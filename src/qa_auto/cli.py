@@ -739,5 +739,19 @@ def coverage(
             console.print(f"  • {dup['url']} ({dup['count']} recordings)")
 
 
+@app.command()
+def mcp(
+    db: Annotated[
+        Path | None,
+        typer.Option("--db", help="Path to SQLite corpus database"),
+    ] = None,
+) -> None:
+    """Start local stdio Model Context Protocol (MCP) server."""
+    from qa_auto.mcp.server import MCPServer
+
+    server = MCPServer(db_path=db)
+    asyncio.run(server.run_stdio())
+
+
 if __name__ == "__main__":
     app()
