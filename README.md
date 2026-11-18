@@ -232,6 +232,27 @@ qa_auto analyze ./my_test/testcase.json --provider openai --base-url http://127.
 | `--base-url` | Provider endpoint URL | default per provider |
 | `--model` / `-m` | Model name | default per provider |
 
+### `qa_auto mutate`
+
+Synthesize realistic negative test cases from a recorded user flow. Generates variations covering empty inputs, boundary strings (2048 chars), special characters / injection probes, unicode edge cases, rapid double clicks, and simulated HTTP 500 network errors.
+
+```bash
+# Generate negative test variations
+qa_auto mutate ./my_test/testcase.json -o ./my_test/mutations/
+
+# Filter by strategy (inputs, actions, network, or all)
+qa_auto mutate ./my_test/testcase.json --strategy inputs --limit 5
+
+# Replay any synthesized negative test
+qa_auto replay ./my_test/mutations/tc_order_mut_1_empty/testcase.json
+```
+
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--output` | `-o` | Output directory for mutated test cases | `<testcase_dir>/mutations` |
+| `--strategy` | `-s` | Strategy filter: `all`, `inputs`, `actions`, `network` | `all` |
+| `--limit` | `-n` | Maximum number of variations to synthesize | `20` |
+
 ### `qa_auto index`
 
 Index directories of `testcase.json` recordings into a local SQLite database with full-text search (FTS5).
@@ -308,6 +329,7 @@ qa_auto/
 │   ├── ai/                # Heuristic and local LLM flow analyzer
 │   ├── index/             # SQLite FTS5 corpus index and search
 │   ├── mcp/               # Stdio Model Context Protocol server
+│   ├── mutation/          # Negative scenario generator and mutator
 │   └── templates/         # Jinja2 report templates
 └── tests/                 # Unit and integration tests
 ```
