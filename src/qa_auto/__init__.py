@@ -7,7 +7,7 @@ This package provides tools for QA engineers to:
 - Generate structured test case documentation (JSON, Markdown, HTML)
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "QA Auto Team"
 
 from qa_auto.models import (

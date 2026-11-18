@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from qa_auto import __version__
 from qa_auto.index.search import get_coverage_report, search_testcases
 from qa_auto.index.store import DEFAULT_DB_PATH, init_db
 
@@ -31,7 +32,7 @@ class MCPServer:
                     },
                     "serverInfo": {
                         "name": "qa_auto_mcp",
-                        "version": "0.1.0",
+                        "version": __version__,
                     },
                 }
                 return {"jsonrpc": "2.0", "id": req_id, "result": result}
