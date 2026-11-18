@@ -78,6 +78,21 @@ def index_testcase(testcase: TestCase, file_path: Path, db_path: Path | str | No
             ),
         )
 
+        # Index overview row so testcase name and start_url are always matched by FTS
+        con.execute(
+            """
+            INSERT INTO steps_fts (
+                testcase_id, step_number, action_type,
+                selector, description, url, network_urls, console_logs
+            ) VALUES (?, 0, 'overview', '', ?, ?, '', '')
+            """,
+            (
+                testcase.id,
+                testcase.name,
+                testcase.start_url,
+            ),
+        )
+
         for step in testcase.steps:
             selector = step.element.selector if step.element else ""
             net_urls = " ".join(r.url for r in step.network_requests)
