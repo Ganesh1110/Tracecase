@@ -644,5 +644,114 @@ def analyze(
     console.print(f"\n[green]✓[/green] Analysis report saved to: {path}")
 
 
+@app.command(name="index")
+def index_cmd(
+    directory: Annotated[
+        Path,
+        typer.Argument(help="Directory containing testcase.json files to index"),
+    ],
+    db: Annotated[
+        Path | None,
+        typer.Option("--db", help="Path to SQLite corpus database"),
+    ] = None,
+) -> None:
+    """Index test cases in a directory into the local SQLite/FTS5 store."""
+    from qa_auto.index.store import index_directory
+
+    if not directory.exists() or not directory.is_dir():
+        console.print(f"[red]✗ Directory not found:[/red] {directory}")
+        raise typer.Exit(2)
+
+    count = index_directory(directory, db_path=db)
+    console.print(f"[green]✓[/green] Indexed {count} test case(s) into corpus store.")
+
+
+@app.command()
+def search(
+    query: Annotated[
+        str,
+        typer.Argument(help="Search query to match against test cases and actions"),
+    ],
+    db: Annotated[
+        Path | None,
+        typer.Option("--db", help="Path to SQLite corpus database"),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option("--limit", "-n", help="Maximum number of results to display"),
+    ] = 10,
+) -> None:
+    """Search recorded test cases using full-text FTS5 search."""
+    from qa_auto.index.search import search_testcases
+
+    results = search_testcases(query, db_path=db, limit=limit)
+    if not results:
+        console.print(f"[yellow]No test cases found matching:[/yellow] {query}")
+        return
+
+    table = Table(title=f"Search Results for '{query}'")
+    table.add_column("ID", style="cyan")
+    table.add_column("Name")
+    table.add_column("Start URL")
+    table.add_column("Matched Snippet")
+
+    for res in results:
+        table.add_row(
+            res["id"],
+            res["name"],
+            res["start_url"],
+            res.get("snippet") or "-",
+        )
+
+    console.print(table)
+
+
+@app.command()
+def coverage(
+    db: Annotated[
+        Path | None,
+        typer.Option("--db", help="Path to SQLite corpus database"),
+    ] = None,
+) -> None:
+    """Analyze corpus coverage across domains, start URLs, and network endpoints."""
+    from qa_auto.index.search import get_coverage_report
+
+    report = get_coverage_report(db_path=db)
+
+    table = Table(title="Corpus Coverage Report")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Count / Details")
+
+    table.add_row("Total Test Cases", str(report["total_testcases"]))
+    table.add_row("Unique Domains", str(report["unique_domains"]))
+    table.add_row("Unique Endpoints", str(len(report["network_endpoints"])))
+    table.add_row("Potential Duplicate URLs", str(len(report["potential_duplicates"])))
+    console.print(table)
+
+    if report["domains"]:
+        console.print("\n[bold]Tested Domains:[/bold]")
+        for domain, count in report["domains"].items():
+            console.print(f"  • {domain} ({count} test cases)")
+
+    if report["potential_duplicates"]:
+        console.print("\n[yellow]Potential Duplicate Test Flows:[/yellow]")
+        for dup in report["potential_duplicates"]:
+            console.print(f"  • {dup['url']} ({dup['count']} recordings)")
+
+
+@app.command()
+def mcp(
+    db: Annotated[
+        Path | None,
+        typer.Option("--db", help="Path to SQLite corpus database"),
+    ] = None,
+) -> None:
+    """Start local stdio Model Context Protocol (MCP) server."""
+    from qa_auto.mcp.server import MCPServer
+
+    server = MCPServer(db_path=db)
+    asyncio.run(server.run_stdio())
+
+
 if __name__ == "__main__":
     app()
