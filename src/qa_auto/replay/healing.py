@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -43,9 +44,27 @@ def candidate_selectors(element: ElementInfo) -> list[str]:
     if test_id:
         candidates.append(f"[data-testid={_quote(test_id)}]")
 
+    elem_id = element.attributes.get("id")
+    if elem_id:
+        candidates.append(f"#{elem_id}")
+
+    name = element.attributes.get("name")
+    if name:
+        if element.tag_name:
+            candidates.append(f"{element.tag_name}[name={_quote(name)}]")
+        candidates.append(f"[name={_quote(name)}]")
+
+    if element.placeholder:
+        candidates.append(f"[placeholder={_quote(element.placeholder)}]")
+
     aria_label = element.attributes.get("aria-label")
     if aria_label:
         candidates.append(f"[aria-label={_quote(aria_label)}]")
+
+    if element.selector:
+        clean = re.sub(r"\.(focus|active|hover|[\w-]+--focus|[\w-]+--active)", "", element.selector)
+        if clean and clean != element.selector:
+            candidates.append(clean)
 
     role = element.attributes.get("role") or _IMPLICIT_ROLES.get(element.tag_name)
     if role and element.text:
@@ -57,8 +76,10 @@ def candidate_selectors(element: ElementInfo) -> list[str]:
     return list(dict.fromkeys(candidates))
 
 
-async def _is_single_visible(locator: Locator) -> bool:
+async def _is_single_visible(locator: Locator, wait_ms: float = 0) -> bool:
     try:
+        if wait_ms > 0:
+            await locator.first.wait_for(state="visible", timeout=wait_ms)
         if await locator.count() != 1:
             return False
         return await locator.first.is_visible()
@@ -71,6 +92,7 @@ async def resolve_element(
     step: Step,
     *,
     heal: bool,
+    timeout_ms: float = 5000,
 ) -> tuple[Locator | None, HealResult]:
     """Resolve a step target, optionally trying fallback selectors."""
     if step.element is None:
@@ -83,7 +105,9 @@ async def resolve_element(
     result = HealResult(attempts=candidates)
     for index, selector in enumerate(candidates):
         locator = page.locator(selector)
-        if await _is_single_visible(locator):
+        # Give candidate 0 time to mount (for SPAs), fallbacks check quickly
+        wait_ms = timeout_ms if index == 0 else 500
+        if await _is_single_visible(locator, wait_ms=wait_ms):
             result.selector = selector
             if index > 0:
                 result.healed_from = step.element.selector

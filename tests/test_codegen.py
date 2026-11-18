@@ -48,7 +48,7 @@ def test_generate_code_has_imports_and_function() -> None:
     code = generate_pytest_code(_testcase([step], name="User Login Flow"))
 
     assert "import pytest" in code
-    assert "from playwright.async_api import Page, expect" in code
+    assert "from playwright.async_api import Page, async_playwright, expect" in code
     assert "async def test_user_login_flow(page: Page) -> None:" in code
     assert 'await page.goto("https://example.com/login")' in code
     assert 'await page.locator("#btn").click()' in code

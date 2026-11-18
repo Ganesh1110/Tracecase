@@ -38,10 +38,19 @@ EVENT_LISTENER_JS = """
         if (el.dataset && el.dataset.testid) {
             return '[data-testid="' + el.dataset.testid + '"]';
         }
+
+        // Try name attribute
+        if (el.getAttribute && el.getAttribute('name')) {
+            const nameSel = el.tagName.toLowerCase() + '[name="' + CSS.escape(el.getAttribute('name')) + '"]';
+            if (document.querySelectorAll(nameSel).length === 1) {
+                return nameSel;
+            }
+        }
         
-        // Try unique class combination
+        // Try unique class combination (excluding transient state classes)
         if (el.className && typeof el.className === 'string') {
-            const classes = el.className.trim().split(/\\s+/).filter(c => c.length > 0);
+            const transientRegex = /(^|[-_])(focus|active|hover|visited|focus-visible|focus-within)($|[-_])/i;
+            const classes = el.className.trim().split(/\\s+/).filter(c => c.length > 0 && !transientRegex.test(c));
             if (classes.length > 0) {
                 const selector = el.tagName.toLowerCase() + '.' + classes.join('.');
                 if (document.querySelectorAll(selector).length === 1) {

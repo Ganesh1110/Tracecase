@@ -159,7 +159,9 @@ class ReplayEngine:
             if step.action_type == "navigate" and step.url:
                 await page.goto(step.url, wait_until="domcontentloaded")
             else:
-                locator, heal_result = await resolve_element(page, step, heal=self.heal)
+                locator, heal_result = await resolve_element(
+                    page, step, heal=self.heal, timeout_ms=min(self.timeout, 5000)
+                )
                 selector_used = heal_result.selector
                 healed_from = heal_result.healed_from
                 if locator is None:
@@ -190,6 +192,13 @@ class ReplayEngine:
             ]
             if targets:
                 await self._wait_for_responses(responses, response_count_start, targets)
+
+            url_targets = [
+                item.expected for item in step_assertions if item.kind == "url" and item.expected
+            ]
+            for exp in url_targets:
+                with contextlib.suppress(Exception):
+                    await page.wait_for_url(f"**{exp}*", timeout=min(self.timeout, 5000))
         except Exception as exc:
             error = str(exc)
 

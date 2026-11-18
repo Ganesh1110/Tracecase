@@ -17,7 +17,7 @@ def search_testcases(
     """Search test cases using FTS5 BM25 match."""
     con = init_db(db_path)
     sanitized = query.replace('"', '""').strip()
-    match_query = f'"{sanitized}"' if " " in sanitized else sanitized
+    match_query = f'"{sanitized}"'
 
     cur = con.cursor()
     cur.execute(

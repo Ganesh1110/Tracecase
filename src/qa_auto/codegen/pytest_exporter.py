@@ -16,10 +16,28 @@ def _slugify(text: str) -> str:
     return slug or "test_case"
 
 
+def _best_selector(step: Step) -> str:
+    element = step.element
+    if not element:
+        return ""
+    if element.attributes.get("id"):
+        return f"#{element.attributes['id']}"
+    if element.attributes.get("data-testid"):
+        return f"[data-testid='{element.attributes['data-testid']}']"
+    if element.attributes.get("name"):
+        tag = element.tag_name or ""
+        return f"{tag}[name='{element.attributes['name']}']"
+    if element.selector:
+        return re.sub(r"\.(focus|active|hover|[\w-]+--focus|[\w-]+--active)", "", element.selector)
+    if element.xpath:
+        return f"xpath={element.xpath}"
+    return element.selector or ""
+
+
 def _format_step(step: Step) -> list[str]:
     lines: list[str] = []
     action = step.action_type
-    selector = step.element.selector if step.element else ""
+    selector = _best_selector(step)
 
     if action == "navigate" and step.url:
         lines.append(f'await page.goto("{step.url}")')
@@ -60,7 +78,10 @@ def generate_pytest_code(testcase: TestCase, *, har_path: str | None = None) -> 
             continue
         step_lines = assertions_by_step.setdefault(assertion.step_number, [])
         if assertion.kind == "url" and assertion.expected:
-            step_lines.append(f'assert "{assertion.expected}" in page.url')
+            exp_str = str(assertion.expected)
+            step_lines.append(
+                f'await expect(page).to_have_url(re.compile(r".*{re.escape(exp_str)}.*"), timeout=15000)'
+            )
 
     body_lines: list[str] = []
 
@@ -81,16 +102,16 @@ def generate_pytest_code(testcase: TestCase, *, har_path: str | None = None) -> 
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
-from playwright.async_api import Page, expect
-from playwright.async_api import async_playwright
+from playwright.async_api import Page, async_playwright, expect
 
 
 @pytest_asyncio.fixture
-async def page() -> AsyncGenerator[Page, None]:
+async def page() -> AsyncGenerator[Page]:
     """Launch headless browser and create a fresh page."""
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=True)

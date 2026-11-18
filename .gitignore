@@ -81,3 +81,8 @@ examples/example_output/*
 docs/superpowers/
 .superpowers/
 
+# Demo artifacts
+recordings/
+diff_result.png
+tests/test_orangehrm_*.py
+

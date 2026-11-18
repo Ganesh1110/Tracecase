@@ -66,6 +66,18 @@ def test_search_testcases_matches_query(temp_dir: Path) -> None:
     assert "snippet" in results[0]
 
 
+def test_search_testcases_with_special_characters(temp_dir: Path) -> None:
+    db_path = temp_dir / "corpus.db"
+    tc = _testcase(
+        "tc_btn", "Submit Flow", "https://shop.com/pay", selector="button[type='submit']"
+    )
+    index_testcase(tc, temp_dir / "tc.json", db_path)
+
+    # Should not throw SQLite FTS5 syntax error with brackets or quotes
+    results = search_testcases("button[type='submit']", db_path=db_path)
+    assert isinstance(results, list)
+
+
 def test_coverage_report_summarizes_endpoints_and_urls(temp_dir: Path) -> None:
     db_path = temp_dir / "corpus.db"
     tc1 = _testcase("tc_1", "Cart 1", "https://shop.com/cart")
