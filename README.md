@@ -167,8 +167,23 @@ Replay a recorded test case, evaluate derived assertions, and optionally heal se
 | `--from-har` | Fulfill network requests from a recorded HAR | none |
 | `--headed` | Show the browser window | `false` |
 | `--timeout` / `-t` | Action timeout in milliseconds | `30000` |
+| `--diff` / `--no-diff` | Perform visual screenshot comparison | `false` |
+| `--diff-threshold` | Tolerance percentage for visual diff | `0.1` |
+| `--diff-fail` / `--no-diff-fail` | Fail replay if visual diff exceeds threshold | `false` |
 
-Exit codes: `0` passed, `1` assertion failed, `2` infrastructure error.
+Exit codes: `0` passed, `1` assertion or visual diff failed, `2` infrastructure error.
+
+### `qa_auto diff`
+
+Compare two screenshots or images pixel-by-pixel, compute diff metrics, and optionally save a highlighted diff overlay image.
+
+```bash
+# Compare two images with default 0.1% threshold
+qa_auto diff baseline.png candidate.png
+
+# Specify custom tolerance threshold and save highlighted diff image
+qa_auto diff baseline.png candidate.png -o diff.png --threshold 0.5
+```
 
 ### `qa_auto export-har`
 
@@ -332,9 +347,8 @@ mypy src/qa_auto --ignore-missing-imports
 
 ## Limitations
 
-- Replay supports derived assertions and heuristic selector healing; AI-driven self-healing and visual comparison are not included yet.
+- Replay supports derived assertions, heuristic selector healing, and pixel-accurate visual regression diffing.
 - Desktop web only; mobile apps and API-only testing are not covered.
-- Visual comparison between runs is not included.
 
 ---
 
