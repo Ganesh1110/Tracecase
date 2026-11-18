@@ -77,3 +77,7 @@ Thumbs.db
 examples/example_output/*
 !examples/example_output/.gitkeep
 
+# Superpowers working artifacts
+docs/superpowers/
+.superpowers/
+
