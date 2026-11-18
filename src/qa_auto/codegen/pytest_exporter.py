@@ -81,8 +81,26 @@ def generate_pytest_code(testcase: TestCase, *, har_path: str | None = None) -> 
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+
 import pytest
+import pytest_asyncio
 from playwright.async_api import Page, expect
+from playwright.async_api import async_playwright
+
+
+@pytest_asyncio.fixture
+async def page() -> AsyncGenerator[Page, None]:
+    """Launch headless browser and create a fresh page."""
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(headless=True)
+        context = await browser.new_context()
+        pg = await context.new_page()
+        try:
+            yield pg
+        finally:
+            await context.close()
+            await browser.close()
 
 
 @pytest.mark.asyncio
