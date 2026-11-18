@@ -2,8 +2,8 @@
 
 from urllib.parse import urlparse
 
-from qa_auto.models import TestCase
-from qa_auto.replay.models import Assertion
+from qa_auto.models import Step, TestCase
+from qa_auto.replay.models import Assertion, AssertionResult
 
 
 def _origin(url: str) -> tuple[str, str]:
@@ -47,3 +47,84 @@ def derive_assertions(testcase: TestCase) -> list[Assertion]:
         assertions.append(Assertion(kind="no_page_error", step_number=step.number))
 
     return assertions
+
+
+def _status_matches(expected: str | int | None, actual: int) -> bool:
+    if expected == "2xx":
+        return 200 <= actual < 300
+    return actual == expected
+
+
+def evaluate_assertions(
+    step: Step,
+    assertions: list[Assertion],
+    *,
+    response_statuses: dict[str, list[int]],
+    final_url: str,
+    new_page_errors: list[str],
+) -> list[AssertionResult]:
+    """Evaluate assertions belonging to a single step."""
+    results: list[AssertionResult] = []
+
+    for assertion in assertions:
+        if assertion.step_number != step.number:
+            continue
+
+        if assertion.kind == "status" and assertion.target:
+            statuses = response_statuses.get(assertion.target)
+            if not statuses:
+                results.append(
+                    AssertionResult(
+                        assertion=assertion,
+                        passed=False,
+                        actual="not observed",
+                        message=f"No response observed for {assertion.target}",
+                    )
+                )
+                continue
+            status = statuses[-1]
+            passed = _status_matches(assertion.expected, status)
+            results.append(
+                AssertionResult(
+                    assertion=assertion,
+                    passed=passed,
+                    actual=str(status),
+                    message="" if passed else f"Expected {assertion.expected}, got {status}",
+                )
+            )
+        elif assertion.kind == "no_page_error":
+            passed = not new_page_errors
+            actual = "; ".join(new_page_errors) if new_page_errors else "no errors"
+            results.append(
+                AssertionResult(
+                    assertion=assertion,
+                    passed=passed,
+                    actual=actual,
+                    message="" if passed else f"Page errors: {actual}",
+                )
+            )
+        elif assertion.kind == "url":
+            actual_path = urlparse(final_url).path
+            passed = actual_path == assertion.expected
+            results.append(
+                AssertionResult(
+                    assertion=assertion,
+                    passed=passed,
+                    actual=actual_path,
+                    message=(
+                        ""
+                        if passed
+                        else f"Expected path {assertion.expected}, got {actual_path}"
+                    ),
+                )
+            )
+        else:
+            results.append(
+                AssertionResult(
+                    assertion=assertion,
+                    passed=False,
+                    message=f"Unsupported assertion kind: {assertion.kind}",
+                )
+            )
+
+    return results
