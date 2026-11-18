@@ -217,6 +217,48 @@ qa_auto analyze ./my_test/testcase.json --provider openai --base-url http://127.
 | `--base-url` | Provider endpoint URL | default per provider |
 | `--model` / `-m` | Model name | default per provider |
 
+### `qa_auto index`
+
+Index directories of `testcase.json` recordings into a local SQLite database with full-text search (FTS5).
+
+```bash
+# Index recordings in a directory
+qa_auto index ./my_test/
+
+# Specify a custom corpus database location
+qa_auto index ./tests/recordings/ --db ./corpus.db
+```
+
+### `qa_auto search`
+
+Search indexed test cases and actions using fast FTS5 BM25 relevance ranking and matched text snippets.
+
+```bash
+# Search for actions or flows mentioning "checkout" or "Payment"
+qa_auto search "Payment"
+
+# Limit the number of search results
+qa_auto search "login" --limit 5
+```
+
+### `qa_auto coverage`
+
+Analyze test corpus coverage across tested domains, start URLs, network endpoints, and flag potential duplicate test flows.
+
+```bash
+qa_auto coverage
+qa_auto coverage --db ./corpus.db
+```
+
+### `qa_auto mcp`
+
+Start the Model Context Protocol (MCP) server over stdio, exposing your indexed test corpus (`search_testcases`, `get_testcase`, `coverage_report`) to local LLM agents and IDE assistants.
+
+```bash
+qa_auto mcp
+qa_auto mcp --db ./corpus.db
+```
+
 ---
 
 ## What gets captured
@@ -246,6 +288,11 @@ qa_auto/
 │   ├── screenshot.py      # Screenshot capture, highlighting, panel hiding
 │   ├── models.py          # Pydantic data models
 │   ├── exporters/         # JSON, Markdown, and HTML exporters
+│   ├── replay/            # Replay engine, assertions, HAR, self-healing
+│   ├── codegen/           # Pytest Playwright code generator
+│   ├── ai/                # Heuristic and local LLM flow analyzer
+│   ├── index/             # SQLite FTS5 corpus index and search
+│   ├── mcp/               # Stdio Model Context Protocol server
 │   └── templates/         # Jinja2 report templates
 └── tests/                 # Unit and integration tests
 ```
