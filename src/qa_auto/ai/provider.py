@@ -16,12 +16,10 @@ class Provider(Protocol):
     """Protocol for AI language model providers."""
 
     @property
-    def name(self) -> str:
-        ...
+    def name(self) -> str: ...
 
     @property
-    def model(self) -> str | None:
-        ...
+    def model(self) -> str | None: ...
 
     async def chat(
         self,

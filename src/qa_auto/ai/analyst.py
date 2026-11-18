@@ -77,9 +77,7 @@ async def analyze_testcase(testcase: TestCase, provider: Provider) -> AnalysisRe
                     if isinstance(item, dict):
                         step_num = int(item.get("step_number") or 1)
                         expected_val = (
-                            str(item["expected"])
-                            if item.get("expected") is not None
-                            else None
+                            str(item["expected"]) if item.get("expected") is not None else None
                         )
                         suggested_assertions.append(
                             Assertion(
