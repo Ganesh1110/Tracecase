@@ -537,6 +537,13 @@ def _print_replay_summary(result: ReplayResult) -> None:
     summary_color = {"passed": "green", "failed": "red", "error": "red"}[result.status]
     console.print(f"[{summary_color}]Replay {result.status}[/{summary_color}]")
 
+    if result.status == "error" and any(
+        "Element not found" in (s.error or "") for s in result.steps
+    ):
+        console.print(
+            "[dim]Tip: If selectors drifted or the DOM shifted, retry with --heal to enable intelligent fallback locators.[/dim]"
+        )
+
     if result.visual_diffs:
         diff_table = Table(title="Visual Regression Summary")
         diff_table.add_column("Step", style="cyan")
@@ -693,6 +700,10 @@ def mutate(
     console.print(
         f"\n[green]✓[/green] Synthesized {len(exported_paths)} negative test case(s) into: {out_dir}"
     )
+    if exported_paths:
+        console.print(
+            f"[dim]Tip: Replay an individual variation:[/dim] qa_auto replay {exported_paths[0]} --heal"
+        )
 
 
 @app.command()
@@ -815,6 +826,17 @@ def analyze(
         console.print("\n[bold magenta]Negative Test Scenarios to consider:[/bold magenta]")
         for scenario in result.negative_scenarios:
             console.print(f"  • {scenario}")
+
+    if (
+        ai
+        and prov.name != "null"
+        and not result.negative_scenarios
+        and not result.suggested_assertions
+    ):
+        console.print(
+            f"\n[dim]Note: Local AI provider '{prov.name}' did not return suggestions. "
+            f"Ensure {prov.name} is running (e.g. `ollama serve`) and model '{prov.model}' is downloaded.[/dim]"
+        )
 
     out_dir = output or testcase.parent
     path = write_analysis_result(result, out_dir)
