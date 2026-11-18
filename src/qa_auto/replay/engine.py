@@ -135,9 +135,7 @@ class ReplayEngine:
                 await self._perform(page, locator, step)
 
             targets = [
-                item.target
-                for item in step_assertions
-                if item.kind == "status" and item.target
+                item.target for item in step_assertions if item.kind == "status" and item.target
             ]
             if targets:
                 await self._wait_for_responses(responses, response_count_start, targets)

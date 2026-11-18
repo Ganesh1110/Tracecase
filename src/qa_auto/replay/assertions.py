@@ -112,9 +112,7 @@ def evaluate_assertions(
                     passed=passed,
                     actual=actual_path,
                     message=(
-                        ""
-                        if passed
-                        else f"Expected path {assertion.expected}, got {actual_path}"
+                        "" if passed else f"Expected path {assertion.expected}, got {actual_path}"
                     ),
                 )
             )
