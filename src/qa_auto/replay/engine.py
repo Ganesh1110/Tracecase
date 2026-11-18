@@ -17,6 +17,7 @@ from qa_auto.replay.assertions import derive_assertions, evaluate_assertions
 from qa_auto.replay.har import install_har_routes
 from qa_auto.replay.healing import resolve_element
 from qa_auto.replay.models import ReplayResult, ReplayStatus, StepResult, StepStatus
+from qa_auto.replay.visual import compare_images
 
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
@@ -36,6 +37,10 @@ class ReplayEngine:
         har: dict[str, Any] | None = None,
         output_dir: Path | None = None,
         assertions_enabled: bool = True,
+        visual_diff: bool = False,
+        diff_threshold: float = 0.1,
+        visual_fail: bool = False,
+        testcase_dir: Path | None = None,
     ) -> None:
         self.testcase = testcase
         self.browser_type = browser_type or testcase.browser
@@ -45,6 +50,10 @@ class ReplayEngine:
         self.har = har
         self.output_dir = Path(output_dir) if output_dir is not None else None
         self.assertions_enabled = assertions_enabled
+        self.visual_diff = visual_diff
+        self.diff_threshold = diff_threshold
+        self.visual_fail = visual_fail
+        self.testcase_dir = Path(testcase_dir) if testcase_dir is not None else None
 
     async def run(self) -> ReplayResult:
         started_at = datetime.now()
@@ -92,6 +101,10 @@ class ReplayEngine:
         else:
             status, exit_code = "passed", 0
 
+        visual_diffs = [
+            result.visual_diff for result in step_results if result.visual_diff is not None
+        ]
+
         return ReplayResult(
             testcase_id=self.testcase.id,
             started_at=started_at,
@@ -99,6 +112,7 @@ class ReplayEngine:
             status=status,
             exit_code=exit_code,
             steps=step_results,
+            visual_diffs=visual_diffs,
         )
 
     async def _run_step(
@@ -155,6 +169,26 @@ class ReplayEngine:
         )
         failed = any(not result.passed for result in assertion_results)
 
+        candidate_screenshot = await self._screenshot(page, step)
+        visual_diff_result = None
+        baseline_screenshot = step.screenshot_path or step.screenshot_with_highlight
+
+        if self.visual_diff and baseline_screenshot and candidate_screenshot and self.output_dir:
+            base_file = Path(baseline_screenshot)
+            if self.testcase_dir and not base_file.is_absolute():
+                base_file = self.testcase_dir / baseline_screenshot
+            if base_file.exists():
+                cand_full_path = self.output_dir / candidate_screenshot
+                diff_out = self.output_dir / "diffs" / f"{step.number:03d}_diff.png"
+                visual_diff_result = compare_images(
+                    base_file,
+                    cand_full_path,
+                    diff_output=diff_out,
+                    threshold_percent=self.diff_threshold,
+                )
+                if self.visual_fail and not visual_diff_result.passed:
+                    failed = True
+
         step_status: StepStatus
         if error is not None:
             step_status = "error"
@@ -171,7 +205,8 @@ class ReplayEngine:
             selector_used=selector_used,
             healed_from=healed_from,
             assertions=assertion_results,
-            screenshot=await self._screenshot(page, step),
+            screenshot=candidate_screenshot,
+            visual_diff=visual_diff_result,
             error=error,
             duration_ms=(time.monotonic() - started) * 1000,
         )
