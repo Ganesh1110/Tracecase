@@ -20,7 +20,7 @@ from qa_auto.replay.models import ReplayResult, ReplayStatus, StepResult, StepSt
 from qa_auto.replay.visual import compare_images
 
 if TYPE_CHECKING:
-    from playwright.async_api import Locator, Page
+    from playwright.async_api import BrowserContext, Locator, Page
 
 
 class ReplayEngine:
@@ -73,14 +73,25 @@ class ReplayEngine:
 
         try:
             page = await manager.start()
+            context = manager.context
+
+            def _attach_page_listeners(p: Page) -> None:
+                p.on(
+                    "response",
+                    lambda response: responses.append((response.url, response.status)),
+                )
+                p.on("pageerror", lambda error: errors.append(str(error)))
+
+            _attach_page_listeners(page)
+            context.on("page", _attach_page_listeners)
+
             if self.har is not None:
-                await install_har_routes(page.context, self.har)
-            page.on("response", lambda response: responses.append((response.url, response.status)))
-            page.on("pageerror", lambda error: errors.append(str(error)))
+                await install_har_routes(context, self.har)
+
             await page.goto(self.testcase.start_url, wait_until="domcontentloaded")
 
             for step in self.testcase.steps:
-                result = await self._run_step(page, step, assertions, responses, errors)
+                result = await self._run_step(context, step, assertions, responses, errors)
                 step_results.append(result)
         except Exception as exc:
             step_results.append(StepResult(number=0, status="error", error=str(exc)))
@@ -115,15 +126,28 @@ class ReplayEngine:
             visual_diffs=visual_diffs,
         )
 
+    async def _get_target_page(self, context: BrowserContext, page_id: int | None) -> Page:
+        """Resolve the target page/tab for a step, waiting for popups if needed."""
+        target_idx = page_id or 0
+        deadline = time.monotonic() + min(self.timeout / 1000, 5.0)
+
+        while len(context.pages) <= target_idx and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+
+        if target_idx < len(context.pages):
+            return context.pages[target_idx]
+        return context.pages[0]
+
     async def _run_step(
         self,
-        page: Page,
+        context: BrowserContext,
         step: Step,
         assertions: list[Any],
         responses: list[tuple[str, int]],
         errors: list[str],
     ) -> StepResult:
         started = time.monotonic()
+        page = await self._get_target_page(context, step.page_id)
         error_count_start = len(errors)
         response_count_start = len(responses)
         step_assertions = [item for item in assertions if item.step_number == step.number]
@@ -146,7 +170,20 @@ class ReplayEngine:
                         error=f"Element not found. Tried: {attempts}",
                         duration_ms=(time.monotonic() - started) * 1000,
                     )
-                await self._perform(page, locator, step)
+
+                step_idx = step.number - 1
+                expects_popup = step_idx + 1 < len(self.testcase.steps) and (
+                    self.testcase.steps[step_idx + 1].page_id or 0
+                ) > (step.page_id or 0)
+
+                if expects_popup:
+                    try:
+                        async with page.expect_popup(timeout=min(self.timeout, 5000)):
+                            await self._perform(page, locator, step)
+                    except Exception:
+                        pass
+                else:
+                    await self._perform(page, locator, step)
 
             targets = [
                 item.target for item in step_assertions if item.kind == "status" and item.target
