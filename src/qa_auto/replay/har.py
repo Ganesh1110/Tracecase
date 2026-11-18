@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from qa_auto import __version__
 from qa_auto.models import NetworkRequest, TestCase
+
+if TYPE_CHECKING:
+    from playwright.async_api import BrowserContext
 
 
 def _har_headers(headers: dict[str, str]) -> list[dict[str, str]]:
@@ -76,3 +79,52 @@ def export_har(testcase: TestCase, output_path: Path) -> Path:
     content = json.dumps(build_har(testcase), indent=2, ensure_ascii=False)
     output_path.write_text(content, encoding="utf-8")
     return output_path
+
+
+def _normalize_url(url: str) -> str:
+    return url.split("#", 1)[0]
+
+
+def _index_entries(har: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+    index: dict[tuple[str, str], dict[str, Any]] = {}
+    for entry in har.get("log", {}).get("entries", []):
+        request = entry.get("request", {})
+        response = entry.get("response", {})
+        if not response.get("status"):
+            continue
+        key = (
+            request.get("method", "GET"),
+            _normalize_url(request.get("url", "")),
+        )
+        index[key] = entry
+    return index
+
+
+def load_har(path: Path) -> dict[str, Any]:
+    """Load a HAR file from disk."""
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+async def install_har_routes(context: BrowserContext, har: dict[str, Any]) -> None:
+    """Fulfill matching requests from recorded HAR responses."""
+    index = _index_entries(har)
+
+    async def handler(route: Any) -> None:
+        request = route.request
+        key = (request.method, _normalize_url(request.url))
+        entry = index.get(key)
+        if entry is None:
+            await route.continue_()
+            return
+
+        response = entry["response"]
+        headers = {
+            header["name"]: header["value"]
+            for header in response.get("headers", [])
+            if header["name"].lower()
+            not in {"content-encoding", "transfer-encoding", "content-length"}
+        }
+        body = response.get("content", {}).get("text", "")
+        await route.fulfill(status=int(response["status"]), headers=headers, body=body)
+
+    await context.route("**/*", handler)
