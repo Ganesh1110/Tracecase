@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from playwright.async_api import ConsoleMessage, Request, Response
+from playwright.async_api import ConsoleMessage, Page, Request, Response
 from rich.console import Console
 
 from qa_auto.browser import BrowserManager
@@ -90,8 +90,9 @@ class Recorder:
         self._step_console_logs: list[ConsoleLog] = []  # Logs for current step
         self._step_network_requests: list[NetworkRequest] = []  # Requests for current step
 
-        # Browser manager
+        # Browser manager and pages
         self._browser_manager: BrowserManager | None = None
+        self._pages: list[Page] = []
 
         # Control flags
         self._stop_event = asyncio.Event()
@@ -123,25 +124,22 @@ class Recorder:
         try:
             # Start browser
             page = await self._browser_manager.start()
+            self._pages = [page]
             console.print("[green]✓[/green] Browser launched")
 
-            # Set up event handlers for page events
-            page.on("load", self._on_page_load)
-            page.on("domcontentloaded", self._on_dom_ready)
-
-            # Set up console and network listeners
-            page.on("console", self._on_console_message)
-            page.on("pageerror", self._on_page_error)
-            page.on("request", self._on_request)
-            page.on("response", self._on_response)
-            page.on("requestfailed", self._on_request_failed)
-
+            # Set up listeners for the primary page
+            self._setup_page_listeners(page)
             console.print("[green]✓[/green] Console & network listeners attached")
 
             # Set up control panel and event listeners
             await inject_control_panel(page, self)
-            await setup_event_listeners(page, self)
+            await setup_event_listeners(page, self, page_id=0)
             console.print("[green]✓[/green] Control panel injected")
+
+            # Listen for newly opened tabs and popups
+            self._browser_manager.context.on(
+                "page", lambda new_page: asyncio.create_task(self._on_new_page(new_page))
+            )
 
             # Navigate to start URL
             await self._browser_manager.navigate(self.start_url)
@@ -163,6 +161,27 @@ class Recorder:
             if self._browser_manager:
                 await self._browser_manager.close()
                 console.print("[green]✓[/green] Browser closed")
+
+    def _setup_page_listeners(self, page: Page) -> None:
+        """Set up page lifecycle, console, and network listeners."""
+        page.on("load", self._on_page_load)
+        page.on("domcontentloaded", self._on_dom_ready)
+        page.on("console", self._on_console_message)
+        page.on("pageerror", self._on_page_error)
+        page.on("request", self._on_request)
+        page.on("response", self._on_response)
+        page.on("requestfailed", self._on_request_failed)
+
+    async def _on_new_page(self, new_page: Page) -> None:
+        """Handle newly opened tab or popup window."""
+        if new_page in self._pages:
+            return
+        self._pages.append(new_page)
+        page_id = len(self._pages) - 1
+        self._setup_page_listeners(new_page)
+        with contextlib.suppress(Exception):
+            await setup_event_listeners(new_page, self, page_id=page_id)
+        console.print(f"[green]✓[/green] New tab/popup #{page_id} detected and instrumented")
 
     def _prepare_output_dir(self) -> None:
         """Create output directories."""
@@ -434,7 +453,7 @@ class Recorder:
     # Action Handling
     # -------------------------------------------------------------------------
 
-    async def on_action(self, data: dict[str, Any]) -> None:
+    async def on_action(self, data: dict[str, Any], page_id: int = 0) -> None:
         """
         Handle an action event from the browser.
 
@@ -442,6 +461,7 @@ class Recorder:
 
         Args:
             data: Action data from JavaScript
+            page_id: 0-based index of the tab/page
         """
         if not self.is_recording:
             return
@@ -490,9 +510,16 @@ class Recorder:
         description_short = self._generate_short_description(action_type, element, data)
         description_detailed = self._generate_detailed_description(action_type, element, data)
 
+        # Determine target page for screenshot
+        target_page: Page | None = None
+        if page_id < len(self._pages):
+            target_page = self._pages[page_id]
+        elif self._browser_manager and self._browser_manager._page:
+            target_page = self._browser_manager._page
+
         # Take screenshot
         screenshot_path: Path | None = None
-        if self._browser_manager and self._browser_manager._page:
+        if target_page is not None:
             try:
                 filename = generate_screenshot_filename(
                     step_number,
@@ -501,7 +528,7 @@ class Recorder:
                 )
                 full_path = self.screenshots_dir / filename
                 await take_screenshot(
-                    self._browser_manager._page,
+                    target_page,
                     full_path,
                     highlight_selector=element.selector,
                 )
@@ -523,6 +550,7 @@ class Recorder:
             element=element,
             input_value=data.get("value"),
             key=data.get("key"),
+            page_id=page_id,
             screenshot_path=screenshot_path,
             network_requests=step_requests,
             console_logs=step_logs,

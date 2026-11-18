@@ -232,7 +232,7 @@ EVENT_LISTENER_JS = """
 """
 
 
-async def setup_event_listeners(page: Page, recorder: Recorder) -> None:
+async def setup_event_listeners(page: Page, recorder: Recorder, page_id: int = 0) -> None:
     """
     Set up DOM event listeners on the page.
 
@@ -242,11 +242,12 @@ async def setup_event_listeners(page: Page, recorder: Recorder) -> None:
     Args:
         page: Playwright Page object
         recorder: Recorder instance to receive events
+        page_id: 0-based tab index
     """
     # Expose the action handler to JavaScript
     await page.expose_function(
         "__qa_auto_on_action",
-        recorder.on_action,
+        lambda data: recorder.on_action(data, page_id=page_id),
     )
 
     # Add script that runs on every page load
