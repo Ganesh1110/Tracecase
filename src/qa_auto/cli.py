@@ -562,5 +562,87 @@ def codegen(
     console.print(f"[green]✓[/green] Generated pytest test: {output_path}")
 
 
+@app.command()
+def analyze(
+    testcase: Annotated[
+        Path,
+        typer.Argument(help="Path to a testcase.json file"),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Directory to save analysis.json (defaults to test case directory)",
+        ),
+    ] = None,
+    ai: Annotated[
+        bool,
+        typer.Option("--ai", help="Enable local AI model enrichment"),
+    ] = False,
+    provider: Annotated[
+        str,
+        typer.Option(
+            "--provider",
+            help="AI provider to use (null, ollama, openai)",
+        ),
+    ] = "null",
+    base_url: Annotated[
+        str | None,
+        typer.Option("--base-url", help="Base URL for the AI provider endpoint"),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", "-m", help="Model name (e.g. llama3, qwen2.5)"),
+    ] = None,
+) -> None:
+    """Analyze recorded user flow with heuristics and optional local AI."""
+    from qa_auto.ai.analyst import analyze_testcase, write_analysis_result
+    from qa_auto.ai.provider import get_provider
+    from qa_auto.models import TestCase as RecordedTestCase
+
+    if not testcase.exists():
+        console.print(f"[red]✗ Test case not found:[/red] {testcase}")
+        raise typer.Exit(2)
+
+    try:
+        case = RecordedTestCase.model_validate_json(testcase.read_text(encoding="utf-8"))
+    except Exception as exc:
+        console.print(f"[red]✗ Invalid test case:[/red] {exc}")
+        raise typer.Exit(2) from None
+
+    chosen_provider = provider
+    if ai and chosen_provider == "null":
+        chosen_provider = "ollama"
+
+    prov = get_provider(chosen_provider, base_url=base_url, model=model)
+    console.print(f"[bold cyan]Analyzing '{case.name}' with provider: {prov.name}[/bold cyan]")
+
+    result = asyncio.run(analyze_testcase(case, prov))
+
+    table = Table(title="Analysis Results")
+    table.add_column("Category", style="cyan")
+    table.add_column("Details")
+    table.add_row("Summary", result.summary)
+    table.add_row("Risks Identified", str(len(result.risks)))
+    table.add_row("Suggested Assertions", str(len(result.suggested_assertions)))
+    table.add_row("Negative Scenarios", str(len(result.negative_scenarios)))
+    console.print(table)
+
+    if result.risks:
+        console.print("\n[bold yellow]Identified Risks:[/bold yellow]")
+        for risk in result.risks:
+            console.print(f"  • {risk}")
+
+    if result.negative_scenarios:
+        console.print("\n[bold magenta]Negative Test Scenarios to consider:[/bold magenta]")
+        for scenario in result.negative_scenarios:
+            console.print(f"  • {scenario}")
+
+    out_dir = output or testcase.parent
+    path = write_analysis_result(result, out_dir)
+    console.print(f"\n[green]✓[/green] Analysis report saved to: {path}")
+
+
 if __name__ == "__main__":
     app()

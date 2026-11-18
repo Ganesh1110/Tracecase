@@ -194,6 +194,29 @@ qa_auto codegen ./my_test/testcase.json -o ./tests/test_checkout.py --har ./my_t
 pytest ./tests/test_checkout.py -v
 ```
 
+### `qa_auto analyze`
+
+Analyze recorded flows with deterministic heuristics and optional local AI enrichment (Ollama, OpenAI-compatible). Generates flow summaries, risk flagging, negative test scenarios, and assertion suggestions in `analysis.json`.
+
+```bash
+# Run deterministic heuristics (offline, no LLM required)
+qa_auto analyze ./my_test/testcase.json
+
+# Enrich with local Ollama (default http://127.0.0.1:11434, llama3)
+qa_auto analyze ./my_test/testcase.json --ai
+
+# Enrich with custom local OpenAI-compatible endpoint or model
+qa_auto analyze ./my_test/testcase.json --provider openai --base-url http://127.0.0.1:8000/v1 --model qwen2.5
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--output` / `-o` | Directory to save `analysis.json` | test case dir |
+| `--ai` | Enable local AI enrichment | `false` |
+| `--provider` | AI provider (`null`, `ollama`, `openai`) | `null` |
+| `--base-url` | Provider endpoint URL | default per provider |
+| `--model` / `-m` | Model name | default per provider |
+
 ---
 
 ## What gets captured
