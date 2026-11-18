@@ -179,6 +179,21 @@ qa_auto export-har ./my_test/testcase.json -o ./my_test/network.har
 qa_auto replay ./my_test/testcase.json --from-har ./my_test/network.har
 ```
 
+### `qa_auto codegen`
+
+Generate standalone, executable `pytest` + Playwright Python test modules from recorded test cases.
+
+```bash
+# Generate test_<name>.py in the same folder
+qa_auto codegen ./my_test/testcase.json
+
+# Specify an output path and optional HAR for offline mock routing
+qa_auto codegen ./my_test/testcase.json -o ./tests/test_checkout.py --har ./my_test/network.har
+
+# Run the generated test with pytest
+pytest ./tests/test_checkout.py -v
+```
+
 ---
 
 ## What gets captured
