@@ -36,6 +36,7 @@ The generated reports are readable by QA engineers, developers, and AI agents, a
 - **Full context.** Network requests, console logs, and JavaScript errors are attached to the relevant steps.
 - **Three formats.** JSON for automation, Markdown for tickets and docs, HTML for reviews and demos.
 - **Cross-browser.** Record with Chromium, Firefox, or WebKit.
+- **Multi-tab & pop-up support.** Seamlessly captures and replays actions across newly opened tabs, pop-ups, and `target="_blank"` windows.
 - **Local and private.** Recordings run on your machine and stay there.
 - **Clean screenshots.** The QA Auto control panel is automatically hidden while screenshots are taken.
 
@@ -308,6 +309,7 @@ qa_auto mcp --db ./corpus.db
 - Network requests and responses, including headers, bodies, status, and timing
 - Browser console messages
 - Uncaught JavaScript errors
+- Multi-tab tracking (`page_id`) across pop-ups and new windows
 
 ---
 
