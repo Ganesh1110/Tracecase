@@ -1016,5 +1016,35 @@ def clean(
         console.print("[yellow]Nothing to wipe.[/yellow]")
 
 
+@app.command()
+def ui(
+    host: Annotated[
+        str,
+        typer.Option("--host", "-h", help="Bind host address"),
+    ] = "127.0.0.1",
+    port: Annotated[
+        int,
+        typer.Option("--port", "-p", help="Bind port number"),
+    ] = 8000,
+    open_browser: Annotated[
+        bool,
+        typer.Option("--browser/--no-browser", help="Automatically open browser on launch"),
+    ] = True,
+) -> None:
+    """Launch the QA Auto Studio interactive web application."""
+    print_banner()
+    console.print(
+        f"[bold green]Starting QA Auto Studio[/bold green] on [cyan]http://{host}:{port}[/cyan]"
+    )
+    console.print("[dim]Press Ctrl+C to stop the studio server.[/dim]\n")
+
+    from qa_auto.ui.server import start_server
+
+    try:
+        start_server(host=host, port=port, open_browser=open_browser)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]QA Auto Studio stopped.[/yellow]")
+
+
 if __name__ == "__main__":
     app()

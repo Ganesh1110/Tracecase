@@ -149,6 +149,22 @@ Record browser actions and generate a test case.
 | `--headless` | | Run the browser without a visible window | `false` |
 | `--timeout` | `-t` | Action timeout in milliseconds | `30000` |
 
+### `qa_auto ui`
+
+Launch the QA Auto Studio interactive web application (Kane AI-inspired web UI).
+
+```bash
+qa_auto ui
+# or specify host/port
+qa_auto ui --host 127.0.0.1 --port 8000
+```
+
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--host` | `-h` | Server host address | `127.0.0.1` |
+| `--port` | `-p` | Server port | `8000` |
+| `--browser` / `--no-browser` | | Automatically open browser window | `true` |
+
 ### `qa_auto check`
 
 Verify that Python packages and Playwright browsers are installed correctly.

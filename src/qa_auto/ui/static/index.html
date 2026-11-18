@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QA Auto Studio — Autonomous Test Engineering</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              400: '#818cf8',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            },
+            dark: {
+              950: '#07090e',
+              900: '#0d1117',
+              850: '#131822',
+              800: '#161d2b',
+              700: '#212a3d',
+              600: '#323f59',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0d1117; }
+    ::-webkit-scrollbar-thumb { background: #212a3d; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #323f59; }
+    [v-cloak] { display: none; }
+  </style>
+</head>
+<body class="bg-dark-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-brand-500 selection:text-white">
+
+  <!-- TOP NAVIGATION BAR -->
+  <header class="h-16 border-b border-dark-700 bg-dark-900/90 backdrop-blur-md sticky top-0 z-40 px-6 flex items-center justify-between">
+    <div class="flex items-center space-x-4">
+      <div class="flex items-center space-x-2">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-400 flex items-center justify-center shadow-lg shadow-brand-500/20">
+          <i data-lucide="sparkles" class="w-5 h-5 text-white"></i>
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <span class="font-bold tracking-tight text-lg text-white">QA AUTO</span>
+            <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/20">STUDIO</span>
+          </div>
+          <p class="text-[10px] text-slate-400 tracking-wider uppercase font-medium">Kane AI-Inspired QA Platform</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Stats & Actions -->
+    <div class="flex items-center space-x-4">
+      <div class="hidden md:flex items-center space-x-3 px-3 py-1.5 rounded-lg bg-dark-850 border border-dark-700 text-xs text-slate-300">
+        <span class="flex h-2 w-2 relative">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+        </span>
+        <span class="font-mono" id="stat-cases-count">0 Test Cases</span>
+      </div>
+
+      <button onclick="openRecordModal()" class="flex items-center space-x-2 px-4 py-2 rounded-lg bg-gradient-to-r from-brand-600 to-indigo-500 hover:from-brand-500 hover:to-indigo-400 text-white font-medium text-sm shadow-md shadow-brand-600/30 transition-all hover:scale-[1.02] active:scale-[0.98]">
+        <i data-lucide="video" class="w-4 h-4"></i>
+        <span>Record New Test</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN WORKSPACE LAYOUT -->
+  <div class="flex-1 flex overflow-hidden">
+
+    <!-- LEFT SIDEBAR: TEST SUITE EXPLORER -->
+    <aside class="w-80 border-r border-dark-700 bg-dark-900 flex flex-col flex-shrink-0">
+      <div class="p-4 border-b border-dark-700">
+        <div class="relative">
+          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
+          <input
+            type="text"
+            id="search-input"
+            oninput="filterTestCases()"
+            placeholder="Search test cases..."
+            class="w-full bg-dark-850 border border-dark-700 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-brand-500 transition-colors"
+          />
+        </div>
+      </div>
+
+      <div class="px-4 py-2 text-[11px] font-semibold tracking-wider uppercase text-slate-400 flex items-center justify-between">
+        <span>Recorded Suites</span>
+        <button onclick="loadTestCases()" title="Refresh" class="hover:text-slate-200 transition-colors">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
+
+      <!-- Test Cases List -->
+      <div id="testcases-list" class="flex-1 overflow-y-auto px-3 space-y-1 pb-4">
+        <div class="p-6 text-center text-xs text-slate-500">Loading tests...</div>
+      </div>
+    </aside>
+
+    <!-- CENTER / RIGHT: STUDIO WORKSPACE -->
+    <main class="flex-1 flex flex-col bg-dark-950 overflow-hidden">
+      <!-- Empty State -->
+      <div id="empty-state" class="flex-1 flex flex-col items-center justify-center p-8 text-center">
+        <div class="w-16 h-16 rounded-2xl bg-dark-850 border border-dark-700 flex items-center justify-center mb-4 text-brand-400">
+          <i data-lucide="layers" class="w-8 h-8"></i>
+        </div>
+        <h3 class="text-lg font-semibold text-white mb-1">Select or Record a Test Case</h3>
+        <p class="text-sm text-slate-400 max-w-md mb-6">Choose a recorded test flow from the sidebar to inspect steps, element locators, network requests, and trigger AI replays.</p>
+        <button onclick="openRecordModal()" class="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium transition-colors">
+          Record Flow
+        </button>
+      </div>
+
+      <!-- Test Case Active View -->
+      <div id="testcase-view" class="flex-1 flex flex-col overflow-hidden hidden">
+        <!-- Test Case Header Bar -->
+        <div class="px-6 py-4 border-b border-dark-700 bg-dark-900/60 flex items-center justify-between flex-shrink-0">
+          <div>
+            <div class="flex items-center space-x-3 mb-1">
+              <h1 id="tc-name" class="text-xl font-bold text-white tracking-tight">Test Case Name</h1>
+              <span id="tc-browser-badge" class="px-2 py-0.5 rounded text-[11px] font-medium uppercase bg-slate-800 text-slate-300 border border-slate-700">chromium</span>
+              <span id="tc-steps-badge" class="px-2 py-0.5 rounded text-[11px] font-medium bg-brand-500/10 text-brand-400 border border-brand-500/20">0 Steps</span>
+            </div>
+            <div class="flex items-center space-x-4 text-xs text-slate-400">
+              <span class="flex items-center space-x-1">
+                <i data-lucide="globe" class="w-3.5 h-3.5"></i>
+                <a id="tc-url-link" href="#" target="_blank" class="hover:text-brand-400 hover:underline max-w-sm truncate font-mono">https://...</a>
+              </span>
+              <span>•</span>
+              <span id="tc-date" class="font-mono">Created ...</span>
+              <span>•</span>
+              <span id="tc-duration" class="font-mono">0.0s</span>
+            </div>
+          </div>
+
+          <div class="flex items-center space-x-3">
+            <button onclick="openCodegenModal()" class="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 border border-dark-600 text-slate-200 text-xs font-medium transition-colors">
+              <i data-lucide="code-2" class="w-4 h-4 text-brand-400"></i>
+              <span>Export Pytest</span>
+            </button>
+            <button onclick="openHtmlReport()" class="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 border border-dark-600 text-slate-200 text-xs font-medium transition-colors">
+              <i data-lucide="file-text" class="w-4 h-4 text-emerald-400"></i>
+              <span>HTML Report</span>
+            </button>
+            <button onclick="openReplayModal()" class="flex items-center space-x-2 px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md shadow-emerald-600/20 transition-all hover:scale-[1.02]">
+              <i data-lucide="play" class="w-4 h-4 fill-white"></i>
+              <span>Run Replay</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- SPLIT PANEL: TIMELINE & STEP INSPECTOR -->
+        <div class="flex-1 flex overflow-hidden">
+
+          <!-- LEFT: STEP TIMELINE (KANE AI STYLE) -->
+          <div class="w-1/2 border-r border-dark-700 flex flex-col bg-dark-900/30 overflow-hidden">
+            <div class="px-6 py-3 border-b border-dark-700 bg-dark-900/80 flex items-center justify-between text-xs font-medium text-slate-400">
+              <span class="flex items-center space-x-2">
+                <i data-lucide="git-commit" class="w-4 h-4 text-brand-400"></i>
+                <span>Action Timeline & User Interactions</span>
+              </span>
+              <span id="timeline-count-badge" class="text-[11px] font-mono text-slate-500">0 Steps</span>
+            </div>
+
+            <div id="steps-timeline" class="flex-1 overflow-y-auto p-4 space-y-2.5">
+              <!-- Dynamically populated step cards -->
+            </div>
+          </div>
+
+          <!-- RIGHT: STEP DEEP-DIVE INSPECTOR -->
+          <div class="w-1/2 flex flex-col bg-dark-950 overflow-hidden">
+            <!-- Inspector Header & Tabs -->
+            <div class="px-6 py-2.5 border-b border-dark-700 bg-dark-900/80 flex items-center justify-between text-xs">
+              <div class="flex space-x-1" id="inspector-tabs">
+                <button onclick="switchTab('visual')" id="tab-visual" class="px-3 py-1.5 rounded-md font-medium text-slate-200 bg-dark-700 transition-colors">Visual Evidence</button>
+                <button onclick="switchTab('element')" id="tab-element" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-slate-200 transition-colors">DOM Element</button>
+                <button onclick="switchTab('network')" id="tab-network" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-slate-200 transition-colors">Network (<span id="net-count-pill">0</span>)</button>
+                <button onclick="switchTab('console')" id="tab-console" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-slate-200 transition-colors">Console Logs</button>
+              </div>
+              <span id="inspector-step-title" class="text-xs font-mono text-brand-400 font-semibold">Step #1</span>
+            </div>
+
+            <!-- Tab 1: Visual Evidence (Screenshot with Highlight) -->
+            <div id="panel-visual" class="flex-1 flex flex-col p-4 overflow-y-auto">
+              <div class="relative flex-1 min-h-[300px] rounded-xl border border-dark-700 bg-dark-900/70 overflow-hidden flex items-center justify-center p-2 group">
+                <img id="step-screenshot" src="" alt="Step Screenshot" class="max-h-full max-w-full object-contain rounded-lg shadow-xl" />
+                <div id="no-screenshot-placeholder" class="hidden text-xs text-slate-500 flex flex-col items-center">
+                  <i data-lucide="image-off" class="w-8 h-8 mb-2 opacity-50"></i>
+                  <span>No screenshot captured for this action</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 2: DOM Element Inspector -->
+            <div id="panel-element" class="flex-1 p-6 overflow-y-auto hidden space-y-4">
+              <div>
+                <label class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">CSS Selector</label>
+                <div class="flex items-center space-x-2">
+                  <input id="elem-selector" readonly class="flex-1 bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-emerald-400 select-all focus:outline-none" />
+                  <button onclick="copyToClipboard('elem-selector')" class="px-3 py-2 rounded-lg bg-dark-800 hover:bg-dark-700 border border-dark-700 text-xs text-slate-300">Copy</button>
+                </div>
+              </div>
+
+              <div>
+                <label class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">XPath</label>
+                <div class="flex items-center space-x-2">
+                  <input id="elem-xpath" readonly class="flex-1 bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-300 select-all focus:outline-none" />
+                  <button onclick="copyToClipboard('elem-xpath')" class="px-3 py-2 rounded-lg bg-dark-800 hover:bg-dark-700 border border-dark-700 text-xs text-slate-300">Copy</button>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">Tag Name</label>
+                  <div id="elem-tag" class="bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-brand-400">button</div>
+                </div>
+                <div>
+                  <label class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">Text Content</label>
+                  <div id="elem-text" class="bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-300 truncate">-</div>
+                </div>
+              </div>
+
+              <div>
+                <label class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">Bounding Box Coordinates</label>
+                <div id="elem-bbox" class="bg-dark-850 border border-dark-700 rounded-lg p-3 text-xs font-mono text-slate-400 grid grid-cols-4 gap-2 text-center">
+                  <div>X: <span id="bbox-x" class="text-white">-</span></div>
+                  <div>Y: <span id="bbox-y" class="text-white">-</span></div>
+                  <div>W: <span id="bbox-w" class="text-white">-</span></div>
+                  <div>H: <span id="bbox-h" class="text-white">-</span></div>
+                </div>
+              </div>
+
+              <div>
+                <label class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">Attributes</label>
+                <div id="elem-attributes" class="bg-dark-850 border border-dark-700 rounded-lg p-3 text-xs font-mono text-slate-300 space-y-1">
+                  <!-- Populated dynamically -->
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 3: Network Waterfall -->
+            <div id="panel-network" class="flex-1 p-4 overflow-y-auto hidden">
+              <div id="network-list" class="space-y-2">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
+
+            <!-- Tab 4: Console Logs -->
+            <div id="panel-console" class="flex-1 p-4 overflow-y-auto hidden">
+              <div id="console-list" class="space-y-2 font-mono text-xs">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- MODAL: RECORD NEW TEST -->
+  <div id="modal-record" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-dark-900 border border-dark-700 w-full max-w-lg rounded-2xl shadow-2xl p-6">
+      <div class="flex items-center justify-between pb-4 border-b border-dark-700">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded-lg bg-brand-500/20 text-brand-400 flex items-center justify-center">
+            <i data-lucide="video" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Record New Browser Test</h3>
+            <p class="text-xs text-slate-400">Launches browser with interactive HUD control</p>
+          </div>
+        </div>
+        <button onclick="closeRecordModal()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div id="record-form" class="space-y-4 pt-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Target Application URL *</label>
+          <input
+            type="url"
+            id="rec-url"
+            placeholder="https://example.com or localhost:3000"
+            class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500"
+          />
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Test Case Name</label>
+          <input
+            type="text"
+            id="rec-name"
+            placeholder="e.g., User Authentication Flow"
+            class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500"
+          />
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Browser Engine</label>
+            <select id="rec-browser" class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+              <option value="chromium">Chromium</option>
+              <option value="firefox">Firefox</option>
+              <option value="webkit">WebKit (Safari)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Window Mode</label>
+            <select id="rec-headless" class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+              <option value="false">Headed (Interactive GUI)</option>
+              <option value="true">Headless</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="pt-2">
+          <button onclick="submitRecording()" id="btn-submit-record" class="w-full py-2.5 rounded-lg bg-gradient-to-r from-brand-600 to-indigo-500 hover:from-brand-500 hover:to-indigo-400 text-white font-semibold text-sm shadow-lg shadow-brand-500/20 transition-all flex items-center justify-center space-x-2">
+            <i data-lucide="play" class="w-4 h-4 fill-white"></i>
+            <span>Launch Browser & Start Recording</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Recording Active State -->
+      <div id="record-active-state" class="hidden text-center py-6 space-y-4">
+        <div class="w-14 h-14 rounded-full bg-red-500/10 text-red-400 mx-auto flex items-center justify-center relative">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-50"></span>
+          <i data-lucide="radio" class="w-6 h-6 text-red-500"></i>
+        </div>
+        <div>
+          <h4 class="text-base font-bold text-white">Browser Recording in Progress</h4>
+          <p class="text-xs text-slate-400 max-w-sm mx-auto mt-1">Interact with your web application in the opened browser window. When finished, click <strong class="text-white">⏹ Stop</strong> on the in-page control panel or close the browser.</p>
+        </div>
+        <div class="inline-flex items-center space-x-2 px-3 py-1.5 rounded-full bg-dark-800 text-xs font-mono text-slate-300">
+          <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span id="record-status-text">Listening for actions...</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: REPLAY RUNNER (KANE AI PARITY) -->
+  <div id="modal-replay" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-dark-900 border border-dark-700 w-full max-w-2xl rounded-2xl shadow-2xl p-6">
+      <div class="flex items-center justify-between pb-4 border-b border-dark-700">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+            <i data-lucide="play" class="w-4 h-4 fill-emerald-400"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Autonomous Replay Engine</h3>
+            <p class="text-xs text-slate-400">Execute test suite with self-healing & visual assertion checks</p>
+          </div>
+        </div>
+        <button onclick="closeReplayModal()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Replay Options Form -->
+      <div id="replay-options-view" class="space-y-4 pt-4">
+        <div class="grid grid-cols-2 gap-4">
+          <label class="flex items-center justify-between p-3 rounded-lg border border-dark-700 bg-dark-850 cursor-pointer hover:border-brand-500/50">
+            <div>
+              <div class="text-xs font-semibold text-white">Self-Healing Selectors</div>
+              <div class="text-[11px] text-slate-400">Auto-resolve broken DOM locators</div>
+            </div>
+            <input type="checkbox" id="replay-heal" checked class="w-4 h-4 rounded text-brand-600 bg-dark-900 border-dark-700 focus:ring-brand-500" />
+          </label>
+
+          <label class="flex items-center justify-between p-3 rounded-lg border border-dark-700 bg-dark-850 cursor-pointer hover:border-brand-500/50">
+            <div>
+              <div class="text-xs font-semibold text-white">Visual Regression Diff</div>
+              <div class="text-[11px] text-slate-400">Compare screenshots pixel-by-pixel</div>
+            </div>
+            <input type="checkbox" id="replay-diff" class="w-4 h-4 rounded text-brand-600 bg-dark-900 border-dark-700 focus:ring-brand-500" />
+          </label>
+
+          <label class="flex items-center justify-between p-3 rounded-lg border border-dark-700 bg-dark-850 cursor-pointer hover:border-brand-500/50">
+            <div>
+              <div class="text-xs font-semibold text-white">Evaluate Assertions</div>
+              <div class="text-[11px] text-slate-400">Check derived and custom assertions</div>
+            </div>
+            <input type="checkbox" id="replay-assert" checked class="w-4 h-4 rounded text-brand-600 bg-dark-900 border-dark-700 focus:ring-brand-500" />
+          </label>
+
+          <label class="flex items-center justify-between p-3 rounded-lg border border-dark-700 bg-dark-850 cursor-pointer hover:border-brand-500/50">
+            <div>
+              <div class="text-xs font-semibold text-white">Headed Execution</div>
+              <div class="text-[11px] text-slate-400">Show live browser window</div>
+            </div>
+            <input type="checkbox" id="replay-headed" class="w-4 h-4 rounded text-brand-600 bg-dark-900 border-dark-700 focus:ring-brand-500" />
+          </label>
+        </div>
+
+        <button onclick="submitReplay()" id="btn-run-replay" class="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg shadow-emerald-600/20 transition-all flex items-center justify-center space-x-2">
+          <i data-lucide="play" class="w-4 h-4 fill-white"></i>
+          <span>Execute Test Replay</span>
+        </button>
+      </div>
+
+      <!-- Replay Execution Status & Results -->
+      <div id="replay-results-view" class="hidden pt-4 space-y-4">
+        <!-- Replay Status Banner -->
+        <div id="replay-status-banner" class="p-4 rounded-xl border flex items-center justify-between">
+          <div class="flex items-center space-x-3">
+            <div id="replay-status-icon" class="w-8 h-8 rounded-lg flex items-center justify-center"></div>
+            <div>
+              <div id="replay-status-text" class="text-sm font-bold">Execution Status</div>
+              <div id="replay-metrics-text" class="text-xs text-slate-400">0 steps evaluated in 0.0s</div>
+            </div>
+          </div>
+          <button onclick="resetReplayModal()" class="text-xs px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300">Run Again</button>
+        </div>
+
+        <!-- Step Results List -->
+        <div class="border border-dark-700 rounded-xl overflow-hidden">
+          <div class="px-4 py-2 bg-dark-800/80 border-b border-dark-700 text-xs font-semibold text-slate-300">Step Replay Log</div>
+          <div id="replay-steps-log" class="max-h-60 overflow-y-auto p-3 space-y-2 text-xs font-mono">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: CODE GENERATOR (PYTEST) -->
+  <div id="modal-codegen" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-dark-900 border border-dark-700 w-full max-w-3xl rounded-2xl shadow-2xl p-6 flex flex-col max-h-[85vh]">
+      <div class="flex items-center justify-between pb-4 border-b border-dark-700">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded-lg bg-brand-500/20 text-brand-400 flex items-center justify-center">
+            <i data-lucide="code" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Generated Playwright Pytest Code</h3>
+            <p class="text-xs text-slate-400">Production-ready test script exported directly from session</p>
+          </div>
+        </div>
+        <button onclick="closeCodegenModal()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="flex-1 my-4 overflow-hidden rounded-xl border border-dark-700 bg-dark-950 flex flex-col">
+        <div class="px-4 py-2 bg-dark-850 border-b border-dark-700 flex items-center justify-between text-xs text-slate-400">
+          <span class="font-mono">test_generated.py</span>
+          <button onclick="copyGeneratedCode()" class="flex items-center space-x-1.5 px-3 py-1 rounded bg-brand-600 hover:bg-brand-500 text-white font-medium">
+            <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+            <span>Copy Code</span>
+          </button>
+        </div>
+        <pre class="flex-1 p-4 overflow-auto font-mono text-xs text-slate-200 select-all"><code id="codegen-content"># Loading generated pytest script...</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCRIPT LOGIC -->
+  <script>
+    // State management
+    let testCases = [];
+    let currentTestCase = null;
+    let selectedStepNumber = 1;
+    let activePollInterval = null;
+
+    // Action color themes
+    const actionColors = {
+      click: { bg: 'bg-sky-500/10', text: 'text-sky-400', border: 'border-sky-500/20' },
+      dblclick: { bg: 'bg-sky-500/10', text: 'text-sky-400', border: 'border-sky-500/20' },
+      input: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20' },
+      navigate: { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' },
+      keypress: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/20' },
+      select: { bg: 'bg-indigo-500/10', text: 'text-indigo-400', border: 'border-indigo-500/20' },
+      hover: { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
+      scroll: { bg: 'bg-slate-500/10', text: 'text-slate-400', border: 'border-slate-500/20' }
+    };
+
+    // Initialize application
+    async function init() {
+      lucide.createIcons();
+      await loadTestCases();
+    }
+
+    // Fetch and render test cases
+    async function loadTestCases() {
+      try {
+        const res = await fetch('/api/testcases');
+        testCases = await res.json();
+        document.getElementById('stat-cases-count').textContent = `${testCases.length} Test Cases`;
+        renderTestCasesList(testCases);
+
+        // Auto-select first test if none selected
+        if (!currentTestCase && testCases.length > 0) {
+          selectTestCase(testCases[0].id);
+        }
+      } catch (err) {
+        console.error('Failed to load test cases:', err);
+      }
+    }
+
+    // Filter test cases
+    function filterTestCases() {
+      const q = document.getElementById('search-input').value.toLowerCase();
+      const filtered = testCases.filter(tc => 
+        (tc.name && tc.name.toLowerCase().includes(q)) || 
+        (tc.start_url && tc.start_url.toLowerCase().includes(q)) ||
+        (tc.id && tc.id.toLowerCase().includes(q))
+      );
+      renderTestCasesList(filtered);
+    }
+
+    function renderTestCasesList(list) {
+      const container = document.getElementById('testcases-list');
+      if (list.length === 0) {
+        container.innerHTML = '<div class="p-6 text-center text-xs text-slate-500">No test cases found</div>';
+        return;
+      }
+
+      container.innerHTML = list.map(tc => {
+        const isSelected = currentTestCase && (currentTestCase.id === tc.id || currentTestCase._folder === tc.folder);
+        const dateStr = tc.created_at ? new Date(tc.created_at).toLocaleDateString() : 'Recent';
+        let domain = tc.start_url;
+        try { domain = new URL(tc.start_url).hostname; } catch(e){}
+
+        return `
+          <div onclick="selectTestCase('${tc.id}')" class="p-3 rounded-xl cursor-pointer transition-all border ${isSelected ? 'bg-dark-800 border-brand-500/50 shadow-sm' : 'border-transparent hover:bg-dark-850 hover:border-dark-700'}">
+            <div class="flex items-center justify-between mb-1">
+              <h4 class="text-xs font-semibold text-slate-200 truncate flex-1">${escapeHtml(tc.name)}</h4>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-dark-700 text-slate-400 font-mono">${tc.total_steps} steps</span>
+            </div>
+            <div class="flex items-center justify-between text-[11px] text-slate-400">
+              <span class="truncate max-w-[140px] font-mono">${escapeHtml(domain)}</span>
+              <span>${dateStr}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Select and inspect a test case
+    async function selectTestCase(identifier) {
+      try {
+        const res = await fetch(`/api/testcases/${encodeURIComponent(identifier)}`);
+        if (!res.ok) throw new Error('Test case not found');
+        currentTestCase = await res.json();
+
+        // Update list active highlight
+        renderTestCasesList(testCases);
+
+        // Show testcase view
+        document.getElementById('empty-state').classList.add('hidden');
+        document.getElementById('testcase-view').classList.remove('hidden');
+
+        // Populate header
+        document.getElementById('tc-name').textContent = currentTestCase.name;
+        document.getElementById('tc-browser-badge').textContent = currentTestCase.browser || 'chromium';
+        document.getElementById('tc-steps-badge').textContent = `${currentTestCase.steps.length} Steps`;
+        document.getElementById('tc-url-link').textContent = currentTestCase.start_url;
+        document.getElementById('tc-url-link').href = currentTestCase.start_url;
+        document.getElementById('tc-date').textContent = currentTestCase.created_at ? new Date(currentTestCase.created_at).toLocaleString() : '';
+        document.getElementById('tc-duration').textContent = `${(currentTestCase.total_duration || 0).toFixed(1)}s`;
+        document.getElementById('timeline-count-badge').textContent = `${currentTestCase.steps.length} Steps Recorded`;
+
+        // Render steps timeline
+        renderStepsTimeline(currentTestCase.steps);
+
+        // Select first step
+        if (currentTestCase.steps.length > 0) {
+          inspectStep(currentTestCase.steps[0].number);
+        }
+
+        lucide.createIcons();
+      } catch (err) {
+        console.error('Failed to select test case:', err);
+      }
+    }
+
+    // Render Kane AI-style Steps Timeline
+    function renderStepsTimeline(steps) {
+      const container = document.getElementById('steps-timeline');
+      if (!steps || steps.length === 0) {
+        container.innerHTML = '<div class="p-8 text-center text-xs text-slate-500">No steps recorded in this flow</div>';
+        return;
+      }
+
+      container.innerHTML = steps.map(step => {
+        const isSelected = step.number === selectedStepNumber;
+        const color = actionColors[step.action_type] || { bg: 'bg-slate-500/10', text: 'text-slate-400', border: 'border-slate-500/20' };
+        const shotFilename = step.screenshot_with_highlight || step.screenshot_path;
+        const shotUrl = shotFilename ? `/api/testcases/${encodeURIComponent(currentTestCase.id)}/screenshots/${encodeURIComponent(shotFilename.split('/').pop())}` : null;
+        const netCount = (step.network_requests || []).length;
+        const logCount = (step.console_logs || []).length;
+
+        return `
+          <div onclick="inspectStep(${step.number})" class="p-3 rounded-xl border cursor-pointer transition-all flex items-start space-x-3.5 ${isSelected ? 'bg-dark-850 border-brand-500 shadow-md ring-1 ring-brand-500/30' : 'bg-dark-900 border-dark-700/80 hover:border-dark-600 hover:bg-dark-850/60'}">
+            <!-- Step Number Badge -->
+            <div class="w-7 h-7 rounded-lg bg-dark-800 border border-dark-700 flex items-center justify-center text-xs font-mono font-bold text-slate-300 flex-shrink-0 mt-0.5">
+              ${step.number}
+            </div>
+
+            <!-- Step Description & Meta -->
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center space-x-2 mb-1">
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase border ${color.bg} ${color.text} ${color.border}">
+                  ${step.action_type}
+                </span>
+                ${step.input_value ? `<span class="text-xs font-mono text-emerald-400 truncate">"${escapeHtml(step.input_value)}"</span>` : ''}
+              </div>
+              <p class="text-xs font-medium text-slate-200 leading-snug truncate mb-1">
+                ${escapeHtml(step.description_short || step.action_type)}
+              </p>
+              
+              <!-- Badges -->
+              <div class="flex items-center space-x-2 text-[10px] text-slate-400">
+                ${step.element?.selector ? `<span class="truncate max-w-[180px] font-mono text-slate-400 bg-dark-800 px-1.5 py-0.5 rounded">${escapeHtml(step.element.selector)}</span>` : ''}
+                ${netCount > 0 ? `<span class="text-slate-400 font-mono">${netCount} reqs</span>` : ''}
+                ${logCount > 0 ? `<span class="text-amber-400 font-mono">${logCount} logs</span>` : ''}
+              </div>
+            </div>
+
+            <!-- Screenshot Thumbnail -->
+            ${shotUrl ? `
+              <div class="w-14 h-10 rounded-md border border-dark-700 overflow-hidden bg-dark-800 flex-shrink-0">
+                <img src="${shotUrl}" alt="Step ${step.number}" class="w-full h-full object-cover" />
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Inspect single step details
+    function inspectStep(stepNum) {
+      selectedStepNumber = stepNum;
+      if (!currentTestCase) return;
+
+      const step = currentTestCase.steps.find(s => s.number === stepNum);
+      if (!step) return;
+
+      // Re-render timeline to update highlight
+      renderStepsTimeline(currentTestCase.steps);
+
+      document.getElementById('inspector-step-title').textContent = `Step #${step.number}: ${step.action_type.toUpperCase()}`;
+
+      // Tab 1: Visual
+      const shotFilename = step.screenshot_with_highlight || step.screenshot_path;
+      const shotImg = document.getElementById('step-screenshot');
+      const placeholder = document.getElementById('no-screenshot-placeholder');
+
+      if (shotFilename) {
+        shotImg.src = `/api/testcases/${encodeURIComponent(currentTestCase.id)}/screenshots/${encodeURIComponent(shotFilename.split('/').pop())}`;
+        shotImg.classList.remove('hidden');
+        placeholder.classList.add('hidden');
+      } else {
+        shotImg.classList.add('hidden');
+        placeholder.classList.remove('hidden');
+      }
+
+      // Tab 2: DOM Element
+      const elem = step.element || {};
+      document.getElementById('elem-selector').value = elem.selector || '-';
+      document.getElementById('elem-xpath').value = elem.xpath || '-';
+      document.getElementById('elem-tag').textContent = elem.tag_name || '-';
+      document.getElementById('elem-text').textContent = elem.text || '-';
+
+      const bbox = elem.bounding_box || {};
+      document.getElementById('bbox-x').textContent = bbox.x !== undefined ? Math.round(bbox.x) : '-';
+      document.getElementById('bbox-y').textContent = bbox.y !== undefined ? Math.round(bbox.y) : '-';
+      document.getElementById('bbox-w').textContent = bbox.width !== undefined ? Math.round(bbox.width) : '-';
+      document.getElementById('bbox-h').textContent = bbox.height !== undefined ? Math.round(bbox.height) : '-';
+
+      const attrsContainer = document.getElementById('elem-attributes');
+      const attrs = elem.attributes || {};
+      const attrKeys = Object.keys(attrs);
+      if (attrKeys.length > 0) {
+        attrsContainer.innerHTML = attrKeys.map(k => `<div><span class="text-slate-400">${k}:</span> <span class="text-white">"${escapeHtml(attrs[k])}"</span></div>`).join('');
+      } else {
+        attrsContainer.innerHTML = '<span class="text-slate-500">No HTML attributes</span>';
+      }
+
+      // Tab 3: Network
+      const netRequests = step.network_requests || [];
+      document.getElementById('net-count-pill').textContent = netRequests.length;
+      const netContainer = document.getElementById('network-list');
+      if (netRequests.length > 0) {
+        netContainer.innerHTML = netRequests.map(r => `
+          <div class="p-2.5 rounded-lg border border-dark-700 bg-dark-900 font-mono text-xs flex items-center justify-between">
+            <div class="flex items-center space-x-2 truncate flex-1 mr-2">
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${r.method === 'POST' ? 'bg-amber-500/10 text-amber-400' : 'bg-sky-500/10 text-sky-400'}">${r.method}</span>
+              <span class="text-slate-300 truncate">${escapeHtml(r.url)}</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${r.status >= 400 ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}">${r.status || '-'}</span>
+              ${r.timing ? `<span class="text-slate-500 text-[11px]">${Math.round(r.timing)}ms</span>` : ''}
+            </div>
+          </div>
+        `).join('');
+      } else {
+        netContainer.innerHTML = '<div class="text-center py-8 text-xs text-slate-500">No network requests triggered by this step</div>';
+      }
+
+      // Tab 4: Console
+      const consoleLogs = step.console_logs || [];
+      const consoleContainer = document.getElementById('console-list');
+      if (consoleLogs.length > 0) {
+        consoleContainer.innerHTML = consoleLogs.map(l => `
+          <div class="p-2.5 rounded-lg border border-dark-700 bg-dark-900 flex items-start space-x-2">
+            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${l.level === 'error' ? 'bg-red-500/10 text-red-400' : 'bg-slate-700 text-slate-300'}">${l.level}</span>
+            <span class="text-slate-200 flex-1 break-all">${escapeHtml(l.message)}</span>
+          </div>
+        `).join('');
+      } else {
+        consoleContainer.innerHTML = '<div class="text-center py-8 text-xs text-slate-500 font-sans">No console logs captured</div>';
+      }
+    }
+
+    // Switch inspector tab
+    function switchTab(tabName) {
+      ['visual', 'element', 'network', 'console'].forEach(t => {
+        document.getElementById(`panel-${t}`).classList.add('hidden');
+        document.getElementById(`tab-${t}`).className = 'px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-slate-200 transition-colors';
+      });
+      document.getElementById(`panel-${tabName}`).classList.remove('hidden');
+      document.getElementById(`tab-${tabName}`).className = 'px-3 py-1.5 rounded-md font-medium text-slate-200 bg-dark-700 transition-colors';
+    }
+
+    // RECORD MODAL LOGIC
+    function openRecordModal() {
+      document.getElementById('modal-record').classList.remove('hidden');
+      document.getElementById('record-form').classList.remove('hidden');
+      document.getElementById('record-active-state').classList.add('hidden');
+      lucide.createIcons();
+    }
+    function closeRecordModal() {
+      document.getElementById('modal-record').classList.add('hidden');
+      if (activePollInterval) clearInterval(activePollInterval);
+    }
+
+    async function submitRecording() {
+      const url = document.getElementById('rec-url').value.trim();
+      const name = document.getElementById('rec-name').value.trim() || null;
+      const browser = document.getElementById('rec-browser').value;
+      const headless = document.getElementById('rec-headless').value === 'true';
+
+      if (!url) {
+        alert('Please enter a target URL.');
+        return;
+      }
+
+      document.getElementById('record-form').classList.add('hidden');
+      document.getElementById('record-active-state').classList.remove('hidden');
+      lucide.createIcons();
+
+      try {
+        const res = await fetch('/api/record/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, name, browser, headless, timeout: 30000 })
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          alert(`Failed to start: ${err.detail || 'Unknown error'}`);
+          closeRecordModal();
+          return;
+        }
+
+        // Start polling status
+        activePollInterval = setInterval(async () => {
+          try {
+            const statusRes = await fetch('/api/record/status');
+            const data = await statusRes.json();
+            if (data.status === 'completed') {
+              clearInterval(activePollInterval);
+              closeRecordModal();
+              await loadTestCases();
+              if (data.testcase_id) {
+                selectTestCase(data.testcase_id);
+              }
+            } else if (data.status === 'error') {
+              clearInterval(activePollInterval);
+              alert(`Recording failed: ${data.error || 'Unknown error'}`);
+              closeRecordModal();
+            }
+          } catch(e){}
+        }, 1500);
+
+      } catch (err) {
+        alert(`Error: ${err.message}`);
+        closeRecordModal();
+      }
+    }
+
+    // REPLAY MODAL LOGIC
+    function openReplayModal() {
+      if (!currentTestCase) return;
+      document.getElementById('modal-replay').classList.remove('hidden');
+      resetReplayModal();
+      lucide.createIcons();
+    }
+    function closeReplayModal() {
+      document.getElementById('modal-replay').classList.add('hidden');
+    }
+    function resetReplayModal() {
+      document.getElementById('replay-options-view').classList.remove('hidden');
+      document.getElementById('replay-results-view').classList.add('hidden');
+    }
+
+    async function submitReplay() {
+      const heal = document.getElementById('replay-heal').checked;
+      const visual_diff = document.getElementById('replay-diff').checked;
+      const assertions = document.getElementById('replay-assert').checked;
+      const headed = document.getElementById('replay-headed').checked;
+
+      const btn = document.getElementById('btn-run-replay');
+      btn.disabled = true;
+      btn.innerHTML = `<span class="animate-spin mr-2">⚡</span> Executing Autonomous Replay...`;
+
+      try {
+        const res = await fetch('/api/replay', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            testcase_id: currentTestCase.id,
+            headed,
+            heal,
+            visual_diff,
+            assertions
+          })
+        });
+
+        const result = await res.json();
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="play" class="w-4 h-4 fill-white mr-2"></i><span>Execute Test Replay</span>`;
+
+        document.getElementById('replay-options-view').classList.add('hidden');
+        document.getElementById('replay-results-view').classList.remove('hidden');
+
+        // Banner styling
+        const banner = document.getElementById('replay-status-banner');
+        const icon = document.getElementById('replay-status-icon');
+        const statusText = document.getElementById('replay-status-text');
+        const metrics = document.getElementById('replay-metrics-text');
+
+        const isPassed = result.status === 'passed';
+        banner.className = `p-4 rounded-xl border flex items-center justify-between ${isPassed ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-red-500/10 border-red-500/30 text-red-400'}`;
+        icon.className = `w-8 h-8 rounded-lg flex items-center justify-center ${isPassed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`;
+        icon.innerHTML = `<i data-lucide="${isPassed ? 'check' : 'x'}" class="w-5 h-5"></i>`;
+        statusText.textContent = isPassed ? 'REPLAY PASSED' : 'REPLAY FAILED';
+        metrics.textContent = `${result.steps.length} steps executed • Exit Code: ${result.exit_code}`;
+
+        // Render step log
+        const logContainer = document.getElementById('replay-steps-log');
+        logContainer.innerHTML = result.steps.map(s => `
+          <div class="flex items-center justify-between p-2 rounded bg-dark-900 border border-dark-700/60">
+            <div class="flex items-center space-x-2">
+              <span class="w-5 text-slate-500">#${s.number}</span>
+              <span class="font-semibold ${s.status === 'passed' ? 'text-emerald-400' : 'text-red-400'}">${s.status.toUpperCase()}</span>
+              ${s.healed_from ? `<span class="text-[10px] text-amber-400 bg-amber-500/10 px-1 rounded">Healed selector</span>` : ''}
+            </div>
+            <span class="text-slate-400">${Math.round(s.duration_ms)}ms</span>
+          </div>
+        `).join('');
+
+        lucide.createIcons();
+      } catch (err) {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="play" class="w-4 h-4 fill-white mr-2"></i><span>Execute Test Replay</span>`;
+        alert(`Replay failed: ${err.message}`);
+      }
+    }
+
+    // CODEGEN MODAL LOGIC
+    async function openCodegenModal() {
+      if (!currentTestCase) return;
+      document.getElementById('modal-codegen').classList.remove('hidden');
+      document.getElementById('codegen-content').textContent = '# Generating Pytest Playwright code...';
+      lucide.createIcons();
+
+      try {
+        const res = await fetch(`/api/testcases/${encodeURIComponent(currentTestCase.id)}/codegen`, { method: 'POST' });
+        const data = await res.json();
+        document.getElementById('codegen-content').textContent = data.code || '# No code generated';
+      } catch (err) {
+        document.getElementById('codegen-content').textContent = `# Error generating code: ${err.message}`;
+      }
+    }
+    function closeCodegenModal() {
+      document.getElementById('modal-codegen').classList.add('hidden');
+    }
+    function copyGeneratedCode() {
+      const code = document.getElementById('codegen-content').textContent;
+      navigator.clipboard.writeText(code);
+      alert('Pytest code copied to clipboard!');
+    }
+
+    // Open full HTML report
+    function openHtmlReport() {
+      if (!currentTestCase) return;
+      window.open(`/api/testcases/${encodeURIComponent(currentTestCase.id)}/html`, '_blank');
+    }
+
+    // Helper: copy to clipboard
+    function copyToClipboard(elementId) {
+      const val = document.getElementById(elementId).value;
+      navigator.clipboard.writeText(val);
+      alert('Copied to clipboard!');
+    }
+
+    // Helper: HTML escape
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>
