@@ -81,6 +81,7 @@ class Step(BaseModel):
     # Target information
     element: ElementInfo | None = Field(default=None, description="Target DOM element")
     url: str | None = Field(default=None, description="URL for navigation actions")
+    page_id: int | None = Field(default=None, description="0-based browser tab/page index")
 
     # Action data
     input_value: str | None = Field(default=None, description="Input value for input actions")

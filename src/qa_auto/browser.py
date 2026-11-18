@@ -54,6 +54,20 @@ class BrowserManager:
             raise RuntimeError("Browser not started. Call start() first.")
         return self._browser
 
+    @property
+    def context(self) -> BrowserContext:
+        """Get the current browser context."""
+        if self._context is None:
+            raise RuntimeError("Browser not started. Call start() first.")
+        return self._context
+
+    @property
+    def pages(self) -> list[Page]:
+        """Get all open pages in the browser context."""
+        if self._context is None:
+            return []
+        return list(self._context.pages)
+
     async def start(self) -> Page:
         """
         Start browser and create a new page.
