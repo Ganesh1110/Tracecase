@@ -122,3 +122,42 @@ def test_does_not_derive_url_assertion_for_non_click() -> None:
     assertions = derive_assertions(_testcase([step]))
 
     assert [a for a in assertions if a.kind == "url"] == []
+
+
+def test_does_not_derive_status_assertion_for_4xx_or_5xx() -> None:
+    step = _step(
+        1,
+        [
+            _request("https://app.example.com/api/missing", status=404),
+            _request("https://app.example.com/api/broken", status=500),
+        ],
+    )
+
+    assertions = derive_assertions(_testcase([step]))
+
+    assert [a for a in assertions if a.kind == "status"] == []
+
+
+def test_does_not_derive_status_assertion_for_3xx() -> None:
+    step = _step(1, [_request("https://app.example.com/api/redirect", status=302)])
+
+    assertions = derive_assertions(_testcase([step]))
+
+    assert [a for a in assertions if a.kind == "status"] == []
+
+
+def test_derives_single_url_assertion_for_final_document_request() -> None:
+    step = _step(
+        1,
+        [
+            _request("https://app.example.com/old", status=302, resource_type="document"),
+            _request("https://app.example.com/dashboard", resource_type="document"),
+        ],
+    )
+
+    assertions = derive_assertions(_testcase([step]))
+
+    url_assertions = [a for a in assertions if a.kind == "url"]
+    assert len(url_assertions) == 1
+    assert url_assertions[0].target == "https://app.example.com/dashboard"
+    assert url_assertions[0].expected == "/dashboard"
