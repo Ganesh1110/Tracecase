@@ -437,6 +437,22 @@ def replay(
             "--timeout", "-t", help="Action timeout in milliseconds", min=1000, max=300000
         ),
     ] = 30000,
+    diff: Annotated[
+        bool,
+        typer.Option("--diff/--no-diff", help="Perform visual screenshot comparison"),
+    ] = False,
+    diff_threshold: Annotated[
+        float,
+        typer.Option(
+            "--diff-threshold", help="Tolerance percentage for visual diff", min=0.0, max=100.0
+        ),
+    ] = 0.1,
+    diff_fail: Annotated[
+        bool,
+        typer.Option(
+            "--diff-fail/--no-diff-fail", help="Fail replay if visual diff exceeds threshold"
+        ),
+    ] = False,
 ) -> None:
     """Replay a recorded test case and evaluate derived assertions."""
     from qa_auto.models import TestCase as RecordedTestCase
@@ -470,6 +486,10 @@ def replay(
         har=har,
         output_dir=output,
         assertions_enabled=verify,
+        visual_diff=diff,
+        diff_threshold=diff_threshold,
+        visual_fail=diff_fail,
+        testcase_dir=testcase.parent,
     )
 
     try:
@@ -516,6 +536,81 @@ def _print_replay_summary(result: ReplayResult) -> None:
     console.print(table)
     summary_color = {"passed": "green", "failed": "red", "error": "red"}[result.status]
     console.print(f"[{summary_color}]Replay {result.status}[/{summary_color}]")
+
+    if result.visual_diffs:
+        diff_table = Table(title="Visual Regression Summary")
+        diff_table.add_column("Step", style="cyan")
+        diff_table.add_column("Diff Pixels")
+        diff_table.add_column("Diff %")
+        diff_table.add_column("Status")
+        for i, vd in enumerate(result.visual_diffs, 1):
+            st = "[green]Passed[/green]" if vd.passed else "[red]Failed[/red]"
+            diff_table.add_row(str(i), f"{vd.diff_pixels:,}", f"{vd.diff_percentage:.2f}%", st)
+        console.print(diff_table)
+
+
+@app.command()
+def diff(
+    baseline: Annotated[
+        Path,
+        typer.Argument(help="Baseline image file"),
+    ],
+    candidate: Annotated[
+        Path,
+        typer.Argument(help="Candidate image file"),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Path to save highlighted visual diff image"),
+    ] = None,
+    threshold: Annotated[
+        float,
+        typer.Option(
+            "--threshold",
+            "-t",
+            help="Tolerance percentage (e.g. 0.1 for 0.1%)",
+            min=0.0,
+            max=100.0,
+        ),
+    ] = 0.1,
+) -> None:
+    """Compare two images pixel-by-pixel and report differences."""
+    from qa_auto.replay.visual import compare_images
+
+    if not baseline.exists():
+        console.print(f"[red]✗ Baseline not found:[/red] {baseline}")
+        raise typer.Exit(2)
+    if not candidate.exists():
+        console.print(f"[red]✗ Candidate not found:[/red] {candidate}")
+        raise typer.Exit(2)
+
+    try:
+        res = compare_images(
+            baseline,
+            candidate,
+            diff_output=output,
+            threshold_percent=threshold,
+        )
+    except Exception as exc:
+        console.print(f"[red]✗ Comparison error:[/red] {exc}")
+        raise typer.Exit(2) from None
+
+    status_str = "[green]Passed[/green]" if res.passed else "[red]Failed[/red]"
+    report_table = Table(title="Visual Difference Report")
+    report_table.add_column("Metric", style="cyan")
+    report_table.add_column("Value")
+    report_table.add_row("Baseline", str(baseline))
+    report_table.add_row("Candidate", str(candidate))
+    report_table.add_row("Total Pixels", f"{res.total_pixels:,}")
+    report_table.add_row("Diff Pixels", f"{res.diff_pixels:,}")
+    report_table.add_row("Diff Percentage", f"{res.diff_percentage:.2f}%")
+    report_table.add_row("Status", status_str)
+    if res.diff_path:
+        report_table.add_row("Diff Image", res.diff_path)
+    console.print(report_table)
+
+    if not res.passed:
+        raise typer.Exit(1)
 
 
 @app.command()
