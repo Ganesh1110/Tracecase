@@ -85,6 +85,7 @@ testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
+    "llm: marks tests that require a local language model (skipped by default)",
 ]
 timeout = 30
 filterwarnings = [
