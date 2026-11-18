@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "qa_auto"
-version = "0.1.0"
+version = "0.2.0"
 description = "Record browser actions and generate structured QA test cases with screenshots, network, and console context"
 readme = "README.md"
 license = "MIT"
