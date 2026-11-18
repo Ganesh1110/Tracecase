@@ -123,8 +123,8 @@ def sample_step(sample_element_info: ElementInfo) -> Step:
         screenshot_with_highlight=None,
         network_requests=[],
         console_logs=[],
-        description_short="Клик по кнопке Submit",
-        description_detailed="Пользователь кликнул по кнопке Submit для отправки формы.",
+        description_short="Click Submit button",
+        description_detailed="User clicked Submit button to submit the form.",
     )
 
 
@@ -152,8 +152,8 @@ def sample_step_with_input(sample_element_info: ElementInfo) -> Step:
         screenshot_with_highlight=None,
         network_requests=[],
         console_logs=[],
-        description_short="Ввод email",
-        description_detailed="Пользователь ввёл 'user@example.com' в поле email.",
+        description_short="Enter email",
+        description_detailed="User entered 'user@example.com' in the email field.",
     )
 
 
@@ -168,7 +168,7 @@ def sample_testcase(
     """Create a sample TestCase object."""
     return TestCase(
         id="tc_001",
-        name="Тест авторизации",
+        name="User Login Flow",
         created_at=datetime(2025, 1, 1, 12, 0, 0),
         start_url="https://example.com/login",
         browser="chromium",

@@ -42,7 +42,9 @@ class TestCheckCommand:
         """Test that check shows dependency information."""
         result = runner.invoke(app, ["check"])
         # Should mention Python or dependencies
-        assert "Python" in result.stdout or "Зависимости" in result.stdout or len(result.stdout) > 0
+        assert (
+            "Python" in result.stdout or "Dependencies" in result.stdout or len(result.stdout) > 0
+        )
 
 
 class TestRecordCommand:

@@ -297,6 +297,18 @@ qa_auto mcp
 qa_auto mcp --db ./corpus.db
 ```
 
+### `qa_auto clean`
+
+Wipe the local SQLite corpus database and/or recorded session artifacts when they are no longer needed:
+
+```bash
+# Wipe the local SQLite corpus database
+qa_auto clean --db
+
+# Wipe both the local corpus database and all recorded test cases in ./recordings/
+qa_auto clean --all
+```
+
 ---
 
 ## What gets captured

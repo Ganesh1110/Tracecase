@@ -81,8 +81,12 @@ examples/example_output/*
 docs/superpowers/
 .superpowers/
 
-# Demo artifacts
+# Local databases and recording artifacts (never push)
 recordings/
+*.db
+*.sqlite
+*.sqlite3
+*.har
 diff_result.png
 tests/test_orangehrm_*.py
 

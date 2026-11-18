@@ -51,3 +51,10 @@ def test_index_and_search_cli_flow(temp_dir: Path) -> None:
     res_cov = runner.invoke(app, ["coverage", "--db", str(db_file)])
     assert res_cov.exit_code == 0
     assert "checkout.com" in res_cov.stdout
+
+    # 4. Clean DB
+    assert db_file.exists()
+    res_clean = runner.invoke(app, ["clean", "--db-path", str(db_file)])
+    assert res_clean.exit_code == 0
+    assert "Wiped local corpus database" in res_clean.stdout
+    assert not db_file.exists()

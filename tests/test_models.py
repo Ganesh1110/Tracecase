@@ -240,7 +240,7 @@ class TestTestCase:
     def test_create_testcase(self, sample_testcase: TestCase) -> None:
         """Test creating TestCase."""
         assert sample_testcase.id == "tc_001"
-        assert sample_testcase.name == "Тест авторизации"
+        assert sample_testcase.name == "User Login Flow"
         assert sample_testcase.browser == "chromium"
         assert len(sample_testcase.steps) == 2
         assert sample_testcase.total_steps == 2

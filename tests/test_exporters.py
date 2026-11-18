@@ -28,7 +28,7 @@ class TestJSONExporter:
 
         assert isinstance(data, dict)
         assert data["id"] == "tc_001"
-        assert data["name"] == "Тест авторизации"
+        assert data["name"] == "User Login Flow"
 
     def test_export_contains_all_fields(self, sample_testcase: TestCase, temp_dir: Path) -> None:
         """Test that exported JSON contains all required fields."""
@@ -103,7 +103,7 @@ class TestMarkdownExporter:
         output_path = exporter.export(sample_testcase, temp_dir)
 
         content = output_path.read_text(encoding="utf-8")
-        assert "# Тест-кейс: Тест авторизации" in content
+        assert "# Test Case: User Login Flow" in content
 
     def test_export_contains_metadata(self, sample_testcase: TestCase, temp_dir: Path) -> None:
         """Test that exported Markdown contains metadata."""
@@ -113,7 +113,7 @@ class TestMarkdownExporter:
         content = output_path.read_text(encoding="utf-8")
         assert "**ID:**" in content
         assert "tc_001" in content
-        assert "**Браузер:**" in content
+        assert "**Browser:**" in content
         assert "chromium" in content
 
     def test_export_contains_steps(self, sample_testcase: TestCase, temp_dir: Path) -> None:
@@ -122,9 +122,9 @@ class TestMarkdownExporter:
         output_path = exporter.export(sample_testcase, temp_dir)
 
         content = output_path.read_text(encoding="utf-8")
-        assert "## Шаги" in content
-        assert "### Шаг 1:" in content
-        assert "### Шаг 2:" in content
+        assert "## Steps" in content
+        assert "### Step 1:" in content
+        assert "### Step 2:" in content
 
     def test_export_contains_summary(self, sample_testcase: TestCase, temp_dir: Path) -> None:
         """Test that exported Markdown contains summary."""
@@ -132,7 +132,7 @@ class TestMarkdownExporter:
         output_path = exporter.export(sample_testcase, temp_dir)
 
         content = output_path.read_text(encoding="utf-8")
-        assert "## Итоги" in content or "Итоги" in content
+        assert "## Summary" in content or "Summary" in content
 
     def test_export_minimal_testcase(
         self, sample_testcase_minimal: TestCase, temp_dir: Path
@@ -171,7 +171,7 @@ class TestHTMLExporter:
         output_path = exporter.export(sample_testcase, temp_dir)
 
         content = output_path.read_text(encoding="utf-8")
-        assert "<title>Тест авторизации — QA Auto</title>" in content
+        assert "<title>User Login Flow — QA Auto</title>" in content
 
     def test_export_contains_metadata(self, sample_testcase: TestCase, temp_dir: Path) -> None:
         """Test that exported HTML contains metadata."""
@@ -189,7 +189,7 @@ class TestHTMLExporter:
         output_path = exporter.export(sample_testcase, temp_dir)
 
         content = output_path.read_text(encoding="utf-8")
-        assert "Шаги" in content or "step" in content.lower()
+        assert "Steps" in content or "step" in content.lower()
 
     def test_export_contains_styles(self, sample_testcase: TestCase, temp_dir: Path) -> None:
         """Test that exported HTML contains CSS styles."""

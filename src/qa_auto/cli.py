@@ -853,13 +853,21 @@ def index_cmd(
         Path | None,
         typer.Option("--db", help="Path to SQLite corpus database"),
     ] = None,
+    clear: Annotated[
+        bool,
+        typer.Option("--clear", help="Wipe database before indexing"),
+    ] = False,
 ) -> None:
     """Index test cases in a directory into the local SQLite/FTS5 store."""
-    from qa_auto.index.store import index_directory
+    from qa_auto.index.store import index_directory, reset_db
 
     if not directory.exists() or not directory.is_dir():
         console.print(f"[red]✗ Directory not found:[/red] {directory}")
         raise typer.Exit(2)
+
+    if clear:
+        reset_db(db)
+        console.print("[dim]Existing corpus database reset.[/dim]")
 
     count = index_directory(directory, db_path=db)
     console.print(f"[green]✓[/green] Indexed {count} test case(s) into corpus store.")
@@ -950,6 +958,62 @@ def mcp(
 
     server = MCPServer(db_path=db)
     asyncio.run(server.run_stdio())
+
+
+@app.command()
+def clean(
+    db: Annotated[
+        bool,
+        typer.Option("--db/--no-db", help="Clear the local SQLite corpus database"),
+    ] = True,
+    recordings: Annotated[
+        bool,
+        typer.Option(
+            "--recordings/--no-recordings",
+            help="Remove local ./recordings directory",
+        ),
+    ] = False,
+    all_artifacts: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            "-a",
+            help="Remove both local corpus DB and ./recordings directory",
+        ),
+    ] = False,
+    db_path: Annotated[
+        Path | None,
+        typer.Option("--db-path", help="Path to custom SQLite corpus database"),
+    ] = None,
+) -> None:
+    """Wipe local corpus SQLite database and/or recorded session artifacts."""
+    import shutil
+
+    from qa_auto.index.store import DEFAULT_DB_PATH, reset_db
+
+    target_db = Path(db_path) if db_path else DEFAULT_DB_PATH
+    wiped_any = False
+
+    if db or all_artifacts:
+        if reset_db(target_db):
+            console.print(f"[green]✓[/green] Wiped local corpus database: {target_db}")
+            wiped_any = True
+        else:
+            console.print(f"[dim]Corpus database does not exist: {target_db}[/dim]")
+
+    if recordings or all_artifacts:
+        rec_dir = Path("./recordings")
+        if rec_dir.exists() and rec_dir.is_dir():
+            shutil.rmtree(rec_dir)
+            console.print(
+                f"[green]✓[/green] Removed local recordings directory: {rec_dir.resolve()}"
+            )
+            wiped_any = True
+        else:
+            console.print(f"[dim]No local recordings directory found at: {rec_dir}[/dim]")
+
+    if not wiped_any:
+        console.print("[yellow]Nothing to wipe.[/yellow]")
 
 
 if __name__ == "__main__":

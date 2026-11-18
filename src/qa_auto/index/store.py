@@ -11,6 +11,15 @@ from qa_auto.models import TestCase
 DEFAULT_DB_PATH = Path.home() / ".qa_auto" / "corpus.db"
 
 
+def reset_db(db_path: Path | str | None = None) -> bool:
+    """Clear all records from the corpus database or remove the database file."""
+    path = Path(db_path) if db_path else DEFAULT_DB_PATH
+    if path.exists():
+        path.unlink()
+        return True
+    return False
+
+
 def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     """Initialize SQLite database with relational and FTS5 schema."""
     path = Path(db_path) if db_path else DEFAULT_DB_PATH

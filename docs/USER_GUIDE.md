@@ -341,6 +341,21 @@ Displays:
 - Breakdown of actions per domain.
 - Warnings for identical duplicate test flows.
 
+### Wiping Local Corpus & Recordings (`qa_auto clean`)
+
+Recordings and databases run strictly locally and are excluded from git. When you want to reset your environment or wipe test artifacts:
+
+```bash
+# Wipe the local SQLite corpus database (~/.qa_auto/corpus.db)
+qa_auto clean --db
+
+# Wipe both the corpus database AND all local ./recordings
+qa_auto clean --all
+
+# Reset database before a fresh indexing run
+qa_auto index ./recordings/ --clear
+```
+
 ---
 
 ## 12. Model Context Protocol (MCP) Server for AI Assistants

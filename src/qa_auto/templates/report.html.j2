@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -515,26 +515,26 @@
                     <div class="meta-value">{{ testcase.start_url }}</div>
                 </div>
                 <div class="meta-item">
-                    <div class="meta-label">Браузер</div>
+                    <div class="meta-label">Browser</div>
                     <div class="meta-value">{{ testcase.browser }}</div>
                 </div>
                 <div class="meta-item">
-                    <div class="meta-label">Разрешение</div>
+                    <div class="meta-label">Viewport</div>
                     <div class="meta-value">{{ testcase.viewport.width }}×{{ testcase.viewport.height }}</div>
                 </div>
                 <div class="meta-item">
-                    <div class="meta-label">Создан</div>
+                    <div class="meta-label">Created</div>
                     <div class="meta-value">{{ testcase.created_at.strftime('%d.%m.%Y %H:%M') }}</div>
                 </div>
             </div>
         </header>
         
         <div class="tabs">
-            <button class="tab active" onclick="showTab('steps')">Шаги ({{ testcase.total_steps }})</button>
-            <button class="tab" onclick="showTab('console')">Консоль ({{ testcase.console_logs | length }})</button>
-            <button class="tab" onclick="showTab('network')">Сеть ({{ testcase.network_requests | length }})</button>
+            <button class="tab active" onclick="showTab('steps')">Steps ({{ testcase.total_steps }})</button>
+            <button class="tab" onclick="showTab('console')">Console ({{ testcase.console_logs | length }})</button>
+            <button class="tab" onclick="showTab('network')">Network ({{ testcase.network_requests | length }})</button>
             {% if testcase.page_errors %}
-            <button class="tab" onclick="showTab('errors')">Ошибки ({{ testcase.page_errors | length }})</button>
+            <button class="tab" onclick="showTab('errors')">Errors ({{ testcase.page_errors | length }})</button>
             {% endif %}
         </div>
         
@@ -554,21 +554,21 @@
                             
                             {% if step.element %}
                             <div class="detail-row">
-                                <div class="detail-label">Селектор</div>
+                                <div class="detail-label">Selector</div>
                                 <div class="detail-value">{{ step.element.selector }}</div>
                             </div>
                             {% endif %}
                             
                             {% if step.input_value %}
                             <div class="detail-row">
-                                <div class="detail-label">Введённое значение</div>
+                                <div class="detail-label">Input Value</div>
                                 <div class="detail-value">{{ step.input_value }}</div>
                             </div>
                             {% endif %}
                             
                             {% if step.console_logs %}
                             <div class="console-logs">
-                                <h4>Логи консоли ({{ step.console_logs | length }})</h4>
+                                <h4>Console Logs ({{ step.console_logs | length }})</h4>
                                 {% for log in step.console_logs[:5] %}
                                 <div class="log-entry">
                                     <span class="log-level {{ log.level }}">{{ log.level }}</span>
@@ -579,7 +579,7 @@
                                 <details class="more-items">
                                     <summary class="more-items-summary">
                                         <span class="expand-icon">▶</span>
-                                        <span>Ещё {{ step.console_logs | length - 5 }} логов...</span>
+                                        <span>{{ step.console_logs | length - 5 }} more logs...</span>
                                     </summary>
                                     <div class="more-items-content">
                                         {% for log in step.console_logs[5:] %}
@@ -596,7 +596,7 @@
                             
                             {% if step.network_requests %}
                             <div class="network-requests">
-                                <h4>Сетевые запросы ({{ step.network_requests | length }})</h4>
+                                <h4>Network Requests ({{ step.network_requests | length }})</h4>
                                 {% for req in step.network_requests[:5] %}
                                 <details class="request-card">
                                     <summary class="request-summary">
@@ -614,7 +614,7 @@
                                         </div>
                                         {% if req.request_headers %}
                                         <div class="request-section">
-                                            <div class="request-section-title">Заголовки запроса</div>
+                                            <div class="request-section-title">Request Headers</div>
                                             <table class="headers-table">
                                                 {% for key, value in req.request_headers.items() %}
                                                 <tr><td>{{ key }}</td><td>{{ value }}</td></tr>
@@ -624,13 +624,13 @@
                                         {% endif %}
                                         {% if req.request_body %}
                                         <div class="request-section">
-                                            <div class="request-section-title">Тело запроса</div>
+                                            <div class="request-section-title">Request Body</div>
                                             <div class="body-preview">{{ req.request_body }}</div>
                                         </div>
                                         {% endif %}
                                         {% if req.response_headers %}
                                         <div class="request-section">
-                                            <div class="request-section-title">Заголовки ответа</div>
+                                            <div class="request-section-title">Response Headers</div>
                                             <table class="headers-table">
                                                 {% for key, value in req.response_headers.items() %}
                                                 <tr><td>{{ key }}</td><td>{{ value }}</td></tr>
@@ -640,7 +640,7 @@
                                         {% endif %}
                                         {% if req.response_body %}
                                         <div class="request-section">
-                                            <div class="request-section-title">Тело ответа</div>
+                                            <div class="request-section-title">Response Body</div>
                                             <div class="body-preview">{{ req.response_body }}</div>
                                         </div>
                                         {% endif %}
@@ -651,7 +651,7 @@
                                 <details class="more-items">
                                     <summary class="more-items-summary">
                                         <span class="expand-icon">▶</span>
-                                        <span>Ещё {{ step.network_requests | length - 5 }} запросов...</span>
+                                        <span>{{ step.network_requests | length - 5 }} more requests...</span>
                                     </summary>
                                     <div class="more-items-content">
                                         {% for req in step.network_requests[5:] %}
@@ -671,7 +671,7 @@
                                                 </div>
                                                 {% if req.request_headers %}
                                                 <div class="request-section">
-                                                    <div class="request-section-title">Заголовки запроса</div>
+                                                    <div class="request-section-title">Request Headers</div>
                                                     <table class="headers-table">
                                                         {% for key, value in req.request_headers.items() %}
                                                         <tr><td>{{ key }}</td><td>{{ value }}</td></tr>
@@ -681,13 +681,13 @@
                                                 {% endif %}
                                                 {% if req.request_body %}
                                                 <div class="request-section">
-                                                    <div class="request-section-title">Тело запроса</div>
+                                                    <div class="request-section-title">Request Body</div>
                                                     <div class="body-preview">{{ req.request_body }}</div>
                                                 </div>
                                                 {% endif %}
                                                 {% if req.response_headers %}
                                                 <div class="request-section">
-                                                    <div class="request-section-title">Заголовки ответа</div>
+                                                    <div class="request-section-title">Response Headers</div>
                                                     <table class="headers-table">
                                                         {% for key, value in req.response_headers.items() %}
                                                         <tr><td>{{ key }}</td><td>{{ value }}</td></tr>
@@ -697,7 +697,7 @@
                                                 {% endif %}
                                                 {% if req.response_body %}
                                                 <div class="request-section">
-                                                    <div class="request-section-title">Тело ответа</div>
+                                                    <div class="request-section-title">Response Body</div>
                                                     <div class="body-preview">{{ req.response_body }}</div>
                                                 </div>
                                                 {% endif %}
@@ -713,7 +713,7 @@
                         
                         {% if step.screenshot_base64 %}
                         <div class="step-screenshot">
-                            <img src="{{ step.screenshot_base64 }}" alt="Шаг {{ step.number }}">
+                            <img src="{{ step.screenshot_base64 }}" alt="Step {{ step.number }}">
                         </div>
                         {% endif %}
                     </div>
@@ -723,14 +723,14 @@
             
             <!-- Console Tab -->
             <div id="tab-console" class="tab-content">
-                <h2>Все логи консоли</h2>
+                <h2>All Console Logs</h2>
                 {% if testcase.console_logs %}
                 <table class="logs-table">
                     <thead>
                         <tr>
-                            <th style="width: 80px;">Время</th>
-                            <th style="width: 80px;">Уровень</th>
-                            <th>Сообщение</th>
+                            <th style="width: 80px;">Time</th>
+                            <th style="width: 80px;">Level</th>
+                            <th>Message</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -744,13 +744,13 @@
                     </tbody>
                 </table>
                 {% else %}
-                <p style="color: var(--text-muted);">Логов консоли не обнаружено</p>
+                <p style="color: var(--text-muted);">No console logs captured</p>
                 {% endif %}
             </div>
             
             <!-- Network Tab -->
             <div id="tab-network" class="tab-content">
-                <h2>Все сетевые запросы</h2>
+                <h2>All Network Requests</h2>
                 {% if testcase.network_requests %}
                 {% for req in testcase.network_requests %}
                 <details class="request-card">
@@ -771,7 +771,7 @@
                         </div>
                         {% if req.request_headers %}
                         <div class="request-section">
-                            <div class="request-section-title">Заголовки запроса</div>
+                            <div class="request-section-title">Request Headers</div>
                             <table class="headers-table">
                                 {% for key, value in req.request_headers.items() %}
                                 <tr><td>{{ key }}</td><td>{{ value }}</td></tr>
@@ -781,13 +781,13 @@
                         {% endif %}
                         {% if req.request_body %}
                         <div class="request-section">
-                            <div class="request-section-title">Тело запроса</div>
+                            <div class="request-section-title">Request Body</div>
                             <div class="body-preview">{{ req.request_body }}</div>
                         </div>
                         {% endif %}
                         {% if req.response_headers %}
                         <div class="request-section">
-                            <div class="request-section-title">Заголовки ответа</div>
+                            <div class="request-section-title">Response Headers</div>
                             <table class="headers-table">
                                 {% for key, value in req.response_headers.items() %}
                                 <tr><td>{{ key }}</td><td>{{ value }}</td></tr>
@@ -797,13 +797,13 @@
                         {% endif %}
                         {% if req.response_body %}
                         <div class="request-section">
-                            <div class="request-section-title">Тело ответа</div>
+                            <div class="request-section-title">Response Body</div>
                             <div class="body-preview">{{ req.response_body }}</div>
                         </div>
                         {% endif %}
                         {% if req.error %}
                         <div class="request-section">
-                            <div class="request-section-title">Ошибка</div>
+                            <div class="request-section-title">Error</div>
                             <div class="body-preview" style="color: var(--error);">{{ req.error }}</div>
                         </div>
                         {% endif %}
@@ -811,14 +811,14 @@
                 </details>
                 {% endfor %}
                 {% else %}
-                <p style="color: var(--text-muted);">Сетевых запросов не обнаружено</p>
+                <p style="color: var(--text-muted);">No network requests captured</p>
                 {% endif %}
             </div>
             
             <!-- Errors Tab -->
             {% if testcase.page_errors %}
             <div id="tab-errors" class="tab-content">
-                <h2>Ошибки JavaScript</h2>
+                <h2>JavaScript Page Errors</h2>
                 {% for error in testcase.page_errors %}
                 <div class="js-error">
                     <div class="js-error-message">{{ error.message }}</div>
@@ -836,24 +836,24 @@
             <div class="summary">
                 <div class="summary-item">
                     <div class="summary-value">{{ testcase.total_steps }}</div>
-                    <div class="summary-label">шагов</div>
+                    <div class="summary-label">steps</div>
                 </div>
                 <div class="summary-item">
-                    <div class="summary-value">{{ testcase.total_duration | round(1) }}с</div>
-                    <div class="summary-label">время</div>
+                    <div class="summary-value">{{ testcase.total_duration | round(1) }}s</div>
+                    <div class="summary-label">duration</div>
                 </div>
                 <div class="summary-item">
                     <div class="summary-value">{{ testcase.console_logs | length }}</div>
-                    <div class="summary-label">логов</div>
+                    <div class="summary-label">logs</div>
                 </div>
                 <div class="summary-item">
                     <div class="summary-value">{{ testcase.network_requests | length }}</div>
-                    <div class="summary-label">запросов</div>
+                    <div class="summary-label">requests</div>
                 </div>
                 {% if testcase.page_errors %}
                 <div class="summary-item">
                     <div class="summary-value" style="color: var(--error);">{{ testcase.page_errors | length }}</div>
-                    <div class="summary-label">ошибок</div>
+                    <div class="summary-label">errors</div>
                 </div>
                 {% endif %}
             </div>
