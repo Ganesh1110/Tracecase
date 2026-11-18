@@ -614,6 +614,88 @@ def diff(
 
 
 @app.command()
+def mutate(
+    testcase: Annotated[
+        Path,
+        typer.Argument(help="Path to a testcase.json file"),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Directory to save synthesized negative test cases",
+        ),
+    ] = None,
+    strategy: Annotated[
+        str,
+        typer.Option(
+            "--strategy",
+            "-s",
+            help="Mutation strategy to apply: all, inputs, actions, network",
+        ),
+    ] = "all",
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            "-n",
+            help="Maximum number of mutations to generate",
+        ),
+    ] = 20,
+) -> None:
+    """Synthesize negative test case variations from a recorded user flow."""
+    from qa_auto.models import TestCase as RecordedTestCase
+    from qa_auto.mutation.engine import MutationEngine
+
+    if not testcase.exists():
+        console.print(f"[red]✗ Test case not found:[/red] {testcase}")
+        raise typer.Exit(2)
+
+    try:
+        case = RecordedTestCase.model_validate_json(testcase.read_text(encoding="utf-8"))
+    except Exception as exc:
+        console.print(f"[red]✗ Invalid test case:[/red] {exc}")
+        raise typer.Exit(2) from None
+
+    engine = MutationEngine()
+    selected_strategies = (
+        [strategy]
+        if strategy in ("inputs", "actions", "network")
+        else ["inputs", "actions", "network"]
+    )
+    mutations = engine.generate(case, strategies=selected_strategies, limit=limit)
+
+    if not mutations:
+        console.print("[yellow]No mutations generated for this test case.[/yellow]")
+        return
+
+    out_dir = output or (testcase.parent / "mutations")
+    exported_paths = engine.export_mutations(mutations, out_dir)
+
+    table = Table(title="Synthesized Negative Test Cases")
+    table.add_column("ID", style="cyan")
+    table.add_column("Strategy")
+    table.add_column("Step")
+    table.add_column("Type")
+    table.add_column("Description")
+
+    for m in mutations:
+        table.add_row(
+            m.testcase.id,
+            m.metadata.strategy,
+            str(m.metadata.target_step),
+            m.metadata.mutation_type,
+            m.metadata.description,
+        )
+
+    console.print(table)
+    console.print(
+        f"\n[green]✓[/green] Synthesized {len(exported_paths)} negative test case(s) into: {out_dir}"
+    )
+
+
+@app.command()
 def codegen(
     testcase: Annotated[
         Path,
