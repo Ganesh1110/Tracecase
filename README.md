@@ -155,6 +155,30 @@ Verify that Python packages and Playwright browsers are installed correctly.
 
 Print the QA Auto version along with Python, Playwright, and Pydantic versions.
 
+### `qa_auto replay`
+
+Replay a recorded test case, evaluate derived assertions, and optionally heal selectors.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--output` / `-o` | Directory for `replay.json` and screenshots | none |
+| `--heal` | Try fallback selectors when the recorded selector is missing | `false` |
+| `--assert` / `--no-assert` | Evaluate derived assertions | enabled |
+| `--from-har` | Fulfill network requests from a recorded HAR | none |
+| `--headed` | Show the browser window | `false` |
+| `--timeout` / `-t` | Action timeout in milliseconds | `30000` |
+
+Exit codes: `0` passed, `1` assertion failed, `2` infrastructure error.
+
+### `qa_auto export-har`
+
+Write recorded network activity to a HAR file for offline replay.
+
+```bash
+qa_auto export-har ./my_test/testcase.json -o ./my_test/network.har
+qa_auto replay ./my_test/testcase.json --from-har ./my_test/network.har
+```
+
 ---
 
 ## What gets captured
@@ -223,8 +247,7 @@ mypy src/qa_auto --ignore-missing-imports
 
 ## Limitations
 
-- Records browser UI flows only; it does not replay or execute test cases.
-- No built-in assertions or self-healing selectors.
+- Replay supports derived assertions and heuristic selector healing; AI-driven self-healing and visual comparison are not included yet.
 - Desktop web only; mobile apps and API-only testing are not covered.
 - Visual comparison between runs is not included.
 

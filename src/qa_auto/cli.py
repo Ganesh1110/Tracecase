@@ -13,6 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from qa_auto import __version__
+from qa_auto.replay.models import ReplayResult
 
 
 # Browser choices enum for validation
@@ -364,6 +365,157 @@ def check() -> None:
     else:
         console.print("[bold yellow]⚠ Some checks failed. See above for details.[/bold yellow]")
         raise typer.Exit(1)
+
+
+@app.command()
+def export_har(
+    testcase: Annotated[
+        Path,
+        typer.Argument(help="Path to a testcase.json file"),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output HAR path (defaults to network.har next to the test case)",
+        ),
+    ] = None,
+) -> None:
+    """Export recorded network activity as a HAR file."""
+    from qa_auto.models import TestCase as RecordedTestCase
+    from qa_auto.replay.har import export_har as write_har
+
+    if not testcase.exists():
+        console.print(f"[red]✗ Test case not found:[/red] {testcase}")
+        raise typer.Exit(2)
+
+    try:
+        case = RecordedTestCase.model_validate_json(testcase.read_text(encoding="utf-8"))
+    except Exception as exc:
+        console.print(f"[red]✗ Invalid test case:[/red] {exc}")
+        raise typer.Exit(2) from None
+
+    output_path = output or testcase.with_name("network.har")
+    path = write_har(case, output_path)
+    console.print(f"[green]✓[/green] HAR: {path}")
+
+
+@app.command()
+def replay(
+    testcase: Annotated[
+        Path,
+        typer.Argument(help="Path to a testcase.json file"),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Directory for replay.json and failure screenshots",
+        ),
+    ] = None,
+    heal: Annotated[
+        bool,
+        typer.Option("--heal", help="Enable heuristic selector self-healing"),
+    ] = False,
+    verify: Annotated[
+        bool,
+        typer.Option("--assert/--no-assert", help="Evaluate derived assertions"),
+    ] = True,
+    from_har: Annotated[
+        Path | None,
+        typer.Option("--from-har", help="Fulfill network requests from a HAR file"),
+    ] = None,
+    headed: Annotated[
+        bool,
+        typer.Option("--headed", help="Show the browser window"),
+    ] = False,
+    timeout: Annotated[
+        int,
+        typer.Option(
+            "--timeout", "-t", help="Action timeout in milliseconds", min=1000, max=300000
+        ),
+    ] = 30000,
+) -> None:
+    """Replay a recorded test case and evaluate derived assertions."""
+    from qa_auto.models import TestCase as RecordedTestCase
+    from qa_auto.replay.engine import ReplayEngine, write_replay_result
+    from qa_auto.replay.har import load_har
+
+    print_banner()
+
+    if not testcase.exists():
+        console.print(f"[red]✗ Test case not found:[/red] {testcase}")
+        raise typer.Exit(2)
+
+    try:
+        case = RecordedTestCase.model_validate_json(testcase.read_text(encoding="utf-8"))
+    except Exception as exc:
+        console.print(f"[red]✗ Invalid test case:[/red] {exc}")
+        raise typer.Exit(2) from None
+
+    har = None
+    if from_har is not None:
+        if not from_har.exists():
+            console.print(f"[red]✗ HAR not found:[/red] {from_har}")
+            raise typer.Exit(2)
+        har = load_har(from_har)
+
+    engine = ReplayEngine(
+        case,
+        headless=not headed,
+        timeout=timeout,
+        heal=heal,
+        har=har,
+        output_dir=output,
+        assertions_enabled=verify,
+    )
+
+    try:
+        result = asyncio.run(engine.run())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Replay cancelled by user.[/yellow]")
+        raise typer.Exit(2) from None
+
+    _print_replay_summary(result)
+
+    if output is not None:
+        path = write_replay_result(result, output)
+        console.print(f"[dim]Replay report: {path}[/dim]")
+
+    raise typer.Exit(result.exit_code)
+
+
+def _print_replay_summary(result: ReplayResult) -> None:
+    table = Table(title="Replay Results")
+    table.add_column("Step", style="dim")
+    table.add_column("Status")
+    table.add_column("Selector")
+    table.add_column("Details")
+
+    colors = {
+        "passed": "green",
+        "healed": "yellow",
+        "failed": "red",
+        "error": "red",
+        "skipped": "dim",
+    }
+    for step in result.steps:
+        color = colors.get(step.status, "white")
+        details = step.error or "; ".join(
+            assertion.message for assertion in step.assertions if not assertion.passed
+        )
+        table.add_row(
+            str(step.number),
+            f"[{color}]{step.status}[/{color}]",
+            step.selector_used or "-",
+            details or "",
+        )
+
+    console.print(table)
+    summary_color = {"passed": "green", "failed": "red", "error": "red"}[result.status]
+    console.print(f"[{summary_color}]Replay {result.status}[/{summary_color}]")
 
 
 if __name__ == "__main__":
