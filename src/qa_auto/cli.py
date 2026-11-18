@@ -518,5 +518,49 @@ def _print_replay_summary(result: ReplayResult) -> None:
     console.print(f"[{summary_color}]Replay {result.status}[/{summary_color}]")
 
 
+@app.command()
+def codegen(
+    testcase: Annotated[
+        Path,
+        typer.Argument(help="Path to a testcase.json file"),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output Python test file path (defaults to test_<name>.py)",
+        ),
+    ] = None,
+    har: Annotated[
+        str | None,
+        typer.Option(
+            "--har",
+            help="Optional path to HAR file to replay routes offline",
+        ),
+    ] = None,
+) -> None:
+    """Generate executable pytest Playwright test code from a testcase."""
+    from qa_auto.codegen.pytest_exporter import _slugify, generate_pytest_code
+    from qa_auto.models import TestCase as RecordedTestCase
+
+    if not testcase.exists():
+        console.print(f"[red]✗ Test case not found:[/red] {testcase}")
+        raise typer.Exit(2)
+
+    try:
+        case = RecordedTestCase.model_validate_json(testcase.read_text(encoding="utf-8"))
+    except Exception as exc:
+        console.print(f"[red]✗ Invalid test case:[/red] {exc}")
+        raise typer.Exit(2) from None
+
+    output_path = output or testcase.with_name(f"test_{_slugify(case.name)}.py")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    code = generate_pytest_code(case, har_path=har)
+    output_path.write_text(code, encoding="utf-8")
+    console.print(f"[green]✓[/green] Generated pytest test: {output_path}")
+
+
 if __name__ == "__main__":
     app()
