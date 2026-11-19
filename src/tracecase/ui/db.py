@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -142,8 +142,36 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
                 conn.execute("ALTER TABLE execution_runs ADD COLUMN concurrency INTEGER DEFAULT 1")
             if "matrix_id" not in cols:
                 conn.execute("ALTER TABLE execution_runs ADD COLUMN matrix_id TEXT")
+            if "retries" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN retries INTEGER DEFAULT 0")
+            if "attempt_count" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN attempt_count INTEGER DEFAULT 1")
+            if "retry_history_json" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN retry_history_json TEXT DEFAULT '[]'")
+            if "failure_step" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN failure_step INTEGER")
+            if "failure_selector" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN failure_selector TEXT")
         except Exception:
             pass
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS execution_attempts (
+                id TEXT PRIMARY KEY,
+                execution_id TEXT NOT NULL,
+                attempt_number INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                duration_ms REAL DEFAULT 0.0,
+                error_message TEXT,
+                failed_step INTEGER,
+                failed_selector TEXT,
+                report_path TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (execution_id) REFERENCES execution_runs(id) ON DELETE CASCADE
+            )
+            """
+        )
 
         conn.execute(
             """
@@ -157,6 +185,7 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
                 passed_tests INTEGER NOT NULL DEFAULT 0,
                 failed_tests INTEGER NOT NULL DEFAULT 0,
                 cancelled_tests INTEGER NOT NULL DEFAULT 0,
+                flaky_tests INTEGER NOT NULL DEFAULT 0,
                 started_at TEXT NOT NULL,
                 finished_at TEXT,
                 duration_ms REAL DEFAULT 0.0,
@@ -164,6 +193,14 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             )
             """
         )
+
+        try:
+            b_cursor = conn.execute("PRAGMA table_info(execution_batches)")
+            b_cols = [row["name"] for row in b_cursor.fetchall()]
+            if "flaky_tests" not in b_cols:
+                conn.execute("ALTER TABLE execution_batches ADD COLUMN flaky_tests INTEGER DEFAULT 0")
+        except Exception:
+            pass
 
         conn.execute(
             """
@@ -179,6 +216,7 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
                 passed_executions INTEGER NOT NULL DEFAULT 0,
                 failed_executions INTEGER NOT NULL DEFAULT 0,
                 cancelled_executions INTEGER NOT NULL DEFAULT 0,
+                flaky_executions INTEGER NOT NULL DEFAULT 0,
                 divergence_count INTEGER NOT NULL DEFAULT 0,
                 started_at TEXT NOT NULL,
                 finished_at TEXT,
@@ -187,6 +225,14 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             )
             """
         )
+
+        try:
+            m_cursor = conn.execute("PRAGMA table_info(execution_matrices)")
+            m_cols = [row["name"] for row in m_cursor.fetchall()]
+            if "flaky_executions" not in m_cols:
+                conn.execute("ALTER TABLE execution_matrices ADD COLUMN flaky_executions INTEGER DEFAULT 0")
+        except Exception:
+            pass
 
         conn.execute(
             """
@@ -845,6 +891,7 @@ def create_execution_run(
     worker_id: str | None = None,
     concurrency: int = 1,
     matrix_id: str | None = None,
+    retries: int = 0,
     db_path: Path | str | None = None,
 ) -> dict[str, Any]:
     """Register a new test execution run in queued status."""
@@ -859,9 +906,9 @@ def create_execution_run(
                 INSERT INTO execution_runs (
                     id, project_id, suite_id, testcase_id, testcase_name, status,
                     browser, headed, heal, assertions, visual_diff, started_at,
-                    batch_id, worker_id, concurrency, matrix_id
+                    batch_id, worker_id, concurrency, matrix_id, retries, attempt_count
                 )
-                VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """,
                 (
                     exec_id,
@@ -879,6 +926,7 @@ def create_execution_run(
                     worker_id,
                     concurrency,
                     matrix_id,
+                    retries,
                 ),
             )
         return get_execution_run(exec_id, db_path) or {}
@@ -901,6 +949,10 @@ def update_execution_run_status(
     worker_id: str | None = None,
     batch_id: str | None = None,
     matrix_id: str | None = None,
+    attempt_count: int | None = None,
+    retry_history: list[dict[str, Any]] | None = None,
+    failure_step: int | None = None,
+    failure_selector: str | None = None,
     db_path: Path | str | None = None,
 ) -> None:
     """Update execution run results."""
@@ -946,6 +998,18 @@ def update_execution_run_status(
         if matrix_id is not None:
             updates.append("matrix_id = ?")
             params.append(matrix_id)
+        if attempt_count is not None:
+            updates.append("attempt_count = ?")
+            params.append(attempt_count)
+        if retry_history is not None:
+            updates.append("retry_history_json = ?")
+            params.append(json.dumps(retry_history))
+        if failure_step is not None:
+            updates.append("failure_step = ?")
+            params.append(failure_step)
+        if failure_selector is not None:
+            updates.append("failure_selector = ?")
+            params.append(failure_selector)
 
         params.append(execution_id)
         with conn:
@@ -1006,7 +1070,7 @@ def log_execution_step(
 
 
 def get_execution_run(execution_id: str, db_path: Path | str | None = None) -> dict[str, Any] | None:
-    """Fetch complete execution run with step logs."""
+    """Fetch complete execution run with step logs, attempts, and retry history."""
     init_studio_db(db_path)
     conn = get_connection(db_path)
     try:
@@ -1015,6 +1079,7 @@ def get_execution_run(execution_id: str, db_path: Path | str | None = None) -> d
             return None
         d = dict(row)
         d["logs"] = json.loads(d.get("logs_json") or "[]")
+        d["retry_history"] = json.loads(d.get("retry_history_json") or "[]")
         # Fetch step logs
         step_rows = conn.execute(
             """
@@ -1031,6 +1096,18 @@ def get_execution_run(execution_id: str, db_path: Path | str | None = None) -> d
             sd["assertions"] = json.loads(sd.get("assertions_json") or "[]")
             steps.append(sd)
         d["step_logs"] = steps
+
+        # Fetch execution attempts
+        attempt_rows = conn.execute(
+            """
+            SELECT * FROM execution_attempts
+            WHERE execution_id = ?
+            ORDER BY attempt_number ASC
+            """,
+            (execution_id,),
+        ).fetchall()
+        d["attempts"] = [dict(ar) for ar in attempt_rows]
+
         return d
     finally:
         conn.close()
@@ -1083,8 +1160,161 @@ def list_execution_runs(
         for r in rows:
             d = dict(r)
             d["logs"] = json.loads(d.get("logs_json") or "[]")
+            d["retry_history"] = json.loads(d.get("retry_history_json") or "[]")
             result.append(d)
         return result
+    finally:
+        conn.close()
+
+
+def record_execution_attempt(
+    execution_id: str,
+    attempt_number: int,
+    status: str,
+    duration_ms: float = 0.0,
+    error_message: str | None = None,
+    failed_step: int | None = None,
+    failed_selector: str | None = None,
+    report_path: str | None = None,
+    db_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Record an individual execution attempt permanently."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    attempt_id = f"att_{uuid.uuid4().hex[:12]}"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO execution_attempts (
+                    id, execution_id, attempt_number, status, duration_ms,
+                    error_message, failed_step, failed_selector, report_path, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    attempt_id,
+                    execution_id,
+                    attempt_number,
+                    status,
+                    duration_ms,
+                    error_message,
+                    failed_step,
+                    failed_selector,
+                    report_path,
+                    now_iso,
+                ),
+            )
+        return {
+            "id": attempt_id,
+            "execution_id": execution_id,
+            "attempt_number": attempt_number,
+            "status": status,
+            "duration_ms": duration_ms,
+            "error_message": error_message,
+            "failed_step": failed_step,
+            "failed_selector": failed_selector,
+            "report_path": report_path,
+            "created_at": now_iso,
+        }
+    finally:
+        conn.close()
+
+
+def get_execution_attempts(execution_id: str, db_path: Path | str | None = None) -> list[dict[str, Any]]:
+    """Fetch all recorded attempts for an execution run."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM execution_attempts
+            WHERE execution_id = ?
+            ORDER BY attempt_number ASC
+            """,
+            (execution_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_testcase_flakiness_stats(
+    testcase_id: str,
+    limit: int = 30,
+    db_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Calculate flakiness score, reliability score, and browser breakdown across historical runs."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, status, browser, attempt_count, retries, duration_ms,
+                   error_message, failure_step, failure_selector, started_at, finished_at
+            FROM execution_runs
+            WHERE testcase_id = ? AND status IN ('passed', 'flaky', 'failed', 'error')
+            ORDER BY started_at DESC
+            LIMIT ?
+            """,
+            (testcase_id, limit),
+        ).fetchall()
+
+        runs = [dict(r) for r in rows]
+        total_runs = len(runs)
+        flaky_runs = sum(1 for r in runs if r["status"] == "flaky")
+        passed_runs = sum(1 for r in runs if r["status"] == "passed")
+        failed_runs = sum(1 for r in runs if r["status"] == "failed")
+        error_runs = sum(1 for r in runs if r["status"] == "error")
+
+        flakiness_score = round((flaky_runs / total_runs) * 100, 1) if total_runs > 0 else 0.0
+        reliability_score = round((passed_runs / total_runs) * 100, 1) if total_runs > 0 else 100.0
+
+        if flakiness_score == 0.0:
+            rating = "stable"
+        elif flakiness_score <= 15.0:
+            rating = "low"
+        elif flakiness_score <= 40.0:
+            rating = "moderate"
+        else:
+            rating = "high"
+
+        # Per-browser breakdown
+        browsers: dict[str, dict[str, Any]] = {}
+        for r in runs:
+            b = r.get("browser") or "chromium"
+            if b not in browsers:
+                browsers[b] = {
+                    "total": 0,
+                    "flaky": 0,
+                    "passed": 0,
+                    "failed": 0,
+                    "error": 0,
+                    "flakiness_score": 0.0,
+                }
+            browsers[b]["total"] += 1
+            st = r["status"]
+            if st in browsers[b]:
+                browsers[b][st] += 1
+
+        for b, data in browsers.items():
+            t = data["total"]
+            data["flakiness_score"] = round((data["flaky"] / t) * 100, 1) if t > 0 else 0.0
+
+        return {
+            "testcase_id": testcase_id,
+            "total_runs": total_runs,
+            "flaky_runs": flaky_runs,
+            "passed_runs": passed_runs,
+            "failed_runs": failed_runs,
+            "error_runs": error_runs,
+            "flakiness_score": flakiness_score,
+            "reliability_score": reliability_score,
+            "rating": rating,
+            "flakiness_by_browser": browsers,
+            "recent_runs": runs,
+        }
     finally:
         conn.close()
 
@@ -1124,6 +1354,7 @@ def update_execution_batch(
     passed_tests: int | None = None,
     failed_tests: int | None = None,
     cancelled_tests: int | None = None,
+    flaky_tests: int | None = None,
     finished_at: str | None = None,
     duration_ms: float | None = None,
     db_path: Path | str | None = None,
@@ -1146,6 +1377,9 @@ def update_execution_batch(
         if cancelled_tests is not None:
             updates.append("cancelled_tests = ?")
             params.append(cancelled_tests)
+        if flaky_tests is not None:
+            updates.append("flaky_tests = ?")
+            params.append(flaky_tests)
         if finished_at is not None:
             updates.append("finished_at = ?")
             params.append(finished_at)
@@ -1183,6 +1417,7 @@ def get_execution_batch(batch_id: str, db_path: Path | str | None = None) -> dic
         for rr in run_rows:
             rd = dict(rr)
             rd["logs"] = json.loads(rd.get("logs_json") or "[]")
+            rd["retry_history"] = json.loads(rd.get("retry_history_json") or "[]")
             runs.append(rd)
         d["runs"] = runs
         return d
@@ -1274,6 +1509,7 @@ def update_execution_matrix(
     passed_executions: int | None = None,
     failed_executions: int | None = None,
     cancelled_executions: int | None = None,
+    flaky_executions: int | None = None,
     divergence_count: int | None = None,
     finished_at: str | None = None,
     duration_ms: float | None = None,
@@ -1297,6 +1533,9 @@ def update_execution_matrix(
         if cancelled_executions is not None:
             updates.append("cancelled_executions = ?")
             params.append(cancelled_executions)
+        if flaky_executions is not None:
+            updates.append("flaky_executions = ?")
+            params.append(flaky_executions)
         if divergence_count is not None:
             updates.append("divergence_count = ?")
             params.append(divergence_count)
@@ -1340,6 +1579,7 @@ def get_execution_matrix(matrix_id: str, db_path: Path | str | None = None) -> d
         for rr in run_rows:
             rd = dict(rr)
             rd["logs"] = json.loads(rd.get("logs_json") or "[]")
+            rd["retry_history"] = json.loads(rd.get("retry_history_json") or "[]")
             runs.append(rd)
         d["runs"] = runs
 
@@ -1356,6 +1596,8 @@ def get_execution_matrix(matrix_id: str, db_path: Path | str | None = None) -> d
             tc_map[t_id]["browsers"][r["browser"]] = {
                 "run_id": r["id"],
                 "status": r["status"],
+                "attempt_count": r.get("attempt_count", 1),
+                "retries": r.get("retries", 0),
                 "duration_ms": r.get("duration_ms", 0.0),
                 "error_message": r.get("error_message"),
                 "artifacts_path": r.get("artifacts_path"),
@@ -1369,7 +1611,7 @@ def get_execution_matrix(matrix_id: str, db_path: Path | str | None = None) -> d
             browser_statuses = {
                 b: info["status"]
                 for b, info in tc_info["browsers"].items()
-                if info["status"] in ("passed", "failed", "error")
+                if info["status"] in ("passed", "failed", "error", "flaky")
             }
             # Divergence exists if different terminal statuses appear among completed browsers
             terminal_statuses = set(browser_statuses.values())
@@ -1396,12 +1638,12 @@ def get_execution_matrix(matrix_id: str, db_path: Path | str | None = None) -> d
             else 100.0
         )
 
-        # Calculate pass rates per browser
+        # Calculate pass rates per browser (passed or flaky are considered successful runs)
         browser_pass_rates: dict[str, float] = {}
         for b in browsers:
-            b_runs = [r for r in runs if r.get("browser") == b and r.get("status") in ("passed", "failed", "error")]
+            b_runs = [r for r in runs if r.get("browser") == b and r.get("status") in ("passed", "failed", "error", "flaky")]
             if b_runs:
-                passed_b = sum(1 for r in b_runs if r["status"] == "passed")
+                passed_b = sum(1 for r in b_runs if r["status"] in ("passed", "flaky"))
                 browser_pass_rates[b] = round(100.0 * passed_b / len(b_runs), 1)
             else:
                 browser_pass_rates[b] = 0.0

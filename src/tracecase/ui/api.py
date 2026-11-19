@@ -43,6 +43,7 @@ from tracecase.ui.db import (
     delete_suite,
     get_ai_analyses_for_testcase,
     get_dashboard_metrics,
+    get_execution_attempts,
     get_execution_batch,
     get_execution_matrix,
     get_execution_run,
@@ -50,6 +51,7 @@ from tracecase.ui.db import (
     get_settings,
     get_suite,
     get_synthesized_draft,
+    get_testcase_flakiness_stats,
     list_execution_batches,
     list_execution_matrices,
     list_execution_runs,
@@ -138,6 +140,7 @@ class ReplayRequest(BaseModel):
     visual_diff: bool = Field(default=False, description="Perform screenshot visual comparison")
     diff_threshold: float = Field(default=0.1, description="Visual diff tolerance percentage")
     concurrency: int = Field(default=2, ge=1, le=8, description="Parallel worker count for batch/suite execution")
+    retries: int = Field(default=2, ge=0, le=3, description="Number of retry attempts on failure (0 to 3)")
 
 
 class BatchExecutionRequest(BaseModel):
@@ -151,6 +154,7 @@ class BatchExecutionRequest(BaseModel):
     assertions: bool = Field(default=True, description="Evaluate assertions")
     visual_diff: bool = Field(default=False, description="Perform screenshot visual comparison")
     diff_threshold: float = Field(default=0.1, description="Visual diff tolerance percentage")
+    retries: int = Field(default=2, ge=0, le=3, description="Number of retry attempts on failure (0 to 3)")
 
 
 class MatrixExecutionRequest(BaseModel):
@@ -168,6 +172,7 @@ class MatrixExecutionRequest(BaseModel):
     assertions: bool = Field(default=True, description="Evaluate assertions")
     visual_diff: bool = Field(default=False, description="Perform screenshot visual comparison")
     diff_threshold: float = Field(default=0.1, description="Visual diff tolerance percentage")
+    retries: int = Field(default=2, ge=0, le=3, description="Number of retry attempts on failure (0 to 3)")
 
 
 class VisualDiffRequest(BaseModel):
@@ -430,6 +435,7 @@ async def run_suite(suite_id: str, req: ReplayRequest | None = None) -> list[dic
     visual_diff = req.visual_diff if req else False
     diff_threshold = req.diff_threshold if req else 0.1
     concurrency = req.concurrency if req else 2
+    retries = req.retries if req else 2
 
     try:
         batch = await orchestrator.start_batch_execution(
@@ -443,6 +449,7 @@ async def run_suite(suite_id: str, req: ReplayRequest | None = None) -> list[dic
             assertions=assertions,
             visual_diff=visual_diff,
             diff_threshold=diff_threshold,
+            retries=retries,
         )
         return batch.get("runs", [])
     except ValueError as exc:
@@ -465,6 +472,7 @@ async def run_suite_matrix(suite_id: str, req: MatrixExecutionRequest | None = N
 
     browsers = req.browsers if req and req.browsers else ["chromium", "firefox", "webkit"]
     concurrency = req.concurrency if req else 2
+    retries = req.retries if req else 2
     matrix_name = req.matrix_name if req and req.matrix_name else f"Matrix Suite: {suite.get('name', suite_id)}"
     headed = req.headed if req else False
     heal = req.heal if req else True
@@ -485,6 +493,7 @@ async def run_suite_matrix(suite_id: str, req: MatrixExecutionRequest | None = N
             assertions=assertions,
             visual_diff=visual_diff,
             diff_threshold=diff_threshold,
+            retries=retries,
         )
         return matrix
     except ValueError as exc:
@@ -675,6 +684,7 @@ async def start_batch_execution_endpoint(req: BatchExecutionRequest) -> dict[str
             assertions=req.assertions,
             visual_diff=req.visual_diff,
             diff_threshold=req.diff_threshold,
+            retries=req.retries,
         )
         return batch
     except FileNotFoundError as exc:
@@ -736,6 +746,7 @@ async def start_matrix_execution_endpoint(req: MatrixExecutionRequest) -> dict[s
             assertions=req.assertions,
             visual_diff=req.visual_diff,
             diff_threshold=req.diff_threshold,
+            retries=req.retries,
         )
         return matrix
     except FileNotFoundError as exc:
@@ -789,6 +800,24 @@ async def get_execution_details(execution_id: str) -> dict[str, Any]:
     return run
 
 
+@router.get("/executions/{execution_id}/attempts")
+async def get_execution_attempts_endpoint(execution_id: str) -> list[dict[str, Any]]:
+    """Fetch all recorded attempts for a specific execution run."""
+    run = get_execution_run(execution_id)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Execution not found")
+    return get_execution_attempts(execution_id)
+
+
+@router.get("/testcases/{testcase_id}/flakiness")
+async def get_testcase_flakiness_endpoint(
+    testcase_id: str,
+    limit: int = Query(default=30, ge=1, le=100),
+) -> dict[str, Any]:
+    """Calculate historical flakiness score, reliability rating, and per-browser breakdown."""
+    return get_testcase_flakiness_stats(testcase_id, limit=limit)
+
+
 @router.post("/executions")
 async def start_new_execution(req: ReplayRequest) -> dict[str, Any]:
     """Launch asynchronous background test execution."""
@@ -802,6 +831,7 @@ async def start_new_execution(req: ReplayRequest) -> dict[str, Any]:
             assertions=req.assertions,
             visual_diff=req.visual_diff,
             diff_threshold=req.diff_threshold,
+            retries=req.retries,
         )
         return run
     except FileNotFoundError as exc:

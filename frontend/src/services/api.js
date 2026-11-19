@@ -132,6 +132,9 @@ export const api = {
     return request(`/executions${qs ? `?${qs}` : ''}`);
   },
   getExecution: (id) => request(`/executions/${id}`),
+  getExecutionAttempts: (id) => request(`/executions/${id}/attempts`),
+  getTestcaseFlakiness: (testcaseId, limit = 30) =>
+    request(`/testcases/${encodeURIComponent(testcaseId)}/flakiness?limit=${limit}`),
   startExecution: (data) =>
     request('/executions', { method: 'POST', body: JSON.stringify(data) }),
   cancelExecution: (id) =>

@@ -23,6 +23,7 @@ from tracecase.ui.db import (
     get_execution_batch,
     get_execution_matrix,
     log_execution_step,
+    record_execution_attempt,
     update_execution_batch,
     update_execution_matrix,
     update_execution_run_status,
@@ -30,6 +31,23 @@ from tracecase.ui.db import (
 from tracecase.ui.service import resolve_testcase_file
 
 logger = logging.getLogger("tracecase.ui.executor")
+
+
+def is_browser_env_error(err_msg: str | None) -> bool:
+    """Detect whether an error is caused by missing browser binaries / runtime environment."""
+    if not err_msg:
+        return False
+    lower = err_msg.lower()
+    return any(
+        p in lower
+        for p in [
+            "executable doesn't exist",
+            "playwright install",
+            "failed to launch",
+            "browser binary missing",
+            "executable path does not exist",
+        ]
+    )
 
 
 class ExecutionOrchestrator:
@@ -51,6 +69,7 @@ class ExecutionOrchestrator:
         assertions: bool = True,
         visual_diff: bool = False,
         diff_threshold: float = 0.1,
+        retries: int = 2,
     ) -> dict[str, Any]:
         """Create execution record and start asynchronous execution worker."""
         # Resolve test case
@@ -61,6 +80,8 @@ class ExecutionOrchestrator:
         meta = get_testcase_meta(testcase.id)
         if meta and meta.get("approval_status") == "draft":
             raise ValueError(f"Cannot execute test case '{testcase.id}': draft requires human approval before execution.")
+
+        bounded_retries = max(0, min(3, int(retries)))
 
         # Create record in database
         run_record = create_execution_run(
@@ -73,6 +94,7 @@ class ExecutionOrchestrator:
             heal=heal,
             assertions=assertions,
             visual_diff=visual_diff,
+            retries=bounded_retries,
         )
         execution_id = run_record["id"]
 
@@ -88,6 +110,7 @@ class ExecutionOrchestrator:
                 assertions=assertions,
                 visual_diff=visual_diff,
                 diff_threshold=diff_threshold,
+                retries=bounded_retries,
             )
         )
         self.active_tasks[execution_id] = task
@@ -112,12 +135,11 @@ class ExecutionOrchestrator:
         assertions: bool,
         visual_diff: bool,
         diff_threshold: float,
+        retries: int = 2,
     ) -> None:
-        """Internal execution loop."""
+        """Internal execution loop with retry intelligence and attempt history."""
         _, testcase = resolve_testcase_file(testcase_id)
         testcase_dir = tc_file.parent
-        output_dir = testcase_dir / "replay_runs" / datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir.mkdir(parents=True, exist_ok=True)
 
         # Update status to running
         update_execution_run_status(
@@ -127,105 +149,239 @@ class ExecutionOrchestrator:
         await broadcast_execution_event(
             execution_id=execution_id,
             event_type="execution_started",
-            data={"status": "running", "total_steps": len(testcase.steps)},
+            data={"status": "running", "total_steps": len(testcase.steps), "retries": retries},
         )
 
-        logs: list[str] = []
+        overall_logs: list[str] = []
+        attempt_history: list[dict[str, Any]] = []
+        overall_start_time = datetime.now()
+        total_attempts = 1 + max(0, min(3, int(retries)))
+        final_status = "failed"
+        last_failure_step: int | None = None
+        last_failure_selector: str | None = None
+        last_error_message: str | None = None
+        last_output_dir: Path | None = None
+        passed_count = 0
+        failed_count = 0
+        total_steps = len(testcase.steps)
+        exit_code = 0
 
-        async def _step_callback(step_res: StepResult, step_num: int, total_steps: int) -> None:
-            # Step metadata
-            curr_step = next((s for s in testcase.steps if s.number == step_num), None)
-            action_type = curr_step.action_type if curr_step else None
-            screenshot = (
-                str(step_res.screenshot)
-                if getattr(step_res, "screenshot", None)
-                else (str(getattr(step_res, "screenshot_path")) if getattr(step_res, "screenshot_path", None) else None)
-            )
-
-            assertions_data = []
-            for a in getattr(step_res, "assertions", []):
-                assertions_data.append(
-                    {
-                        "kind": getattr(getattr(a, "assertion", None), "kind", ""),
-                        "target": getattr(getattr(a, "assertion", None), "target", None),
-                        "expected": str(a.assertion.expected)
-                        if getattr(getattr(a, "assertion", None), "expected", None) is not None
-                        else None,
-                        "passed": bool(getattr(a, "passed", False)),
-                        "actual": str(a.actual) if getattr(a, "actual", None) is not None else None,
-                        "message": getattr(a, "message", ""),
-                    }
-                )
-
-            # Log to SQLite
-            log_execution_step(
-                execution_id=execution_id,
-                step_number=step_num,
-                action_type=action_type,
-                status=step_res.status,
-                duration_ms=step_res.duration_ms,
-                selector_used=step_res.selector_used,
-                healed_from=step_res.healed_from,
-                error=step_res.error,
-                screenshot_path=screenshot,
-                visual_diff=step_res.visual_diff.model_dump(mode="json")
-                if step_res.visual_diff
-                else None,
-                assertions=assertions_data,
-            )
-
-            log_entry = f"Step {step_num}/{total_steps} [{action_type}]: {step_res.status.upper()} ({step_res.duration_ms:.1f}ms)"
-            if step_res.healed_from:
-                log_entry += f" [HEALED from '{step_res.healed_from}']"
-            if step_res.error:
-                log_entry += f" - Error: {step_res.error}"
-            for ad in assertions_data:
-                ast_status = "PASS" if ad["passed"] else "FAIL"
-                log_entry += f" | Assert [{ad['kind']}]: {ast_status}"
-            logs.append(log_entry)
-
-            # Broadcast real-time step progress
-            await broadcast_execution_event(
-                execution_id=execution_id,
-                event_type="step_progress",
-                data={
-                    "step_number": step_num,
-                    "total_steps": total_steps,
-                    "action_type": action_type,
-                    "status": step_res.status,
-                    "duration_ms": step_res.duration_ms,
-                    "selector_used": step_res.selector_used,
-                    "healed_from": step_res.healed_from,
-                    "error": step_res.error,
-                    "screenshot_path": screenshot,
-                    "assertions": assertions_data,
-                    "log": log_entry,
-                },
-            )
-
-        start_time = datetime.now()
         try:
-            engine = ReplayEngine(
-                testcase=testcase,
-                browser_type=browser,
-                headless=not headed,
-                heal=heal,
-                assertions_enabled=assertions,
-                visual_diff=visual_diff,
-                diff_threshold=diff_threshold,
-                output_dir=output_dir,
-                testcase_dir=testcase_dir,
-                step_callback=_step_callback,
-            )
-            replay_res: ReplayResult = await engine.run()
+            for attempt in range(1, total_attempts + 1):
+                if attempt > 1:
+                    overall_logs.append(f"--- Retrying test execution (Attempt {attempt}/{total_attempts}) ---")
+                    update_execution_run_status(
+                        execution_id=execution_id,
+                        status="running",
+                        attempt_count=attempt,
+                        retry_history=attempt_history,
+                        failure_step=last_failure_step,
+                        failure_selector=last_failure_selector,
+                        error_message=last_error_message,
+                    )
+                    await broadcast_execution_event(
+                        execution_id=execution_id,
+                        event_type="retry_attempt_started",
+                        data={
+                            "execution_id": execution_id,
+                            "testcase_id": testcase.id,
+                            "attempt": attempt,
+                            "max_retries": retries,
+                            "previous_error": last_error_message,
+                        },
+                    )
+
+                ts_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                output_dir = testcase_dir / "replay_runs" / f"{execution_id}_att{attempt}_{ts_str}"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                last_output_dir = output_dir
+
+                async def _step_callback(step_res: StepResult, step_num: int, tot_steps: int) -> None:
+                    curr_step = next((s for s in testcase.steps if s.number == step_num), None)
+                    action_type = curr_step.action_type if curr_step else None
+                    screenshot = (
+                        str(step_res.screenshot)
+                        if getattr(step_res, "screenshot", None)
+                        else (str(getattr(step_res, "screenshot_path")) if getattr(step_res, "screenshot_path", None) else None)
+                    )
+
+                    assertions_data = []
+                    for a in getattr(step_res, "assertions", []):
+                        assertions_data.append(
+                            {
+                                "kind": getattr(getattr(a, "assertion", None), "kind", ""),
+                                "target": getattr(getattr(a, "assertion", None), "target", None),
+                                "expected": str(a.assertion.expected)
+                                if getattr(getattr(a, "assertion", None), "expected", None) is not None
+                                else None,
+                                "passed": bool(getattr(a, "passed", False)),
+                                "actual": str(a.actual) if getattr(a, "actual", None) is not None else None,
+                                "message": getattr(a, "message", ""),
+                            }
+                        )
+
+                    log_execution_step(
+                        execution_id=execution_id,
+                        step_number=step_num,
+                        action_type=action_type,
+                        status=step_res.status,
+                        duration_ms=step_res.duration_ms,
+                        selector_used=step_res.selector_used,
+                        healed_from=step_res.healed_from,
+                        error=step_res.error,
+                        screenshot_path=screenshot,
+                        visual_diff=step_res.visual_diff.model_dump(mode="json")
+                        if step_res.visual_diff
+                        else None,
+                        assertions=assertions_data,
+                    )
+
+                    prefix = f"[Attempt {attempt}] " if total_attempts > 1 else ""
+                    log_entry = f"{prefix}Step {step_num}/{tot_steps} [{action_type}]: {step_res.status.upper()} ({step_res.duration_ms:.1f}ms)"
+                    if step_res.healed_from:
+                        log_entry += f" [HEALED from '{step_res.healed_from}']"
+                    if step_res.error:
+                        log_entry += f" - Error: {step_res.error}"
+                    for ad in assertions_data:
+                        ast_status = "PASS" if ad["passed"] else "FAIL"
+                        log_entry += f" | Assert [{ad['kind']}]: {ast_status}"
+                    overall_logs.append(log_entry)
+
+                    await broadcast_execution_event(
+                        execution_id=execution_id,
+                        event_type="step_progress",
+                        data={
+                            "attempt": attempt,
+                            "step_number": step_num,
+                            "total_steps": tot_steps,
+                            "action_type": action_type,
+                            "status": step_res.status,
+                            "duration_ms": step_res.duration_ms,
+                            "selector_used": step_res.selector_used,
+                            "healed_from": step_res.healed_from,
+                            "error": step_res.error,
+                            "screenshot_path": screenshot,
+                            "assertions": assertions_data,
+                            "log": log_entry,
+                        },
+                    )
+
+                att_start = datetime.now()
+                try:
+                    engine = ReplayEngine(
+                        testcase=testcase,
+                        browser_type=browser,
+                        headless=not headed,
+                        heal=heal,
+                        assertions_enabled=assertions,
+                        visual_diff=visual_diff,
+                        diff_threshold=diff_threshold,
+                        output_dir=output_dir,
+                        testcase_dir=testcase_dir,
+                        step_callback=_step_callback,
+                    )
+                    replay_res: ReplayResult = await engine.run()
+                    att_finish = datetime.now()
+                    att_duration = (att_finish - att_start).total_seconds() * 1000.0
+
+                    passed_count = sum(1 for s in replay_res.steps if s.status == "passed")
+                    failed_count = sum(1 for s in replay_res.steps if s.status in ("failed", "error"))
+                    total_steps = len(replay_res.steps)
+                    exit_code = replay_res.exit_code
+
+                    first_err = next((s.error for s in replay_res.steps if s.error), None)
+                    first_f_step = next((s.number for s in replay_res.steps if s.status in ("failed", "error")), None)
+                    first_f_sel = next((s.selector_used for s in replay_res.steps if s.status in ("failed", "error")), None)
+
+                    if first_err:
+                        last_error_message = first_err
+                    if first_f_step is not None:
+                        last_failure_step = first_f_step
+                    if first_f_sel is not None:
+                        last_failure_selector = first_f_sel
+
+                    env_err = is_browser_env_error(first_err)
+                    if env_err and "browser binary missing" not in (first_err or "").lower():
+                        first_err = f"Browser binary missing for '{browser}': Please run 'playwright install {browser}' ({first_err})"
+                        last_error_message = first_err
+
+                    att_status = "passed" if replay_res.status == "passed" else ("error" if env_err else "failed")
+
+                    # Record attempt permanently in database
+                    record_execution_attempt(
+                        execution_id=execution_id,
+                        attempt_number=attempt,
+                        status=att_status,
+                        duration_ms=att_duration,
+                        error_message=first_err,
+                        failed_step=first_f_step,
+                        failed_selector=first_f_sel,
+                        report_path=str(output_dir),
+                    )
+                    attempt_history.append({
+                        "attempt_number": attempt,
+                        "status": att_status,
+                        "duration_ms": att_duration,
+                        "error_message": first_err,
+                        "failed_step": first_f_step,
+                        "failed_selector": first_f_sel,
+                        "report_path": str(output_dir),
+                    })
+
+                    if replay_res.status == "passed":
+                        final_status = "passed" if attempt == 1 else "flaky"
+                        break
+                    elif env_err:
+                        # Environment error: do NOT retry
+                        final_status = "error"
+                        break
+                    else:
+                        if attempt < total_attempts:
+                            await asyncio.sleep(0.2)
+                            continue
+                        else:
+                            final_status = "failed"
+                            break
+
+                except asyncio.CancelledError:
+                    final_status = "cancelled"
+                    raise
+                except Exception as exc:
+                    att_finish = datetime.now()
+                    att_duration = (att_finish - att_start).total_seconds() * 1000.0
+                    err_str = str(exc)
+                    last_error_message = err_str
+                    env_err = is_browser_env_error(err_str)
+                    if env_err and "browser binary missing" not in err_str.lower():
+                        err_str = f"Browser binary missing for '{browser}': Please run 'playwright install {browser}' ({err_str})"
+                        last_error_message = err_str
+
+                    att_status = "error"
+                    record_execution_attempt(
+                        execution_id=execution_id,
+                        attempt_number=attempt,
+                        status=att_status,
+                        duration_ms=att_duration,
+                        error_message=err_str,
+                        report_path=str(output_dir),
+                    )
+                    attempt_history.append({
+                        "attempt_number": attempt,
+                        "status": att_status,
+                        "duration_ms": att_duration,
+                        "error_message": err_str,
+                        "report_path": str(output_dir),
+                    })
+
+                    if env_err or attempt >= total_attempts:
+                        final_status = att_status
+                        break
+                    else:
+                        await asyncio.sleep(0.2)
+                        continue
+
             finish_time = datetime.now()
-            duration_ms = (finish_time - start_time).total_seconds() * 1000.0
-
-            passed_count = sum(1 for s in replay_res.steps if s.status == "passed")
-            failed_count = sum(1 for s in replay_res.steps if s.status in ("failed", "error"))
-
-            # Determine final status
-            final_status = replay_res.status
+            duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
 
             update_execution_run_status(
                 execution_id=execution_id,
@@ -234,31 +390,60 @@ class ExecutionOrchestrator:
                 duration_ms=duration_ms,
                 passed_steps=passed_count,
                 failed_steps=failed_count,
-                total_steps=len(replay_res.steps),
-                exit_code=replay_res.exit_code,
-                report_path=str(output_dir),
-                logs=logs,
+                total_steps=total_steps,
+                exit_code=exit_code,
+                error_message=last_error_message,
+                report_path=str(last_output_dir) if last_output_dir else None,
+                logs=overall_logs,
+                attempt_count=len(attempt_history),
+                retry_history=attempt_history,
+                failure_step=last_failure_step,
+                failure_selector=last_failure_selector,
             )
 
             await broadcast_execution_event(
                 execution_id=execution_id,
-                event_type="execution_completed",
+                event_type="execution_completed" if final_status in ("passed", "flaky") else "execution_failed",
                 data={
                     "status": final_status,
                     "duration_ms": duration_ms,
                     "passed_steps": passed_count,
                     "failed_steps": failed_count,
-                    "total_steps": len(replay_res.steps),
-                    "exit_code": replay_res.exit_code,
-                    "logs": logs,
+                    "total_steps": total_steps,
+                    "exit_code": exit_code,
+                    "attempt_count": len(attempt_history),
+                    "retry_history": attempt_history,
+                    "failure_step": last_failure_step,
+                    "failure_selector": last_failure_selector,
+                    "error_message": last_error_message,
+                    "logs": overall_logs,
                 },
             )
+        except asyncio.CancelledError:
+            finish_time = datetime.now()
+            duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
+            update_execution_run_status(
+                execution_id=execution_id,
+                status="cancelled",
+                finished_at=finish_time.isoformat(),
+                duration_ms=duration_ms,
+                error_message="Execution cancelled.",
+                attempt_count=len(attempt_history),
+                retry_history=attempt_history,
+                logs=overall_logs,
+            )
+            await broadcast_execution_event(
+                execution_id=execution_id,
+                event_type="execution_cancelled",
+                data={"status": "cancelled", "logs": overall_logs},
+            )
+            raise
         except Exception as exc:
             logger.exception("Execution failed for %s: %s", execution_id, exc)
             finish_time = datetime.now()
-            duration_ms = (finish_time - start_time).total_seconds() * 1000.0
+            duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
             error_str = str(exc)
-            logs.append(f"Execution Error: {error_str}")
+            overall_logs.append(f"Execution Error: {error_str}")
 
             update_execution_run_status(
                 execution_id=execution_id,
@@ -266,12 +451,14 @@ class ExecutionOrchestrator:
                 finished_at=finish_time.isoformat(),
                 duration_ms=duration_ms,
                 error_message=error_str,
-                logs=logs,
+                logs=overall_logs,
+                attempt_count=len(attempt_history),
+                retry_history=attempt_history,
             )
             await broadcast_execution_event(
                 execution_id=execution_id,
                 event_type="execution_failed",
-                data={"status": "error", "error": error_str, "logs": logs},
+                data={"status": "error", "error": error_str, "logs": overall_logs},
             )
         finally:
             self.active_tasks.pop(execution_id, None)
@@ -307,10 +494,12 @@ class ExecutionOrchestrator:
         assertions: bool = True,
         visual_diff: bool = False,
         diff_threshold: float = 0.1,
+        retries: int = 2,
     ) -> dict[str, Any]:
         """Launch parallel or sequential execution of multiple test cases via a bounded worker pool."""
         c = 2 if concurrency is None else int(concurrency)
         bounded_concurrency = max(1, min(8, c))
+        bounded_retries = max(0, min(3, int(retries)))
 
         # Deduplicate testcase_ids preserving original sequence order
         seen = set()
@@ -360,6 +549,7 @@ class ExecutionOrchestrator:
                 visual_diff=visual_diff,
                 batch_id=batch_id,
                 concurrency=bounded_concurrency,
+                retries=bounded_retries,
             )
             queued_items.append((tc_file, testcase, run_rec))
             run_records.append(run_rec)
@@ -380,6 +570,7 @@ class ExecutionOrchestrator:
             "passed_tests": 0,
             "failed_tests": 0,
             "cancelled_tests": 0,
+            "flaky_tests": 0,
             "running_testcases": set(),
             "start_time": datetime.now(),
         }
@@ -395,6 +586,7 @@ class ExecutionOrchestrator:
                 assertions=assertions,
                 visual_diff=visual_diff,
                 diff_threshold=diff_threshold,
+                retries=bounded_retries,
             )
         )
         self.active_tasks[batch_id] = coordinator_task
@@ -409,6 +601,7 @@ class ExecutionOrchestrator:
                 "suite_id": suite_id,
                 "total_tests": len(items_to_run),
                 "concurrency": bounded_concurrency,
+                "retries": bounded_retries,
                 "status": "running",
                 "runs": run_records,
             },
@@ -426,6 +619,7 @@ class ExecutionOrchestrator:
         assertions: bool,
         visual_diff: bool,
         diff_threshold: float,
+        retries: int = 2,
     ) -> None:
         """Coordinates concurrent workers, tracks overall batch progress, and finalizes status."""
         concurrency = batch_ctx["concurrency"]
@@ -445,6 +639,7 @@ class ExecutionOrchestrator:
                     assertions=assertions,
                     visual_diff=visual_diff,
                     diff_threshold=diff_threshold,
+                    retries=retries,
                 )
             )
             batch_ctx["active_worker_tasks"][worker_id] = w_task
@@ -469,6 +664,7 @@ class ExecutionOrchestrator:
                 passed_tests=batch_ctx["passed_tests"],
                 failed_tests=batch_ctx["failed_tests"],
                 cancelled_tests=batch_ctx["cancelled_tests"],
+                flaky_tests=batch_ctx.get("flaky_tests", 0),
                 finished_at=finish_time.isoformat(),
                 duration_ms=duration_ms,
             )
@@ -483,6 +679,7 @@ class ExecutionOrchestrator:
                     "passed_tests": batch_ctx["passed_tests"],
                     "failed_tests": batch_ctx["failed_tests"],
                     "cancelled_tests": batch_ctx["cancelled_tests"],
+                    "flaky_tests": batch_ctx.get("flaky_tests", 0),
                     "duration_ms": duration_ms,
                 },
             )
@@ -501,9 +698,11 @@ class ExecutionOrchestrator:
         assertions: bool,
         visual_diff: bool,
         diff_threshold: float,
+        retries: int = 2,
     ) -> None:
-        """Worker loop consuming items from the queue with full browser context isolation."""
+        """Worker loop consuming items from the queue with full browser context isolation and intelligent retry."""
         queue: asyncio.Queue = batch_ctx["queue"]
+        total_attempts = 1 + max(0, min(3, int(retries)))
 
         while not queue.empty() and not batch_ctx.get("cancelled", False):
             try:
@@ -546,115 +745,266 @@ class ExecutionOrchestrator:
                 },
             )
 
-            # Strict context & artifact isolation: dedicated directory per worker and run
-            ts_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            output_dir = tc_file.parent / "replay_runs" / f"{batch_id}_{worker_id}_{ts_str}"
-            output_dir.mkdir(parents=True, exist_ok=True)
+            overall_logs: list[str] = []
+            attempt_history: list[dict[str, Any]] = []
+            overall_start_time = datetime.now()
+            final_status = "failed"
+            last_failure_step: int | None = None
+            last_failure_selector: str | None = None
+            last_error_message: str | None = None
+            last_output_dir: Path | None = None
+            passed_count = 0
+            failed_count = 0
+            total_steps = len(testcase.steps)
+            exit_code = 0
 
-            logs: list[str] = []
-
-            async def _step_callback(step_res: StepResult, step_num: int, total_steps: int) -> None:
-                curr_step = next((s for s in testcase.steps if s.number == step_num), None)
-                action_type = curr_step.action_type if curr_step else None
-                screenshot = (
-                    str(step_res.screenshot)
-                    if getattr(step_res, "screenshot", None)
-                    else (str(getattr(step_res, "screenshot_path")) if getattr(step_res, "screenshot_path", None) else None)
-                )
-
-                assertions_data = []
-                for a in getattr(step_res, "assertions", []):
-                    assertions_data.append(
-                        {
-                            "kind": getattr(getattr(a, "assertion", None), "kind", ""),
-                            "target": getattr(getattr(a, "assertion", None), "target", None),
-                            "expected": str(a.assertion.expected)
-                            if getattr(getattr(a, "assertion", None), "expected", None) is not None
-                            else None,
-                            "passed": bool(getattr(a, "passed", False)),
-                            "actual": str(a.actual) if getattr(a, "actual", None) is not None else None,
-                            "message": getattr(a, "message", ""),
-                        }
-                    )
-
-                log_execution_step(
-                    execution_id=execution_id,
-                    step_number=step_num,
-                    action_type=action_type,
-                    status=step_res.status,
-                    duration_ms=step_res.duration_ms,
-                    selector_used=step_res.selector_used,
-                    healed_from=step_res.healed_from,
-                    error=step_res.error,
-                    screenshot_path=screenshot,
-                    visual_diff=step_res.visual_diff.model_dump(mode="json")
-                    if step_res.visual_diff
-                    else None,
-                    assertions=assertions_data,
-                )
-
-                log_entry = f"[{worker_id}] Step {step_num}/{total_steps} [{action_type}]: {step_res.status.upper()} ({step_res.duration_ms:.1f}ms)"
-                if step_res.healed_from:
-                    log_entry += f" [HEALED from '{step_res.healed_from}']"
-                if step_res.error:
-                    log_entry += f" - Error: {step_res.error}"
-                for ad in assertions_data:
-                    ast_status = "PASS" if ad["passed"] else "FAIL"
-                    log_entry += f" | Assert [{ad['kind']}]: {ast_status}"
-                logs.append(log_entry)
-
-                step_data = {
-                    "batch_id": batch_id,
-                    "worker_id": worker_id,
-                    "execution_id": execution_id,
-                    "testcase_id": testcase.id,
-                    "step_number": step_num,
-                    "total_steps": total_steps,
-                    "action_type": action_type,
-                    "status": step_res.status,
-                    "duration_ms": step_res.duration_ms,
-                    "selector_used": step_res.selector_used,
-                    "healed_from": step_res.healed_from,
-                    "error": step_res.error,
-                    "screenshot_path": screenshot,
-                    "assertions": assertions_data,
-                    "log": log_entry,
-                }
-                await broadcast_execution_event(
-                    execution_id=execution_id,
-                    event_type="step_progress",
-                    data=step_data,
-                )
-                await broadcast_batch_event(
-                    batch_id=batch_id,
-                    event_type="worker_step_progress",
-                    data=step_data,
-                )
-
-            start_time = datetime.now()
             try:
-                engine = ReplayEngine(
-                    testcase=testcase,
-                    browser_type=browser,
-                    headless=not headed,
-                    heal=heal,
-                    assertions_enabled=assertions,
-                    visual_diff=visual_diff,
-                    diff_threshold=diff_threshold,
-                    output_dir=output_dir,
-                    testcase_dir=tc_file.parent,
-                    step_callback=_step_callback,
-                )
-                replay_res: ReplayResult = await engine.run()
-                finish_time = datetime.now()
-                duration_ms = (finish_time - start_time).total_seconds() * 1000.0
+                for attempt in range(1, total_attempts + 1):
+                    if batch_ctx.get("cancelled", False):
+                        final_status = "cancelled"
+                        break
 
-                passed_count = sum(1 for s in replay_res.steps if s.status == "passed")
-                failed_count = sum(1 for s in replay_res.steps if s.status in ("failed", "error"))
-                final_status = replay_res.status
+                    if attempt > 1:
+                        overall_logs.append(f"[{worker_id}] --- Retrying test (Attempt {attempt}/{total_attempts}) ---")
+                        update_execution_run_status(
+                            execution_id=execution_id,
+                            status="running",
+                            attempt_count=attempt,
+                            retry_history=attempt_history,
+                            failure_step=last_failure_step,
+                            failure_selector=last_failure_selector,
+                            error_message=last_error_message,
+                            worker_id=worker_id,
+                            batch_id=batch_id,
+                        )
+                        retry_event_data = {
+                            "batch_id": batch_id,
+                            "worker_id": worker_id,
+                            "execution_id": execution_id,
+                            "testcase_id": testcase.id,
+                            "attempt": attempt,
+                            "max_retries": retries,
+                            "previous_error": last_error_message,
+                        }
+                        await broadcast_execution_event(
+                            execution_id=execution_id,
+                            event_type="retry_attempt_started",
+                            data=retry_event_data,
+                        )
+                        await broadcast_batch_event(
+                            batch_id=batch_id,
+                            event_type="worker_retry_started",
+                            data=retry_event_data,
+                        )
+
+                    # Strict context & artifact isolation: dedicated directory per worker and attempt
+                    ts_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                    output_dir = tc_file.parent / "replay_runs" / f"{batch_id}_{worker_id}_att{attempt}_{ts_str}"
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    last_output_dir = output_dir
+
+                    async def _step_callback(step_res: StepResult, step_num: int, tot_steps: int) -> None:
+                        curr_step = next((s for s in testcase.steps if s.number == step_num), None)
+                        action_type = curr_step.action_type if curr_step else None
+                        screenshot = (
+                            str(step_res.screenshot)
+                            if getattr(step_res, "screenshot", None)
+                            else (str(getattr(step_res, "screenshot_path")) if getattr(step_res, "screenshot_path", None) else None)
+                        )
+
+                        assertions_data = []
+                        for a in getattr(step_res, "assertions", []):
+                            assertions_data.append(
+                                {
+                                    "kind": getattr(getattr(a, "assertion", None), "kind", ""),
+                                    "target": getattr(getattr(a, "assertion", None), "target", None),
+                                    "expected": str(a.assertion.expected)
+                                    if getattr(getattr(a, "assertion", None), "expected", None) is not None
+                                    else None,
+                                    "passed": bool(getattr(a, "passed", False)),
+                                    "actual": str(a.actual) if getattr(a, "actual", None) is not None else None,
+                                    "message": getattr(a, "message", ""),
+                                }
+                            )
+
+                        log_execution_step(
+                            execution_id=execution_id,
+                            step_number=step_num,
+                            action_type=action_type,
+                            status=step_res.status,
+                            duration_ms=step_res.duration_ms,
+                            selector_used=step_res.selector_used,
+                            healed_from=step_res.healed_from,
+                            error=step_res.error,
+                            screenshot_path=screenshot,
+                            visual_diff=step_res.visual_diff.model_dump(mode="json")
+                            if step_res.visual_diff
+                            else None,
+                            assertions=assertions_data,
+                        )
+
+                        prefix = f"[{worker_id}][Att {attempt}] " if total_attempts > 1 else f"[{worker_id}] "
+                        log_entry = f"{prefix}Step {step_num}/{tot_steps} [{action_type}]: {step_res.status.upper()} ({step_res.duration_ms:.1f}ms)"
+                        if step_res.healed_from:
+                            log_entry += f" [HEALED from '{step_res.healed_from}']"
+                        if step_res.error:
+                            log_entry += f" - Error: {step_res.error}"
+                        for ad in assertions_data:
+                            ast_status = "PASS" if ad["passed"] else "FAIL"
+                            log_entry += f" | Assert [{ad['kind']}]: {ast_status}"
+                        overall_logs.append(log_entry)
+
+                        step_data = {
+                            "batch_id": batch_id,
+                            "worker_id": worker_id,
+                            "execution_id": execution_id,
+                            "testcase_id": testcase.id,
+                            "attempt": attempt,
+                            "step_number": step_num,
+                            "total_steps": tot_steps,
+                            "action_type": action_type,
+                            "status": step_res.status,
+                            "duration_ms": step_res.duration_ms,
+                            "selector_used": step_res.selector_used,
+                            "healed_from": step_res.healed_from,
+                            "error": step_res.error,
+                            "screenshot_path": screenshot,
+                            "assertions": assertions_data,
+                            "log": log_entry,
+                        }
+                        await broadcast_execution_event(
+                            execution_id=execution_id,
+                            event_type="step_progress",
+                            data=step_data,
+                        )
+                        await broadcast_batch_event(
+                            batch_id=batch_id,
+                            event_type="worker_step_progress",
+                            data=step_data,
+                        )
+
+                    att_start = datetime.now()
+                    try:
+                        engine = ReplayEngine(
+                            testcase=testcase,
+                            browser_type=browser,
+                            headless=not headed,
+                            heal=heal,
+                            assertions_enabled=assertions,
+                            visual_diff=visual_diff,
+                            diff_threshold=diff_threshold,
+                            output_dir=output_dir,
+                            testcase_dir=tc_file.parent,
+                            step_callback=_step_callback,
+                        )
+                        replay_res: ReplayResult = await engine.run()
+                        att_finish = datetime.now()
+                        att_duration = (att_finish - att_start).total_seconds() * 1000.0
+
+                        passed_count = sum(1 for s in replay_res.steps if s.status == "passed")
+                        failed_count = sum(1 for s in replay_res.steps if s.status in ("failed", "error"))
+                        total_steps = len(replay_res.steps)
+                        exit_code = replay_res.exit_code
+
+                        first_err = next((s.error for s in replay_res.steps if s.error), None)
+                        first_f_step = next((s.number for s in replay_res.steps if s.status in ("failed", "error")), None)
+                        first_f_sel = next((s.selector_used for s in replay_res.steps if s.status in ("failed", "error")), None)
+
+                        if first_err:
+                            last_error_message = first_err
+                        if first_f_step is not None:
+                            last_failure_step = first_f_step
+                        if first_f_sel is not None:
+                            last_failure_selector = first_f_sel
+
+                        env_err = is_browser_env_error(first_err)
+                        if env_err and "browser binary missing" not in (first_err or "").lower():
+                            first_err = f"Browser binary missing for '{browser}': Please run 'playwright install {browser}' ({first_err})"
+                            last_error_message = first_err
+
+                        att_status = "passed" if replay_res.status == "passed" else ("error" if env_err else "failed")
+
+                        record_execution_attempt(
+                            execution_id=execution_id,
+                            attempt_number=attempt,
+                            status=att_status,
+                            duration_ms=att_duration,
+                            error_message=first_err,
+                            failed_step=first_f_step,
+                            failed_selector=first_f_sel,
+                            report_path=str(output_dir),
+                        )
+                        attempt_history.append({
+                            "attempt_number": attempt,
+                            "status": att_status,
+                            "duration_ms": att_duration,
+                            "error_message": first_err,
+                            "failed_step": first_f_step,
+                            "failed_selector": first_f_sel,
+                            "report_path": str(output_dir),
+                        })
+
+                        if replay_res.status == "passed":
+                            final_status = "passed" if attempt == 1 else "flaky"
+                            break
+                        elif env_err:
+                            final_status = "error"
+                            break
+                        else:
+                            if attempt < total_attempts:
+                                await asyncio.sleep(0.2)
+                                continue
+                            else:
+                                final_status = "failed"
+                                break
+
+                    except asyncio.CancelledError:
+                        final_status = "cancelled"
+                        raise
+                    except Exception as exc:
+                        att_finish = datetime.now()
+                        att_duration = (att_finish - att_start).total_seconds() * 1000.0
+                        err_str = str(exc)
+                        last_error_message = err_str
+                        env_err = is_browser_env_error(err_str)
+                        if env_err and "browser binary missing" not in err_str.lower():
+                            err_str = f"Browser binary missing for '{browser}': Please run 'playwright install {browser}' ({err_str})"
+                            last_error_message = err_str
+
+                        att_status = "error"
+                        record_execution_attempt(
+                            execution_id=execution_id,
+                            attempt_number=attempt,
+                            status=att_status,
+                            duration_ms=att_duration,
+                            error_message=err_str,
+                            report_path=str(output_dir),
+                        )
+                        attempt_history.append({
+                            "attempt_number": attempt,
+                            "status": att_status,
+                            "duration_ms": att_duration,
+                            "error_message": err_str,
+                            "report_path": str(output_dir),
+                        })
+
+                        if env_err or attempt >= total_attempts:
+                            final_status = att_status
+                            break
+                        else:
+                            await asyncio.sleep(0.2)
+                            continue
+
+                finish_time = datetime.now()
+                duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
 
                 if final_status == "passed":
                     batch_ctx["passed_tests"] += 1
+                elif final_status == "flaky":
+                    batch_ctx["passed_tests"] += 1
+                    batch_ctx["flaky_tests"] += 1
+                elif final_status == "cancelled":
+                    batch_ctx["cancelled_tests"] += 1
                 else:
                     batch_ctx["failed_tests"] += 1
 
@@ -665,27 +1015,34 @@ class ExecutionOrchestrator:
                     duration_ms=duration_ms,
                     passed_steps=passed_count,
                     failed_steps=failed_count,
-                    total_steps=len(replay_res.steps),
-                    exit_code=replay_res.exit_code,
-                    report_path=str(output_dir),
-                    logs=logs,
+                    total_steps=total_steps,
+                    exit_code=exit_code,
+                    error_message=last_error_message,
+                    report_path=str(last_output_dir) if last_output_dir else None,
+                    logs=overall_logs,
                     worker_id=worker_id,
                     batch_id=batch_id,
+                    attempt_count=len(attempt_history),
+                    retry_history=attempt_history,
+                    failure_step=last_failure_step,
+                    failure_selector=last_failure_selector,
                 )
 
                 await broadcast_execution_event(
                     execution_id=execution_id,
-                    event_type="execution_completed",
+                    event_type="execution_completed" if final_status in ("passed", "flaky") else "execution_failed",
                     data={
                         "status": final_status,
                         "duration_ms": duration_ms,
                         "passed_steps": passed_count,
                         "failed_steps": failed_count,
-                        "total_steps": len(replay_res.steps),
-                        "exit_code": replay_res.exit_code,
-                        "logs": logs,
+                        "total_steps": total_steps,
+                        "exit_code": exit_code,
+                        "logs": overall_logs,
                         "worker_id": worker_id,
                         "batch_id": batch_id,
+                        "attempt_count": len(attempt_history),
+                        "retry_history": attempt_history,
                     },
                 )
                 await broadcast_batch_event(
@@ -700,11 +1057,12 @@ class ExecutionOrchestrator:
                         "duration_ms": duration_ms,
                         "passed_steps": passed_count,
                         "failed_steps": failed_count,
+                        "attempt_count": len(attempt_history),
                     },
                 )
             except asyncio.CancelledError:
                 finish_time = datetime.now()
-                duration_ms = (finish_time - start_time).total_seconds() * 1000.0
+                duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
                 batch_ctx["cancelled_tests"] += 1
                 update_execution_run_status(
                     execution_id=execution_id,
@@ -714,25 +1072,29 @@ class ExecutionOrchestrator:
                     error_message="Execution cancelled.",
                     worker_id=worker_id,
                     batch_id=batch_id,
+                    attempt_count=len(attempt_history),
+                    retry_history=attempt_history,
                 )
                 raise
             except Exception as exc:
                 # Exception isolation: failure in one test does not terminate sibling workers
                 logger.exception("Worker %s failed on testcase %s: %s", worker_id, testcase.id, exc)
                 finish_time = datetime.now()
-                duration_ms = (finish_time - start_time).total_seconds() * 1000.0
+                duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
                 batch_ctx["failed_tests"] += 1
                 err_msg = str(exc)
-                logs.append(f"Worker Error: {err_msg}")
+                overall_logs.append(f"Worker Error: {err_msg}")
                 update_execution_run_status(
                     execution_id=execution_id,
                     status="error",
                     finished_at=finish_time.isoformat(),
                     duration_ms=duration_ms,
                     error_message=err_msg,
-                    logs=logs,
+                    logs=overall_logs,
                     worker_id=worker_id,
                     batch_id=batch_id,
+                    attempt_count=len(attempt_history),
+                    retry_history=attempt_history,
                 )
                 await broadcast_execution_event(
                     execution_id=execution_id,
@@ -740,7 +1102,7 @@ class ExecutionOrchestrator:
                     data={
                         "status": "error",
                         "error": err_msg,
-                        "logs": logs,
+                        "logs": overall_logs,
                         "worker_id": worker_id,
                         "batch_id": batch_id,
                     },
@@ -775,6 +1137,7 @@ class ExecutionOrchestrator:
                         "passed_tests": batch_ctx["passed_tests"],
                         "failed_tests": batch_ctx["failed_tests"],
                         "cancelled_tests": batch_ctx["cancelled_tests"],
+                        "flaky_tests": batch_ctx.get("flaky_tests", 0),
                         "remaining_queue": queue.qsize(),
                     },
                 )
@@ -865,10 +1228,12 @@ class ExecutionOrchestrator:
         assertions: bool = True,
         visual_diff: bool = False,
         diff_threshold: float = 0.1,
+        retries: int = 2,
     ) -> dict[str, Any]:
         """Launch cross-browser matrix execution of test cases across configured browser targets."""
         c = 2 if concurrency is None else int(concurrency)
         bounded_concurrency = max(1, min(8, c))
+        bounded_retries = max(0, min(3, int(retries)))
 
         # Validate and normalize browser targets
         valid_browsers = ["chromium", "firefox", "webkit"]
@@ -930,6 +1295,7 @@ class ExecutionOrchestrator:
                     visual_diff=visual_diff,
                     matrix_id=matrix_id,
                     concurrency=bounded_concurrency,
+                    retries=bounded_retries,
                 )
                 queued_items.append((tc_file, testcase, b, run_rec))
                 run_records.append(run_rec)
@@ -951,6 +1317,7 @@ class ExecutionOrchestrator:
             "passed_executions": 0,
             "failed_executions": 0,
             "cancelled_executions": 0,
+            "flaky_executions": 0,
             "running_keys": set(),
             "start_time": datetime.now(),
         }
@@ -965,6 +1332,7 @@ class ExecutionOrchestrator:
                 assertions=assertions,
                 visual_diff=visual_diff,
                 diff_threshold=diff_threshold,
+                retries=bounded_retries,
             )
         )
         self.active_tasks[matrix_id] = coordinator_task
@@ -980,6 +1348,7 @@ class ExecutionOrchestrator:
                 "browsers": target_browsers,
                 "total_executions": total_executions,
                 "concurrency": bounded_concurrency,
+                "retries": bounded_retries,
                 "status": "running",
                 "runs": run_records,
             },
@@ -996,6 +1365,7 @@ class ExecutionOrchestrator:
         assertions: bool,
         visual_diff: bool,
         diff_threshold: float,
+        retries: int = 2,
     ) -> None:
         """Coordinates concurrent workers for matrix execution and calculates cross-browser divergence."""
         concurrency = matrix_ctx["concurrency"]
@@ -1014,6 +1384,7 @@ class ExecutionOrchestrator:
                     assertions=assertions,
                     visual_diff=visual_diff,
                     diff_threshold=diff_threshold,
+                    retries=retries,
                 )
             )
             matrix_ctx["active_worker_tasks"][worker_id] = w_task
@@ -1046,6 +1417,7 @@ class ExecutionOrchestrator:
                 passed_executions=matrix_ctx["passed_executions"],
                 failed_executions=matrix_ctx["failed_executions"],
                 cancelled_executions=matrix_ctx["cancelled_executions"],
+                flaky_executions=matrix_ctx.get("flaky_executions", 0),
                 divergence_count=divergence_count,
                 finished_at=finish_time.isoformat(),
                 duration_ms=duration_ms,
@@ -1063,6 +1435,7 @@ class ExecutionOrchestrator:
                     "passed_executions": matrix_ctx["passed_executions"],
                     "failed_executions": matrix_ctx["failed_executions"],
                     "cancelled_executions": matrix_ctx["cancelled_executions"],
+                    "flaky_executions": matrix_ctx.get("flaky_executions", 0),
                     "divergence_count": divergence_count,
                     "cross_browser_parity_pct": final_matrix.get("cross_browser_parity_pct", 100.0),
                     "browser_pass_rates": final_matrix.get("browser_pass_rates", {}),
@@ -1083,9 +1456,11 @@ class ExecutionOrchestrator:
         assertions: bool,
         visual_diff: bool,
         diff_threshold: float,
+        retries: int = 2,
     ) -> None:
-        """Worker loop executing (testcase, browser) tasks with browser-specific directory isolation."""
+        """Worker loop executing (testcase, browser) tasks with browser-specific directory isolation and intelligent retry."""
         queue: asyncio.Queue = matrix_ctx["queue"]
+        total_attempts = 1 + max(0, min(3, int(retries)))
 
         while not queue.empty() and not matrix_ctx.get("cancelled", False):
             try:
@@ -1130,131 +1505,268 @@ class ExecutionOrchestrator:
                 },
             )
 
-            # Strict context & artifact isolation: dedicated directory per matrix, browser, and worker run
-            ts_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            output_dir = tc_file.parent / "replay_runs" / f"{matrix_id}_{browser}_{worker_id}_{ts_str}"
-            output_dir.mkdir(parents=True, exist_ok=True)
+            overall_logs: list[str] = []
+            attempt_history: list[dict[str, Any]] = []
+            overall_start_time = datetime.now()
+            final_status = "failed"
+            last_failure_step: int | None = None
+            last_failure_selector: str | None = None
+            last_error_message: str | None = None
+            last_output_dir: Path | None = None
+            passed_count = 0
+            failed_count = 0
+            total_steps = len(testcase.steps)
+            exit_code = 0
 
-            logs: list[str] = []
-
-            async def _step_callback(step_res: StepResult, step_num: int, total_steps: int) -> None:
-                curr_step = next((s for s in testcase.steps if s.number == step_num), None)
-                action_type = curr_step.action_type if curr_step else None
-                screenshot = (
-                    str(step_res.screenshot)
-                    if getattr(step_res, "screenshot", None)
-                    else (str(getattr(step_res, "screenshot_path")) if getattr(step_res, "screenshot_path", None) else None)
-                )
-
-                assertions_data = []
-                for a in getattr(step_res, "assertions", []):
-                    assertions_data.append(
-                        {
-                            "kind": getattr(getattr(a, "assertion", None), "kind", ""),
-                            "target": getattr(getattr(a, "assertion", None), "target", None),
-                            "expected": str(a.assertion.expected)
-                            if getattr(getattr(a, "assertion", None), "expected", None) is not None
-                            else None,
-                            "passed": bool(getattr(a, "passed", False)),
-                            "actual": str(a.actual) if getattr(a, "actual", None) is not None else None,
-                            "message": getattr(a, "message", ""),
-                        }
-                    )
-
-                log_execution_step(
-                    execution_id=execution_id,
-                    step_number=step_num,
-                    action_type=action_type,
-                    status=step_res.status,
-                    duration_ms=step_res.duration_ms,
-                    selector_used=step_res.selector_used,
-                    healed_from=step_res.healed_from,
-                    error=step_res.error,
-                    screenshot_path=screenshot,
-                    visual_diff=step_res.visual_diff.model_dump(mode="json")
-                    if step_res.visual_diff
-                    else None,
-                    assertions=assertions_data,
-                )
-
-                log_entry = f"[{worker_id}][{browser}] Step {step_num}/{total_steps} [{action_type}]: {step_res.status.upper()} ({step_res.duration_ms:.1f}ms)"
-                if step_res.healed_from:
-                    log_entry += f" [HEALED from '{step_res.healed_from}']"
-                if step_res.error:
-                    log_entry += f" - Error: {step_res.error}"
-                for ad in assertions_data:
-                    ast_status = "PASS" if ad["passed"] else "FAIL"
-                    log_entry += f" | Assert [{ad['kind']}]: {ast_status}"
-                logs.append(log_entry)
-
-                step_data = {
-                    "matrix_id": matrix_id,
-                    "worker_id": worker_id,
-                    "execution_id": execution_id,
-                    "testcase_id": testcase.id,
-                    "browser": browser,
-                    "step_number": step_num,
-                    "total_steps": total_steps,
-                    "action_type": action_type,
-                    "status": step_res.status,
-                    "duration_ms": step_res.duration_ms,
-                    "selector_used": step_res.selector_used,
-                    "healed_from": step_res.healed_from,
-                    "error": step_res.error,
-                    "screenshot_path": screenshot,
-                    "assertions": assertions_data,
-                    "log": log_entry,
-                }
-                await broadcast_execution_event(
-                    execution_id=execution_id,
-                    event_type="step_progress",
-                    data=step_data,
-                )
-                await broadcast_matrix_event(
-                    matrix_id=matrix_id,
-                    event_type="worker_step_progress",
-                    data=step_data,
-                )
-
-            start_time = datetime.now()
             try:
-                engine = ReplayEngine(
-                    testcase=testcase,
-                    browser_type=browser,
-                    headless=not headed,
-                    heal=heal,
-                    assertions_enabled=assertions,
-                    visual_diff=visual_diff,
-                    diff_threshold=diff_threshold,
-                    output_dir=output_dir,
-                    testcase_dir=tc_file.parent,
-                    step_callback=_step_callback,
-                )
-                replay_res: ReplayResult = await engine.run()
+                for attempt in range(1, total_attempts + 1):
+                    if matrix_ctx.get("cancelled", False):
+                        final_status = "cancelled"
+                        break
+
+                    if attempt > 1:
+                        overall_logs.append(f"[{worker_id}][{browser}] --- Retrying test (Attempt {attempt}/{total_attempts}) ---")
+                        update_execution_run_status(
+                            execution_id=execution_id,
+                            status="running",
+                            attempt_count=attempt,
+                            retry_history=attempt_history,
+                            failure_step=last_failure_step,
+                            failure_selector=last_failure_selector,
+                            error_message=last_error_message,
+                            worker_id=worker_id,
+                            matrix_id=matrix_id,
+                        )
+                        retry_event_data = {
+                            "matrix_id": matrix_id,
+                            "worker_id": worker_id,
+                            "execution_id": execution_id,
+                            "testcase_id": testcase.id,
+                            "browser": browser,
+                            "attempt": attempt,
+                            "max_retries": retries,
+                            "previous_error": last_error_message,
+                        }
+                        await broadcast_execution_event(
+                            execution_id=execution_id,
+                            event_type="retry_attempt_started",
+                            data=retry_event_data,
+                        )
+                        await broadcast_matrix_event(
+                            matrix_id=matrix_id,
+                            event_type="worker_retry_started",
+                            data=retry_event_data,
+                        )
+
+                    # Strict context & artifact isolation: dedicated directory per matrix, browser, worker and attempt
+                    ts_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                    output_dir = tc_file.parent / "replay_runs" / f"{matrix_id}_{browser}_{worker_id}_att{attempt}_{ts_str}"
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    last_output_dir = output_dir
+
+                    async def _step_callback(step_res: StepResult, step_num: int, tot_steps: int) -> None:
+                        curr_step = next((s for s in testcase.steps if s.number == step_num), None)
+                        action_type = curr_step.action_type if curr_step else None
+                        screenshot = (
+                            str(step_res.screenshot)
+                            if getattr(step_res, "screenshot", None)
+                            else (str(getattr(step_res, "screenshot_path")) if getattr(step_res, "screenshot_path", None) else None)
+                        )
+
+                        assertions_data = []
+                        for a in getattr(step_res, "assertions", []):
+                            assertions_data.append(
+                                {
+                                    "kind": getattr(getattr(a, "assertion", None), "kind", ""),
+                                    "target": getattr(getattr(a, "assertion", None), "target", None),
+                                    "expected": str(a.assertion.expected)
+                                    if getattr(getattr(a, "assertion", None), "expected", None) is not None
+                                    else None,
+                                    "passed": bool(getattr(a, "passed", False)),
+                                    "actual": str(a.actual) if getattr(a, "actual", None) is not None else None,
+                                    "message": getattr(a, "message", ""),
+                                }
+                            )
+
+                        log_execution_step(
+                            execution_id=execution_id,
+                            step_number=step_num,
+                            action_type=action_type,
+                            status=step_res.status,
+                            duration_ms=step_res.duration_ms,
+                            selector_used=step_res.selector_used,
+                            healed_from=step_res.healed_from,
+                            error=step_res.error,
+                            screenshot_path=screenshot,
+                            visual_diff=step_res.visual_diff.model_dump(mode="json")
+                            if step_res.visual_diff
+                            else None,
+                            assertions=assertions_data,
+                        )
+
+                        prefix = f"[{worker_id}][{browser}][Att {attempt}] " if total_attempts > 1 else f"[{worker_id}][{browser}] "
+                        log_entry = f"{prefix}Step {step_num}/{tot_steps} [{action_type}]: {step_res.status.upper()} ({step_res.duration_ms:.1f}ms)"
+                        if step_res.healed_from:
+                            log_entry += f" [HEALED from '{step_res.healed_from}']"
+                        if step_res.error:
+                            log_entry += f" - Error: {step_res.error}"
+                        for ad in assertions_data:
+                            ast_status = "PASS" if ad["passed"] else "FAIL"
+                            log_entry += f" | Assert [{ad['kind']}]: {ast_status}"
+                        overall_logs.append(log_entry)
+
+                        step_data = {
+                            "matrix_id": matrix_id,
+                            "worker_id": worker_id,
+                            "execution_id": execution_id,
+                            "testcase_id": testcase.id,
+                            "browser": browser,
+                            "attempt": attempt,
+                            "step_number": step_num,
+                            "total_steps": tot_steps,
+                            "action_type": action_type,
+                            "status": step_res.status,
+                            "duration_ms": step_res.duration_ms,
+                            "selector_used": step_res.selector_used,
+                            "healed_from": step_res.healed_from,
+                            "error": step_res.error,
+                            "screenshot_path": screenshot,
+                            "assertions": assertions_data,
+                            "log": log_entry,
+                        }
+                        await broadcast_execution_event(
+                            execution_id=execution_id,
+                            event_type="step_progress",
+                            data=step_data,
+                        )
+                        await broadcast_matrix_event(
+                            matrix_id=matrix_id,
+                            event_type="worker_step_progress",
+                            data=step_data,
+                        )
+
+                    att_start = datetime.now()
+                    try:
+                        engine = ReplayEngine(
+                            testcase=testcase,
+                            browser_type=browser,
+                            headless=not headed,
+                            heal=heal,
+                            assertions_enabled=assertions,
+                            visual_diff=visual_diff,
+                            diff_threshold=diff_threshold,
+                            output_dir=output_dir,
+                            testcase_dir=tc_file.parent,
+                            step_callback=_step_callback,
+                        )
+                        replay_res: ReplayResult = await engine.run()
+                        att_finish = datetime.now()
+                        att_duration = (att_finish - att_start).total_seconds() * 1000.0
+
+                        passed_count = sum(1 for s in replay_res.steps if s.status == "passed")
+                        failed_count = sum(1 for s in replay_res.steps if s.status in ("failed", "error"))
+                        total_steps = len(replay_res.steps)
+                        exit_code = replay_res.exit_code
+
+                        first_err = next((s.error for s in replay_res.steps if s.error), None)
+                        first_f_step = next((s.number for s in replay_res.steps if s.status in ("failed", "error")), None)
+                        first_f_sel = next((s.selector_used for s in replay_res.steps if s.status in ("failed", "error")), None)
+
+                        if first_err:
+                            last_error_message = first_err
+                        if first_f_step is not None:
+                            last_failure_step = first_f_step
+                        if first_f_sel is not None:
+                            last_failure_selector = first_f_sel
+
+                        env_err = is_browser_env_error(first_err)
+                        if env_err and "browser binary missing" not in (first_err or "").lower():
+                            first_err = f"Browser binary missing for '{browser}': Please run 'playwright install {browser}' ({first_err})"
+                            last_error_message = first_err
+
+                        att_status = "passed" if replay_res.status == "passed" else ("error" if env_err else "failed")
+
+                        record_execution_attempt(
+                            execution_id=execution_id,
+                            attempt_number=attempt,
+                            status=att_status,
+                            duration_ms=att_duration,
+                            error_message=first_err,
+                            failed_step=first_f_step,
+                            failed_selector=first_f_sel,
+                            report_path=str(output_dir),
+                        )
+                        attempt_history.append({
+                            "attempt_number": attempt,
+                            "status": att_status,
+                            "duration_ms": att_duration,
+                            "error_message": first_err,
+                            "failed_step": first_f_step,
+                            "failed_selector": first_f_sel,
+                            "report_path": str(output_dir),
+                        })
+
+                        if replay_res.status == "passed":
+                            final_status = "passed" if attempt == 1 else "flaky"
+                            break
+                        elif env_err:
+                            final_status = "error"
+                            break
+                        else:
+                            if attempt < total_attempts:
+                                await asyncio.sleep(0.2)
+                                continue
+                            else:
+                                final_status = "failed"
+                                break
+
+                    except asyncio.CancelledError:
+                        final_status = "cancelled"
+                        raise
+                    except Exception as exc:
+                        att_finish = datetime.now()
+                        att_duration = (att_finish - att_start).total_seconds() * 1000.0
+                        err_str = str(exc)
+                        last_error_message = err_str
+                        env_err = is_browser_env_error(err_str)
+                        if env_err and "browser binary missing" not in err_str.lower():
+                            err_str = f"Browser binary missing for '{browser}': Please run 'playwright install {browser}' ({err_str})"
+                            last_error_message = err_str
+
+                        att_status = "error"
+                        record_execution_attempt(
+                            execution_id=execution_id,
+                            attempt_number=attempt,
+                            status=att_status,
+                            duration_ms=att_duration,
+                            error_message=err_str,
+                            report_path=str(output_dir),
+                        )
+                        attempt_history.append({
+                            "attempt_number": attempt,
+                            "status": att_status,
+                            "duration_ms": att_duration,
+                            "error_message": err_str,
+                            "report_path": str(output_dir),
+                        })
+
+                        if env_err or attempt >= total_attempts:
+                            final_status = att_status
+                            break
+                        else:
+                            await asyncio.sleep(0.2)
+                            continue
+
                 finish_time = datetime.now()
-                duration_ms = (finish_time - start_time).total_seconds() * 1000.0
-
-                passed_count = sum(1 for s in replay_res.steps if s.status == "passed")
-                failed_count = sum(1 for s in replay_res.steps if s.status in ("failed", "error"))
-                final_status = replay_res.status
-
-                first_err = next((s.error for s in replay_res.steps if s.error), None)
-                if first_err:
-                    is_env_error = any(
-                        p in first_err.lower()
-                        for p in [
-                            "executable doesn't exist",
-                            "playwright install",
-                            "failed to launch",
-                            "browser binary missing",
-                            "executable path does not exist",
-                        ]
-                    )
-                    if is_env_error:
-                        first_err = f"Browser binary missing for '{browser}': Please run 'playwright install {browser}' ({first_err})"
+                duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
 
                 if final_status == "passed":
                     matrix_ctx["passed_executions"] += 1
+                elif final_status == "flaky":
+                    matrix_ctx["passed_executions"] += 1
+                    matrix_ctx["flaky_executions"] += 1
+                elif final_status == "cancelled":
+                    matrix_ctx["cancelled_executions"] += 1
                 else:
                     matrix_ctx["failed_executions"] += 1
 
@@ -1265,29 +1777,35 @@ class ExecutionOrchestrator:
                     duration_ms=duration_ms,
                     passed_steps=passed_count,
                     failed_steps=failed_count,
-                    total_steps=len(replay_res.steps),
-                    exit_code=replay_res.exit_code,
-                    error_message=first_err,
-                    report_path=str(output_dir),
-                    logs=logs,
+                    total_steps=total_steps,
+                    exit_code=exit_code,
+                    error_message=last_error_message,
+                    report_path=str(last_output_dir) if last_output_dir else None,
+                    logs=overall_logs,
                     worker_id=worker_id,
                     matrix_id=matrix_id,
+                    attempt_count=len(attempt_history),
+                    retry_history=attempt_history,
+                    failure_step=last_failure_step,
+                    failure_selector=last_failure_selector,
                 )
 
                 await broadcast_execution_event(
                     execution_id=execution_id,
-                    event_type="execution_completed",
+                    event_type="execution_completed" if final_status in ("passed", "flaky") else "execution_failed",
                     data={
                         "status": final_status,
                         "duration_ms": duration_ms,
                         "passed_steps": passed_count,
                         "failed_steps": failed_count,
-                        "total_steps": len(replay_res.steps),
-                        "exit_code": replay_res.exit_code,
-                        "logs": logs,
+                        "total_steps": total_steps,
+                        "exit_code": exit_code,
+                        "logs": overall_logs,
                         "worker_id": worker_id,
                         "matrix_id": matrix_id,
                         "browser": browser,
+                        "attempt_count": len(attempt_history),
+                        "retry_history": attempt_history,
                     },
                 )
                 await broadcast_matrix_event(
@@ -1303,11 +1821,12 @@ class ExecutionOrchestrator:
                         "duration_ms": duration_ms,
                         "passed_steps": passed_count,
                         "failed_steps": failed_count,
+                        "attempt_count": len(attempt_history),
                     },
                 )
             except asyncio.CancelledError:
                 finish_time = datetime.now()
-                duration_ms = (finish_time - start_time).total_seconds() * 1000.0
+                duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
                 matrix_ctx["cancelled_executions"] += 1
                 update_execution_run_status(
                     execution_id=execution_id,
@@ -1317,43 +1836,34 @@ class ExecutionOrchestrator:
                     error_message="Matrix execution cancelled.",
                     worker_id=worker_id,
                     matrix_id=matrix_id,
+                    attempt_count=len(attempt_history),
+                    retry_history=attempt_history,
                 )
                 raise
             except Exception as exc:
                 logger.exception("Matrix worker %s failed on %s [%s]: %s", worker_id, testcase.id, browser, exc)
                 finish_time = datetime.now()
-                duration_ms = (finish_time - start_time).total_seconds() * 1000.0
+                duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
                 matrix_ctx["failed_executions"] += 1
                 raw_err = str(exc)
-
-                # Distinguish browser binary missing / environment errors from test failures
-                is_env_error = any(
-                    p in raw_err.lower()
-                    for p in [
-                        "executable doesn't exist",
-                        "playwright install",
-                        "failed to launch",
-                        "browser binary missing",
-                        "executable path does not exist",
-                    ]
-                )
-                if is_env_error:
-                    err_msg = (
-                        f"Browser binary missing for '{browser}': Please run 'playwright install {browser}' ({raw_err})"
-                    )
+                env_err = is_browser_env_error(raw_err)
+                if env_err and "browser binary missing" not in raw_err.lower():
+                    err_msg = f"Browser binary missing for '{browser}': Please run 'playwright install {browser}' ({raw_err})"
                 else:
                     err_msg = raw_err
 
-                logs.append(f"Worker Error: {err_msg}")
+                overall_logs.append(f"Worker Error: {err_msg}")
                 update_execution_run_status(
                     execution_id=execution_id,
                     status="error",
                     finished_at=finish_time.isoformat(),
                     duration_ms=duration_ms,
                     error_message=err_msg,
-                    logs=logs,
+                    logs=overall_logs,
                     worker_id=worker_id,
                     matrix_id=matrix_id,
+                    attempt_count=len(attempt_history),
+                    retry_history=attempt_history,
                 )
                 await broadcast_execution_event(
                     execution_id=execution_id,
@@ -1361,7 +1871,7 @@ class ExecutionOrchestrator:
                     data={
                         "status": "error",
                         "error": err_msg,
-                        "logs": logs,
+                        "logs": overall_logs,
                         "worker_id": worker_id,
                         "matrix_id": matrix_id,
                         "browser": browser,
@@ -1398,6 +1908,7 @@ class ExecutionOrchestrator:
                         "passed_executions": matrix_ctx["passed_executions"],
                         "failed_executions": matrix_ctx["failed_executions"],
                         "cancelled_executions": matrix_ctx["cancelled_executions"],
+                        "flaky_executions": matrix_ctx.get("flaky_executions", 0),
                         "remaining_queue": queue.qsize(),
                     },
                 )

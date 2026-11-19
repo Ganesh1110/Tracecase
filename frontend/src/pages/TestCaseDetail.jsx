@@ -24,6 +24,7 @@ import {
   Crosshair,
   ArrowRight,
   Zap,
+  RefreshCw,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useToast } from '../context/ToastContext';
@@ -67,6 +68,7 @@ export function TestCaseDetail() {
 
   // Replay Options Modal
   const [showReplayModal, setShowReplayModal] = useState(false);
+  const [flakinessStats, setFlakinessStats] = useState(null);
   const [replayOptions, setReplayOptions] = useState({
     browser: 'chromium',
     headed: false,
@@ -74,6 +76,7 @@ export function TestCaseDetail() {
     assertions: true,
     visual_diff: false,
     diff_threshold: 0.1,
+    retries: 2,
   });
 
   // AI Features State
@@ -93,6 +96,7 @@ export function TestCaseDetail() {
       if (data.browser) {
         setReplayOptions((prev) => ({ ...prev, browser: data.browser }));
       }
+      api.getTestcaseFlakiness(id).then(setFlakinessStats).catch(() => {});
     } catch (err) {
       showToast('Failed to load test case: ' + err.message, 'error');
     } finally {
@@ -418,6 +422,23 @@ export function TestCaseDetail() {
                 <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 font-mono text-slate-500 uppercase">
                   {testcase.browser}
                 </span>
+                {flakinessStats && flakinessStats.total_runs > 0 && (
+                  <span
+                    className={`text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider flex items-center gap-1.5 ${
+                      flakinessStats.rating === 'stable'
+                        ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
+                        : flakinessStats.rating === 'low'
+                        ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
+                        : flakinessStats.rating === 'moderate'
+                        ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
+                        : 'bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 border border-rose-200 dark:border-rose-800'
+                    }`}
+                    title={`Reliability: ${flakinessStats.reliability_score}% | Flaky Runs: ${flakinessStats.flaky_runs}/${flakinessStats.total_runs}`}
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>{flakinessStats.flakiness_score}% Flaky ({flakinessStats.rating})</span>
+                  </span>
+                )}
                 <button
                   onClick={() => setIsEditingMeta(true)}
                   className="p-1 text-slate-400 hover:text-brand-500 transition-colors"
@@ -1148,6 +1169,36 @@ export function TestCaseDetail() {
                   <option value="firefox">Firefox</option>
                   <option value="webkit">WebKit (Safari)</option>
                 </select>
+              </div>
+
+              {/* Retries Slider */}
+              <div className="space-y-1.5 p-2.5 rounded-lg bg-amber-50/50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40">
+                <div className="flex justify-between items-center text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  <span className="flex items-center gap-1.5">
+                    <RefreshCw className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Flaky Retry Attempts</span>
+                  </span>
+                  <span className="font-mono text-amber-700 dark:text-amber-400 font-bold">
+                    {replayOptions.retries === 0 ? '0 (None)' : `${replayOptions.retries} Retries`}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="3"
+                  step="1"
+                  value={replayOptions.retries ?? 2}
+                  onChange={(e) =>
+                    setReplayOptions({ ...replayOptions, retries: parseInt(e.target.value, 10) })
+                  }
+                  className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                />
+                <div className="flex justify-between text-[10px] text-slate-400">
+                  <span>0 (None)</span>
+                  <span>1</span>
+                  <span className="text-amber-600 dark:text-amber-400 font-semibold">2 (Default)</span>
+                  <span>3 (Max)</span>
+                </div>
               </div>
 
               <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50 dark:bg-slate-900/50">

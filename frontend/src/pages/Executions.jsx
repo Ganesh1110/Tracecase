@@ -53,6 +53,7 @@ export function Executions() {
   const [batchForm, setBatchForm] = useState({
     testcase_ids: [],
     concurrency: 2,
+    retries: 2,
     browser: 'chromium',
     headed: false,
     heal: true,
@@ -68,6 +69,7 @@ export function Executions() {
     testcase_ids: [],
     browsers: ['chromium', 'firefox', 'webkit'],
     concurrency: 2,
+    retries: 2,
     matrix_name: '',
     headed: false,
     heal: true,
@@ -157,6 +159,7 @@ export function Executions() {
       setBatchForm({
         testcase_ids: tcs.slice(0, 3).map((t) => t.id),
         concurrency: 2,
+        retries: 2,
         browser: 'chromium',
         headed: false,
         heal: true,
@@ -211,6 +214,7 @@ export function Executions() {
         testcase_ids: tcs.slice(0, 4).map((t) => t.id),
         browsers: ['chromium', 'firefox', 'webkit'],
         concurrency: 2,
+        retries: 2,
         matrix_name: `Cross-Browser Matrix (${new Date().toLocaleTimeString()})`,
         headed: false,
         heal: true,
@@ -492,6 +496,7 @@ export function Executions() {
               <option value="all">All Statuses</option>
               <option value="running">Running</option>
               <option value="passed">Passed</option>
+              <option value="flaky">Flaky</option>
               <option value="failed">Failed</option>
             </select>
           </div>
@@ -533,12 +538,14 @@ export function Executions() {
                       className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase shrink-0 ${
                         r.status === 'passed'
                           ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-500 border border-emerald-200 dark:border-emerald-800'
+                          : r.status === 'flaky'
+                          ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
                           : r.status === 'failed' || r.status === 'error'
                           ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-500 border border-rose-200 dark:border-rose-800'
                           : 'bg-amber-50 dark:bg-amber-950/60 text-amber-500 border border-amber-200 dark:border-amber-800 animate-pulse'
                       }`}
                     >
-                      {r.status}
+                      {r.status === 'flaky' ? `Flaky (${r.attempt_count || 2}/${(r.retries || 0) + 1})` : r.status}
                     </span>
                   </button>
                 );
@@ -562,12 +569,16 @@ export function Executions() {
                       className={`px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase ${
                         selectedRun.status === 'passed'
                           ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-500 border border-emerald-200 dark:border-emerald-800'
+                          : selectedRun.status === 'flaky'
+                          ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700 font-bold'
                           : selectedRun.status === 'failed' || selectedRun.status === 'error'
                           ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-500 border border-rose-200 dark:border-rose-800'
                           : 'bg-amber-50 dark:bg-amber-950/60 text-amber-500 border border-amber-200 dark:border-amber-800 animate-pulse'
                       }`}
                     >
-                      {selectedRun.status}
+                      {selectedRun.status === 'flaky'
+                        ? `Flaky (Passed on Attempt ${selectedRun.attempt_count || 2} of ${(selectedRun.retries || 0) + 1})`
+                        : selectedRun.status}
                     </span>
                     {selectedRun.worker_id && (
                       <span className="px-2 py-0.5 rounded text-xs font-mono font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
@@ -585,6 +596,14 @@ export function Executions() {
                     <span>
                       Passed: {selectedRun.passed_steps || 0} / {selectedRun.total_steps || 0}
                     </span>
+                    {selectedRun.retries > 0 && (
+                      <>
+                        <span>•</span>
+                        <span className="text-amber-600 dark:text-amber-400 font-semibold">
+                          Retries: {selectedRun.attempt_count || 1}/{(selectedRun.retries || 0) + 1}
+                        </span>
+                      </>
+                    )}
                     {selectedRun.batch_id && (
                       <>
                         <span>•</span>
@@ -661,6 +680,52 @@ export function Executions() {
                   <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-start gap-2.5">
                     <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                     <div className="font-mono whitespace-pre-wrap">{selectedRun.error_message}</div>
+                  </div>
+                )}
+
+                {/* Retry History & Failure Intelligence */}
+                {selectedRun.attempts && selectedRun.attempts.length > 1 && (
+                  <div className="p-4 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 space-y-3 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <RefreshCw className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                          Retry History & Failure Intelligence ({selectedRun.attempts.length} Attempts)
+                        </h4>
+                      </div>
+                      <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300">
+                        {selectedRun.status === 'flaky' ? 'Resolved on Retry' : 'Retried Failure'}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {selectedRun.attempts.map((att) => (
+                        <div key={att.id || att.attempt_number} className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs flex flex-col gap-1.5 shadow-sm">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                              <span>Attempt #{att.attempt_number}</span>
+                              {att.attempt_number === 1 && <span className="text-[10px] text-slate-400 font-normal">(Initial Run)</span>}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-full font-bold uppercase text-[10px] ${
+                              att.status === 'passed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400' :
+                              att.status === 'error' ? 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-400' :
+                              'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-400'
+                            }`}>
+                              {att.status}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3 text-slate-500 text-[11px]">
+                            <span>Duration: {(att.duration_ms || 0).toFixed(1)}ms</span>
+                            {att.failed_step != null && <span>Failed Step: #{att.failed_step}</span>}
+                            {att.failed_selector && <span className="font-mono truncate max-w-xs">Selector: {att.failed_selector}</span>}
+                          </div>
+                          {att.error_message && (
+                            <div className="mt-1 text-rose-600 dark:text-rose-400 font-mono text-[11px] bg-rose-50 dark:bg-rose-950/40 p-2 rounded-lg border border-rose-100 dark:border-rose-900/30">
+                              {att.error_message}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -1055,15 +1120,17 @@ export function Executions() {
                                 <div className="flex flex-col gap-0.5">
                                   <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full w-fit ${
                                     bInfo.status === 'passed' ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400' :
+                                    bInfo.status === 'flaky' ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700' :
                                     bInfo.status === 'failed' ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400' :
                                     bInfo.status === 'error' ? 'bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400' :
                                     bInfo.status === 'running' ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 animate-pulse' :
                                     'bg-slate-100 dark:bg-slate-800 text-slate-500'
                                   }`}>
                                     {bInfo.status === 'passed' && <CheckCircle2 className="w-2.5 h-2.5" />}
+                                    {bInfo.status === 'flaky' && <RefreshCw className="w-2.5 h-2.5" />}
                                     {bInfo.status === 'failed' && <XCircle className="w-2.5 h-2.5" />}
                                     {bInfo.status === 'error' && <AlertCircle className="w-2.5 h-2.5" />}
-                                    <span>{bInfo.status}</span>
+                                    <span>{bInfo.status === 'flaky' ? `Flaky (${bInfo.attempt_count || 2})` : bInfo.status}</span>
                                   </span>
                                   <span className="text-[10px] text-slate-400 font-mono">
                                     {bInfo.duration_ms ? `${(bInfo.duration_ms / 1000).toFixed(1)}s` : ''}
@@ -1162,6 +1229,36 @@ export function Executions() {
                 <span className="text-indigo-500 font-semibold">2 (Default)</span>
                 <span>4 (Fast)</span>
                 <span>8 (Maximum)</span>
+              </div>
+            </div>
+
+            {/* Intelligent Retries Slider */}
+            <div className="space-y-1.5 p-3 rounded-xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40">
+              <div className="flex justify-between items-center text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <span className="flex items-center gap-1.5">
+                  <RefreshCw className="w-4 h-4 text-amber-500" />
+                  <span>Flaky Detection & Retries</span>
+                </span>
+                <span className="font-mono text-amber-700 dark:text-amber-400 bg-white dark:bg-amber-900/60 px-2 py-0.5 rounded shadow-sm text-xs font-bold border border-amber-200/50 dark:border-amber-800/50">
+                  {batchForm.retries === 0 ? 'No Retries (0)' : `${batchForm.retries} Retries max`}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="3"
+                step="1"
+                value={batchForm.retries ?? 2}
+                onChange={(e) =>
+                  setBatchForm({ ...batchForm, retries: parseInt(e.target.value, 10) })
+                }
+                className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+              />
+              <div className="flex justify-between text-[10px] text-slate-400">
+                <span>0 (None)</span>
+                <span>1</span>
+                <span className="text-amber-600 dark:text-amber-400 font-semibold">2 (Default)</span>
+                <span>3 (Max)</span>
               </div>
             </div>
 
@@ -1381,6 +1478,36 @@ export function Executions() {
                 <span className="text-purple-500 font-semibold">2 (Default)</span>
                 <span>4 (Fast)</span>
                 <span>8 (Maximum)</span>
+              </div>
+            </div>
+
+            {/* Intelligent Retries Slider */}
+            <div className="space-y-1.5 p-3 rounded-xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40">
+              <div className="flex justify-between items-center text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <span className="flex items-center gap-1.5">
+                  <RefreshCw className="w-4 h-4 text-amber-500" />
+                  <span>Flaky Detection & Retries</span>
+                </span>
+                <span className="font-mono text-amber-700 dark:text-amber-400 bg-white dark:bg-amber-900/60 px-2 py-0.5 rounded shadow-sm text-xs font-bold border border-amber-200/50 dark:border-amber-800/50">
+                  {matrixForm.retries === 0 ? 'No Retries (0)' : `${matrixForm.retries} Retries max`}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="3"
+                step="1"
+                value={matrixForm.retries ?? 2}
+                onChange={(e) =>
+                  setMatrixForm({ ...matrixForm, retries: parseInt(e.target.value, 10) })
+                }
+                className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+              />
+              <div className="flex justify-between text-[10px] text-slate-400">
+                <span>0 (None)</span>
+                <span>1</span>
+                <span className="text-amber-600 dark:text-amber-400 font-semibold">2 (Default)</span>
+                <span>3 (Max)</span>
               </div>
             </div>
 

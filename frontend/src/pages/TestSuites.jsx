@@ -117,6 +117,7 @@ export function TestSuites() {
       testcaseCount: (suite.testcase_ids || []).length,
       mode,
       concurrency: 2,
+      retries: 2,
       browser: 'chromium',
       browsers: ['chromium', 'firefox', 'webkit'],
       headed: false,
@@ -133,6 +134,7 @@ export function TestSuites() {
         const matrixRes = await api.runSuiteMatrix(runSuiteModal.suiteId, {
           browsers: runSuiteModal.browsers,
           concurrency: runSuiteModal.concurrency,
+          retries: runSuiteModal.retries ?? 2,
           headed: runSuiteModal.headed,
           heal: runSuiteModal.heal,
           assertions: runSuiteModal.assertions,
@@ -148,6 +150,7 @@ export function TestSuites() {
       showToast(`Launching ${runSuiteModal.suiteName} (Workers: ${runSuiteModal.concurrency})...`, 'info');
       const runs = await api.runSuite(runSuiteModal.suiteId, {
         concurrency: runSuiteModal.concurrency,
+        retries: runSuiteModal.retries ?? 2,
         browser: runSuiteModal.browser,
         headed: runSuiteModal.headed,
         heal: runSuiteModal.heal,
@@ -742,6 +745,36 @@ export function TestSuites() {
                 <span className="text-indigo-500 font-semibold">2 (Default)</span>
                 <span>4</span>
                 <span>8 (Maximum)</span>
+              </div>
+            </div>
+
+            {/* Intelligent Retries Slider */}
+            <div className="space-y-1.5 p-3 rounded-xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40">
+              <div className="flex justify-between items-center text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <span className="flex items-center gap-1.5">
+                  <RefreshCw className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Flaky Detection & Retries</span>
+                </span>
+                <span className="font-mono text-amber-700 dark:text-amber-400 font-bold text-xs bg-white dark:bg-amber-900/60 px-2 py-0.5 rounded border border-amber-200/50 dark:border-amber-800/50">
+                  {runSuiteModal.retries === 0 ? '0 (No Retries)' : `${runSuiteModal.retries} Retries max`}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="3"
+                step="1"
+                value={runSuiteModal.retries ?? 2}
+                onChange={(e) =>
+                  setRunSuiteModal({ ...runSuiteModal, retries: parseInt(e.target.value, 10) })
+                }
+                className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+              />
+              <div className="flex justify-between text-[10px] text-slate-400">
+                <span>0 (None)</span>
+                <span>1</span>
+                <span className="text-amber-600 dark:text-amber-400 font-semibold">2 (Default)</span>
+                <span>3 (Max)</span>
               </div>
             </div>
 
