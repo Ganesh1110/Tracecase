@@ -10,6 +10,7 @@ import {
   ArrowRight,
   Loader2,
   FileCode2,
+  StopCircle,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useWebSocket } from '../context/WebSocketContext';
@@ -67,6 +68,23 @@ export function Recorder() {
       showToast('Recording session launched!', 'success');
     } catch (err) {
       showToast('Failed to start recorder: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleStop = async () => {
+    try {
+      setLoading(true);
+      showToast('Finalizing recording and writing test case...', 'info');
+      const res = await api.stopRecording();
+      setStatus(res);
+      showToast('Recording finalized and test case generated!', 'success');
+      if (res.testcase_id) {
+        navigate(`/testcases/${res.testcase_id}`);
+      }
+    } catch (err) {
+      showToast('Failed to stop recording: ' + err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -159,28 +177,44 @@ export function Recorder() {
             </div>
 
             <div className="pt-2 flex items-center justify-end">
-              <button
-                type="submit"
-                disabled={isRecording || loading}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/25 transition-all disabled:opacity-50"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Launching Browser...</span>
-                  </>
-                ) : isRecording ? (
-                  <>
-                    <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                    <span>Recording in Progress...</span>
-                  </>
-                ) : (
-                  <>
-                    <Video className="w-4 h-4" />
-                    <span>Start Recording Session</span>
-                  </>
-                )}
-              </button>
+              {isRecording ? (
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  disabled={loading}
+                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/25 transition-all"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Saving Test Case...</span>
+                    </>
+                  ) : (
+                    <>
+                      <StopCircle className="w-4 h-4" />
+                      <span>Stop Recording & Save Test Case</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/25 transition-all disabled:opacity-50"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Launching Browser...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Video className="w-4 h-4" />
+                      <span>Start Recording Session</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </form>
         </div>

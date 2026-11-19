@@ -63,6 +63,9 @@ export const api = {
   // Test Cases
   getTestCases: () => request('/testcases'),
   getTestCase: (id) => request(`/testcases/${id}`),
+  createTestCase: (data) =>
+    request('/testcases', { method: 'POST', body: JSON.stringify(data) }),
+  deleteTestCase: (id) => request(`/testcases/${id}`, { method: 'DELETE' }),
   getTestCaseHtml: (id) => request(`/testcases/${id}/html`),
   getCodegen: (id) => request(`/testcases/${id}/codegen`, { method: 'POST' }),
   getHar: (id) => request(`/testcases/${id}/har`),
@@ -114,6 +117,7 @@ export const api = {
   // Recorder
   startRecording: (data) =>
     request('/record/start', { method: 'POST', body: JSON.stringify(data) }),
+  stopRecording: () => request('/record/stop', { method: 'POST' }),
   getRecordingStatus: () => request('/record/status'),
 
   // Visual Diff

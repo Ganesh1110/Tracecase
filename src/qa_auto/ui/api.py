@@ -49,7 +49,9 @@ from qa_auto.ui.executor import orchestrator
 from qa_auto.ui.service import (
     add_custom_assertion,
     add_testcase_step,
+    create_manual_testcase,
     delete_custom_assertion,
+    delete_testcase,
     delete_testcase_step,
     execute_replay,
     export_pytest_code,
@@ -77,6 +79,14 @@ class RecordRequest(BaseModel):
     browser: str = Field(default="chromium", description="Browser type: chromium, firefox, webkit")
     headless: bool = Field(default=False, description="Run browser headless")
     timeout: int = Field(default=30000, description="Action timeout in milliseconds")
+
+
+class TestCaseCreateRequest(BaseModel):
+    name: str = Field(description="Test case name")
+    start_url: str = Field(description="Start URL")
+    browser: str = Field(default="chromium", description="Browser engine")
+    description: str = Field(default="", description="Description")
+    project_id: str = Field(default="default_project", description="Target project ID")
 
 
 class ReplayRequest(BaseModel):
@@ -171,7 +181,24 @@ class MutationGenerateRequest(BaseModel):
 
 
 class SettingsUpdateRequest(BaseModel):
-    settings: dict[str, str]
+    settings: dict[str, str] | None = None
+    ai_provider: str | None = None
+    ai_model: str | None = None
+    ai_api_base: str | None = None
+    ai_api_key: str | None = None
+    default_browser: str | None = None
+    viewport_width: str | None = None
+    viewport_height: str | None = None
+    heal_default: str | None = None
+    assertions_default: str | None = None
+    visual_diff_threshold: str | None = None
+
+    def get_dict(self) -> dict[str, str]:
+        if self.settings is not None:
+            return self.settings
+        d = self.model_dump(exclude_none=True)
+        d.pop("settings", None)
+        return {k: str(v) for k, v in d.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +353,40 @@ async def run_suite(suite_id: str, req: ReplayRequest | None = None) -> list[dic
 @router.get("/testcases")
 async def get_testcases() -> list[dict[str, Any]]:
     return list_testcases()
+
+
+@router.post("/testcases")
+async def add_testcase(req: TestCaseCreateRequest) -> dict[str, Any]:
+    """Manually create a testcase scaffold."""
+    try:
+        tc = create_manual_testcase(
+            name=req.name,
+            start_url=req.start_url,
+            browser=req.browser,
+            description=req.description,
+            project_id=req.project_id,
+        )
+        return tc.model_dump(mode="json")
+    except Exception as exc:
+        logger.exception("Failed to create testcase: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
+@router.delete("/testcases/{identifier}")
+async def remove_testcase(identifier: str) -> dict[str, bool]:
+    """Delete a testcase and clean up its filesystem artifacts."""
+    try:
+        success = delete_testcase(identifier)
+        return {"success": success}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to delete testcase: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
 
 
 @router.get("/testcases/{identifier}")
@@ -502,6 +563,19 @@ async def get_recording_status() -> dict[str, Any]:
     return recording_manager.get_status()
 
 
+@router.post("/record/stop")
+async def stop_recording() -> dict[str, Any]:
+    """Stop active recording session and finalize test case."""
+    try:
+        status_info = await recording_manager.stop()
+        return status_info
+    except Exception as exc:
+        logger.exception("Failed to stop recording: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
 # ---------------------------------------------------------------------------
 # Visual Diff
 # ---------------------------------------------------------------------------
@@ -660,11 +734,25 @@ async def remove_assertion(identifier: str, index: int) -> dict[str, Any]:
 # AI Intelligence & Assistant
 # ---------------------------------------------------------------------------
 
+class AnalyzeRequest(BaseModel):
+    testcase_id: str | None = None
+    mode: str | None = "summary"
+
+
 @router.post("/ai/analyze")
-async def analyze_case(testcase_id: str) -> dict[str, Any]:
+async def analyze_case(
+    testcase_id: str | None = None,
+    body: AnalyzeRequest | None = None,
+) -> dict[str, Any]:
     """Run AI and heuristic analysis on a test case."""
+    target_id = (body.testcase_id if body and body.testcase_id else None) or testcase_id
+    if not target_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="testcase_id is required",
+        )
     try:
-        _, testcase = resolve_testcase_file(testcase_id)
+        _, testcase = resolve_testcase_file(target_id)
         settings = get_settings()
         provider = get_provider(
             name=settings.get("ai_provider", "ollama"),
@@ -674,10 +762,11 @@ async def analyze_case(testcase_id: str) -> dict[str, Any]:
         )
         result = await analyze_testcase(testcase, provider)
         raw = result.model_dump(mode="json")
+        risk_score = min(100, len(result.risks) * 25 + len(result.annotations) * 10)
         saved = save_ai_analysis(
             testcase_id=testcase.id,
             summary=result.summary,
-            risk_score=result.risk_score,
+            risk_score=risk_score,
             raw_analysis=raw,
             model_used=provider.name,
         )
@@ -811,10 +900,17 @@ async def generate_mutations(req: MutationGenerateRequest) -> list[dict[str, Any
 # ---------------------------------------------------------------------------
 
 @router.get("/repository/search")
-async def repo_search(query: str = Query(..., min_length=1), limit: int = 15) -> list[dict[str, Any]]:
+async def repo_search(
+    query: str | None = None,
+    q: str | None = None,
+    limit: int = 15,
+) -> list[dict[str, Any]]:
     """Full-text search indexed test cases."""
+    search_term = query or q or ""
+    if not search_term:
+        return []
     try:
-        return search_testcases(query=query, limit=limit)
+        return search_testcases(query=search_term, limit=limit)
     except Exception as exc:
         logger.exception("Corpus search failed: %s", exc)
         return []
@@ -919,7 +1015,7 @@ async def get_app_settings() -> dict[str, str]:
 
 @router.put("/settings")
 async def update_app_settings(req: SettingsUpdateRequest) -> dict[str, str]:
-    return update_settings(req.settings)
+    return update_settings(req.get_dict())
 
 
 # ---------------------------------------------------------------------------

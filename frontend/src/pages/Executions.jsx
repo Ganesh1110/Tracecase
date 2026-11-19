@@ -11,6 +11,7 @@ import {
   ArrowRight,
   ShieldCheck,
   RefreshCw,
+  Play,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useWebSocket } from '../context/WebSocketContext';
@@ -87,6 +88,19 @@ export function Executions() {
       loadRuns();
     } catch (err) {
       showToast('Failed to cancel: ' + err.message, 'error');
+    }
+  };
+
+  const handleReRun = async () => {
+    if (!selectedRun?.testcase_id) return;
+    try {
+      showToast('Starting re-run...', 'info');
+      const run = await api.startExecution({ testcase_id: selectedRun.testcase_id });
+      showToast('Execution started!', 'success');
+      handleSelectRun(run.id);
+      loadRuns();
+    } catch (err) {
+      showToast('Failed to launch re-run: ' + err.message, 'error');
     }
   };
 
@@ -198,15 +212,25 @@ export function Executions() {
                   </div>
                 </div>
 
-                {isRunning && (
-                  <button
-                    onClick={() => handleCancelRun(selectedRun.id)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 dark:bg-rose-950/60 text-rose-500 hover:bg-rose-100 border border-rose-200 dark:border-rose-800 transition-colors"
-                  >
-                    <StopCircle className="w-3.5 h-3.5" />
-                    <span>Cancel Run</span>
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {isRunning ? (
+                    <button
+                      onClick={() => handleCancelRun(selectedRun.id)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 dark:bg-rose-950/60 text-rose-500 hover:bg-rose-100 border border-rose-200 dark:border-rose-800 transition-colors"
+                    >
+                      <StopCircle className="w-3.5 h-3.5" />
+                      <span>Cancel Run</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleReRun}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition-colors"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>Re-run Test</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Progress Bar */}

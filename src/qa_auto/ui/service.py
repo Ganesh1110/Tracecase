@@ -29,6 +29,7 @@ class RecordingSessionManager:
         self.current_session: dict[str, Any] | None = None
         self._lock = asyncio.Lock()
         self._task: asyncio.Task[None] | None = None
+        self._recorder: Recorder | None = None
 
     async def start(
         self,
@@ -110,6 +111,7 @@ class RecordingSessionManager:
                 viewport=(1280, 720),
                 timeout=timeout,
             )
+            self._recorder = recorder
             await recorder.run()
 
             # Find generated testcase.json
@@ -119,19 +121,63 @@ class RecordingSessionManager:
                 try:
                     data = json.loads(tc_file.read_text(encoding="utf-8"))
                     testcase_id = data.get("id")
-                except Exception:
-                    pass
+                    tc = TestCase.model_validate(data)
+                    from qa_auto.index.store import index_testcase
+                    from qa_auto.ui.db import sync_testcase_meta
+
+                    sync_testcase_meta(tc, tc_file)
+                    index_testcase(tc, tc_file)
+                except Exception as exc:
+                    logger.warning("Could not sync recorded test case to index: %s", exc)
 
             if self.current_session and self.current_session.get("session_id") == session_id:
                 self.current_session["status"] = "completed"
                 self.current_session["completed_at"] = datetime.now().isoformat()
                 self.current_session["testcase_id"] = testcase_id
+
+            from qa_auto.ui.broadcaster import broadcast_recording_event
+
+            await broadcast_recording_event(
+                session_id=session_id,
+                event_type="recording_completed",
+                data={"status": "completed", "testcase_id": testcase_id},
+            )
         except Exception as exc:
             logger.exception("Recording failed: %s", exc)
             if self.current_session and self.current_session.get("session_id") == session_id:
                 self.current_session["status"] = "error"
                 self.current_session["error"] = str(exc)
                 self.current_session["completed_at"] = datetime.now().isoformat()
+
+            from qa_auto.ui.broadcaster import broadcast_recording_event
+
+            await broadcast_recording_event(
+                session_id=session_id,
+                event_type="recording_error",
+                data={"status": "error", "error": str(exc)},
+            )
+        finally:
+            self._recorder = None
+
+    async def stop(self) -> dict[str, Any]:
+        """Stop an active recording session and finalize test case generation."""
+        async with self._lock:
+            if not self.current_session or self.current_session.get("status") != "recording":
+                return self.get_status()
+
+            if self._recorder:
+                try:
+                    await self._recorder.stop_recording()
+                except Exception as exc:
+                    logger.warning("Error stopping recorder: %s", exc)
+
+            if self._task and not self._task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(self._task), timeout=5.0)
+                except Exception:
+                    pass
+
+            return self.get_status()
 
     def get_status(self) -> dict[str, Any]:
         """Return the current recorder session status."""
@@ -542,3 +588,88 @@ def run_visual_diff_for_step(
         diff_output=diff_output,
         threshold_percent=threshold,
     )
+
+
+def create_manual_testcase(
+    name: str,
+    start_url: str,
+    browser: str = "chromium",
+    description: str = "",
+    project_id: str = "default_project",
+) -> TestCase:
+    """Create a new test case directory and initialize it with start navigation."""
+    import shutil
+
+    case_id = f"tc_{uuid.uuid4().hex[:8]}"
+    slug = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in name.lower())
+    target_dir = Path("recordings") / f"{slug}_{case_id}"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "screenshots").mkdir(exist_ok=True)
+
+    initial_step = Step(
+        number=1,
+        timestamp=datetime.now(),
+        action_type="navigate",
+        url=start_url,
+        description_short=f"Navigate to {start_url}",
+        description_detailed=f"Open browser and navigate to {start_url}",
+    )
+
+    tc = TestCase(
+        id=case_id,
+        name=name,
+        start_url=start_url,
+        browser=browser,
+        viewport={"width": 1280, "height": 720},
+        user_agent="QA Auto Studio",
+        steps=[initial_step],
+        created_at=datetime.now(),
+        total_steps=1,
+        total_duration=0.0,
+    )
+    tc_file = target_dir / "testcase.json"
+    save_testcase(tc_file, tc)
+
+    from qa_auto.ui.db import sync_testcase_meta
+
+    sync_testcase_meta(tc, tc_file, project_id=project_id)
+    try:
+        from qa_auto.index.store import index_testcase
+
+        index_testcase(tc, tc_file)
+    except Exception:
+        pass
+    return tc
+
+
+def delete_testcase(identifier: str) -> bool:
+    """Delete a test case folder and clear its records from SQLite."""
+    import shutil
+    from qa_auto.ui.db import get_connection
+
+    tc_file, testcase = resolve_testcase_file(identifier)
+    parent_dir = tc_file.parent
+    if "recordings" in parent_dir.parts:
+        shutil.rmtree(parent_dir, ignore_errors=True)
+    elif tc_file.exists():
+        tc_file.unlink(missing_ok=True)
+
+    conn = get_connection()
+    try:
+        with conn:
+            conn.execute("DELETE FROM testcases_meta WHERE id = ?", (testcase.id,))
+            conn.execute("DELETE FROM execution_runs WHERE testcase_id = ?", (testcase.id,))
+    finally:
+        conn.close()
+
+    try:
+        from qa_auto.index.store import init_db
+        c_conn = init_db()
+        with c_conn:
+            c_conn.execute("DELETE FROM testcases WHERE id = ?", (testcase.id,))
+            c_conn.execute("DELETE FROM steps_fts WHERE testcase_id = ?", (testcase.id,))
+        c_conn.close()
+    except Exception:
+        pass
+    return True
+

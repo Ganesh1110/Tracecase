@@ -33,6 +33,14 @@ export function TestCaseDetail() {
   const [selectedScreenshot, setSelectedScreenshot] = useState(null);
   const [editingStep, setEditingStep] = useState(null);
   const [editFormData, setEditFormData] = useState({});
+  const [isAddingStep, setIsAddingStep] = useState(false);
+  const [newStepData, setNewStepData] = useState({
+    action_type: 'click',
+    selector: '',
+    input_value: '',
+    url: '',
+    description_short: '',
+  });
 
   // Assertion form
   const [newAssertionKind, setNewAssertionKind] = useState('visible');
@@ -83,6 +91,36 @@ export function TestCaseDetail() {
       showToast(`Step moved ${direction}.`, 'info');
     } catch (err) {
       showToast('Failed to reorder: ' + err.message, 'error');
+    }
+  };
+
+  const handleDeleteTestCase = async () => {
+    if (!confirm(`Are you sure you want to permanently delete "${testcase.name}"?`)) return;
+    try {
+      await api.deleteTestCase(id);
+      showToast('Test case deleted.', 'success');
+      navigate('/testcases');
+    } catch (err) {
+      showToast('Failed to delete: ' + err.message, 'error');
+    }
+  };
+
+  const handleCreateStep = async (e) => {
+    e.preventDefault();
+    try {
+      const updated = await api.createStep(id, newStepData);
+      setTestCase(updated);
+      setIsAddingStep(false);
+      setNewStepData({
+        action_type: 'click',
+        selector: '',
+        input_value: '',
+        url: '',
+        description_short: '',
+      });
+      showToast('Step added successfully!', 'success');
+    } catch (err) {
+      showToast('Failed to add step: ' + err.message, 'error');
     }
   };
 
@@ -212,6 +250,14 @@ export function TestCaseDetail() {
             <Play className="w-3.5 h-3.5 fill-current" />
             <span>Execute Replay</span>
           </button>
+
+          <button
+            onClick={handleDeleteTestCase}
+            className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+            title="Delete this test case"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
@@ -256,7 +302,111 @@ export function TestCaseDetail() {
 
       {/* Tab: Recorded Steps */}
       {activeTab === 'steps' && (
-        <div className="space-y-3">
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <span className="text-xs text-slate-500">
+              Total {testcase.steps?.length || 0} user actions in sequence
+            </span>
+            <button
+              onClick={() => setIsAddingStep(!isAddingStep)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-50 dark:bg-brand-950/60 hover:bg-brand-100 dark:hover:bg-brand-900 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{isAddingStep ? 'Cancel' : 'Add Step'}</span>
+            </button>
+          </div>
+
+          {isAddingStep && (
+            <form
+              onSubmit={handleCreateStep}
+              className="p-4 rounded-xl border border-brand-500/40 bg-brand-50/20 dark:bg-brand-950/20 space-y-3"
+            >
+              <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                Insert New Step
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
+                    Action
+                  </label>
+                  <select
+                    value={newStepData.action_type}
+                    onChange={(e) =>
+                      setNewStepData({ ...newStepData, action_type: e.target.value })
+                    }
+                    className="w-full px-2.5 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                  >
+                    <option value="click">click</option>
+                    <option value="input">input</option>
+                    <option value="navigate">navigate</option>
+                    <option value="scroll">scroll</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
+                    Selector
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. #submit or button.primary"
+                    value={newStepData.selector}
+                    onChange={(e) =>
+                      setNewStepData({ ...newStepData, selector: e.target.value })
+                    }
+                    className="w-full px-2.5 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
+                    Input Value / URL
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Text or URL"
+                    value={newStepData.input_value || newStepData.url}
+                    onChange={(e) =>
+                      setNewStepData({
+                        ...newStepData,
+                        input_value: e.target.value,
+                        url: e.target.value,
+                      })
+                    }
+                    className="w-full px-2.5 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
+                    Description
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Short description"
+                    value={newStepData.description_short}
+                    onChange={(e) =>
+                      setNewStepData({ ...newStepData, description_short: e.target.value })
+                    }
+                    className="w-full px-2.5 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsAddingStep(false)}
+                  className="px-3 py-1 text-xs text-slate-500"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1 text-xs font-semibold rounded bg-brand-600 text-white"
+                >
+                  Append Step
+                </button>
+              </div>
+            </form>
+          )}
+
           {testcase.steps?.map((step) => {
             const isEditing = editingStep === step.number;
             const shotPath = step.screenshot_with_highlight || step.screenshot_path;

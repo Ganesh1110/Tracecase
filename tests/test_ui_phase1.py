@@ -233,3 +233,34 @@ def test_api_websocket_connection(client: TestClient) -> None:
         resp = ws.receive_text()
         data = json.loads(resp)
         assert data.get("type") == "pong"
+
+
+def test_api_create_and_delete_testcase(client: TestClient) -> None:
+    # Create testcase
+    res = client.post(
+        "/api/testcases",
+        json={
+            "name": "Audit Test Flow",
+            "start_url": "https://example.com/login",
+            "browser": "chromium",
+            "description": "Integration audit test",
+        },
+    )
+    assert res.status_code == 200
+    tc_data = res.json()
+    assert tc_data["name"] == "Audit Test Flow"
+    assert len(tc_data["steps"]) == 1
+    tc_id = tc_data["id"]
+
+    # Delete testcase
+    del_res = client.delete(f"/api/testcases/{tc_id}")
+    assert del_res.status_code == 200
+    assert del_res.json()["success"] is True
+
+
+def test_api_record_stop(client: TestClient) -> None:
+    # When no session is recording, returns idle/safe status
+    res = client.post("/api/record/stop")
+    assert res.status_code == 200
+    data = res.json()
+    assert "status" in data

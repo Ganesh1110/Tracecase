@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useOutletContext } from 'react-router-dom';
 import {
   FileCode2,
   Search,
@@ -11,6 +11,7 @@ import {
   Layers,
   ChevronRight,
   Filter,
+  Trash2,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useToast } from '../context/ToastContext';
@@ -22,6 +23,7 @@ export function TestCases() {
   const [selectedBrowser, setSelectedBrowser] = useState('all');
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const { openNewCaseModal } = useOutletContext() || {};
 
   const loadCases = async () => {
     try {
@@ -32,6 +34,18 @@ export function TestCases() {
       showToast('Failed to load test cases: ' + err.message, 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteCase = async (e, caseId, name) => {
+    e.stopPropagation();
+    if (!confirm(`Are you sure you want to permanently delete "${name}"?`)) return;
+    try {
+      await api.deleteTestCase(caseId);
+      showToast('Test case deleted.', 'success');
+      loadCases();
+    } catch (err) {
+      showToast('Failed to delete: ' + err.message, 'error');
     }
   };
 
@@ -73,8 +87,15 @@ export function TestCases() {
         </div>
         <div className="flex items-center gap-2.5">
           <button
+            onClick={() => openNewCaseModal?.()}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-md shadow-brand-500/20 transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Test Case</span>
+          </button>
+          <button
             onClick={() => navigate('/recorder')}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/20 transition-all"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/20 transition-all"
           >
             <Video className="w-4 h-4" />
             <span>Record New Test</span>
@@ -184,6 +205,13 @@ export function TestCases() {
                         >
                           <Play className="w-3.5 h-3.5 fill-current" />
                           <span>Run</span>
+                        </button>
+                        <button
+                          onClick={(e) => handleDeleteCase(e, tc.id, tc.name)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                          title="Delete test case"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                         <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
                       </div>
