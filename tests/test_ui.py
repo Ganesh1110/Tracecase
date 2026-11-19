@@ -28,9 +28,11 @@ def sample_testcase_dir(temp_dir: Path, sample_testcase: TestCase) -> Path:
     screenshots_dir = case_dir / "screenshots"
     screenshots_dir.mkdir(exist_ok=True)
 
-    # Write a dummy screenshot
+    # Write a valid dummy PNG screenshot
+    from PIL import Image
+
     mock_screenshot = screenshots_dir / "001_click_button.png"
-    mock_screenshot.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR...")
+    Image.new("RGB", (100, 100), color=(10, 20, 30)).save(mock_screenshot)
 
     # Update step screenshot path to relative
     sample_testcase.steps[0].screenshot_path = Path("screenshots/001_click_button.png")
@@ -150,3 +152,141 @@ def test_ui_cli_command() -> None:
     result = runner.invoke(app, ["ui", "--help"])
     assert result.exit_code == 0
     assert "Launch the QA Auto Studio" in result.stdout
+
+
+def test_update_step(
+    client: TestClient, sample_testcase_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test updating step fields via API."""
+    tc_file = sample_testcase_dir / "testcase.json"
+    monkeypatch.setattr(
+        "qa_auto.ui.service.find_testcase_files",
+        lambda search_paths=None: [tc_file],
+    )
+    case_id = json.loads(tc_file.read_text())["id"]
+
+    res = client.put(
+        f"/api/testcases/{case_id}/steps/1",
+        json={
+            "action_type": "input",
+            "input_value": "secret123",
+            "description_short": "Enter secret password",
+            "element": {"selector": "input#pass"},
+        },
+    )
+    assert res.status_code == 200
+    updated = res.json()
+    step1 = updated["steps"][0]
+    assert step1["action_type"] == "input"
+    assert step1["input_value"] == "secret123"
+    assert step1["element"]["selector"] == "input#pass"
+
+
+def test_reorder_step(
+    client: TestClient, sample_testcase_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test reordering steps up and down."""
+    tc_file = sample_testcase_dir / "testcase.json"
+    monkeypatch.setattr(
+        "qa_auto.ui.service.find_testcase_files",
+        lambda search_paths=None: [tc_file],
+    )
+    case_id = json.loads(tc_file.read_text())["id"]
+
+    # Reorder step 1 down
+    res = client.post(
+        f"/api/testcases/{case_id}/steps/1/reorder",
+        json={"direction": "down"},
+    )
+    assert res.status_code == 200
+    updated = res.json()
+    assert updated["steps"][0]["number"] == 1
+    assert updated["steps"][1]["number"] == 2
+
+
+def test_add_and_delete_step(
+    client: TestClient, sample_testcase_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test adding a new step and deleting it."""
+    tc_file = sample_testcase_dir / "testcase.json"
+    monkeypatch.setattr(
+        "qa_auto.ui.service.find_testcase_files",
+        lambda search_paths=None: [tc_file],
+    )
+    case_id = json.loads(tc_file.read_text())["id"]
+
+    # Add step
+    res = client.post(
+        f"/api/testcases/{case_id}/steps",
+        json={
+            "action_type": "click",
+            "selector": "button#submit-form",
+            "description_short": "Submit form",
+        },
+    )
+    assert res.status_code == 200
+    updated = res.json()
+    assert updated["total_steps"] == 3
+    assert updated["steps"][2]["element"]["selector"] == "button#submit-form"
+
+    # Delete newly added step 3
+    del_res = client.delete(f"/api/testcases/{case_id}/steps/3")
+    assert del_res.status_code == 200
+    assert del_res.json()["total_steps"] == 2
+
+
+def test_add_and_delete_assertion(
+    client: TestClient, sample_testcase_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test attaching a custom assertion and deleting it."""
+    tc_file = sample_testcase_dir / "testcase.json"
+    monkeypatch.setattr(
+        "qa_auto.ui.service.find_testcase_files",
+        lambda search_paths=None: [tc_file],
+    )
+    case_id = json.loads(tc_file.read_text())["id"]
+
+    # Add assertion
+    res = client.post(
+        f"/api/testcases/{case_id}/assertions",
+        json={
+            "kind": "visible",
+            "target": "div#welcome-banner",
+            "step_number": 1,
+            "enforced": True,
+        },
+    )
+    assert res.status_code == 200
+    updated = res.json()
+    assert len(updated["custom_assertions"]) == 1
+    assert updated["custom_assertions"][0]["kind"] == "visible"
+    assert updated["custom_assertions"][0]["target"] == "div#welcome-banner"
+
+    # Delete assertion
+    del_res = client.delete(f"/api/testcases/{case_id}/assertions/0")
+    assert del_res.status_code == 200
+    assert len(del_res.json()["custom_assertions"]) == 0
+
+
+def test_step_visual_diff(
+    client: TestClient, sample_testcase_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test step visual diff execution."""
+    tc_file = sample_testcase_dir / "testcase.json"
+    monkeypatch.setattr(
+        "qa_auto.ui.service.find_testcase_files",
+        lambda search_paths=None: [tc_file],
+    )
+    case_id = json.loads(tc_file.read_text())["id"]
+
+    # Run visual diff for step 1
+    res = client.post(
+        f"/api/testcases/{case_id}/steps/1/visual-diff",
+        json={"threshold": 0.1},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert "diff_percentage" in data
+    assert "passed" in data
+    assert data["diff_percentage"] == 0.0
+    assert data["passed"] is True

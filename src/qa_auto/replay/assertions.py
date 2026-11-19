@@ -62,6 +62,8 @@ def evaluate_assertions(
     response_statuses: dict[str, list[int]],
     final_url: str,
     new_page_errors: list[str],
+    visible_targets: set[str] | list[str] | None = None,
+    page_text: str | None = None,
 ) -> list[AssertionResult]:
     """Evaluate assertions belonging to a single step."""
     results: list[AssertionResult] = []
@@ -114,6 +116,29 @@ def evaluate_assertions(
                     message=(
                         "" if passed else f"Expected path {assertion.expected}, got {actual_path}"
                     ),
+                )
+            )
+        elif assertion.kind == "visible":
+            target = assertion.target or (step.element.selector if step.element else None)
+            vis_set = set(visible_targets or [])
+            passed = target in vis_set if target else False
+            results.append(
+                AssertionResult(
+                    assertion=assertion,
+                    passed=passed,
+                    actual="visible" if passed else "not visible",
+                    message="" if passed else f"Element {target} not visible",
+                )
+            )
+        elif assertion.kind == "text":
+            expected_text = str(assertion.expected or "")
+            passed = expected_text in (page_text or "")
+            results.append(
+                AssertionResult(
+                    assertion=assertion,
+                    passed=passed,
+                    actual=f"'{expected_text}' found" if passed else "text not found",
+                    message="" if passed else f"Expected text '{expected_text}' not found on page",
                 )
             )
         else:

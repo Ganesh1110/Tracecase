@@ -11,10 +11,13 @@ from pathlib import Path
 from typing import Any
 
 from qa_auto.codegen.pytest_exporter import generate_pytest_code
-from qa_auto.models import TestCase
+from qa_auto.exporters.html_exporter import HTMLExporter
+from qa_auto.exporters.markdown_exporter import MarkdownExporter
+from qa_auto.models import ElementInfo, Step, TestCase
 from qa_auto.recorder import Recorder
 from qa_auto.replay.engine import ReplayEngine
 from qa_auto.replay.models import ReplayResult
+from qa_auto.replay.visual import VisualDiffResult, compare_images
 
 logger = logging.getLogger("qa_auto.ui.service")
 
@@ -299,3 +302,243 @@ def export_pytest_code(identifier: str) -> str:
     """Generate Playwright pytest code for a test case."""
     _, testcase = resolve_testcase_file(identifier)
     return generate_pytest_code(testcase)
+
+
+def save_testcase(tc_file: Path, testcase: TestCase) -> None:
+    """Persist updated TestCase to disk and refresh HTML/Markdown reports."""
+    tc_file.write_text(testcase.model_dump_json(indent=2), encoding="utf-8")
+
+    # Refresh HTML and Markdown reports
+    try:
+        HTMLExporter().export(testcase, tc_file.parent)
+        MarkdownExporter().export(testcase, tc_file.parent)
+    except Exception as exc:
+        logger.warning("Could not refresh HTML/MD reports for %s: %s", tc_file, exc)
+
+
+def update_testcase_step(
+    identifier: str, step_number: int, update_data: dict[str, Any]
+) -> TestCase:
+    """Update fields of an existing step in a testcase."""
+    tc_file, testcase = resolve_testcase_file(identifier)
+    target_step: Step | None = None
+    for s in testcase.steps:
+        if s.number == step_number:
+            target_step = s
+            break
+
+    if target_step is None:
+        raise ValueError(f"Step {step_number} not found in test case {identifier}")
+
+    if "action_type" in update_data and update_data["action_type"]:
+        target_step.action_type = update_data["action_type"]
+    if "input_value" in update_data:
+        target_step.input_value = update_data["input_value"]
+    if "key" in update_data:
+        target_step.key = update_data["key"]
+    if "url" in update_data:
+        target_step.url = update_data["url"]
+    if "description_short" in update_data and update_data["description_short"]:
+        target_step.description_short = update_data["description_short"]
+    if "description_detailed" in update_data and update_data["description_detailed"]:
+        target_step.description_detailed = update_data["description_detailed"]
+
+    # Update element info if provided
+    if "element" in update_data and isinstance(update_data["element"], dict):
+        elem_data = update_data["element"]
+        if target_step.element is None:
+            target_step.element = ElementInfo(
+                selector=elem_data.get("selector", ""),
+                xpath=elem_data.get("xpath"),
+                tag_name=elem_data.get("tag_name", "button"),
+                text=elem_data.get("text"),
+                attributes=elem_data.get("attributes", {}),
+                bounding_box=elem_data.get(
+                    "bounding_box", {"x": 0, "y": 0, "width": 0, "height": 0}
+                ),
+            )
+        else:
+            if "selector" in elem_data:
+                target_step.element.selector = elem_data["selector"]
+            if "xpath" in elem_data:
+                target_step.element.xpath = elem_data["xpath"]
+            if "text" in elem_data:
+                target_step.element.text = elem_data["text"]
+            if "tag_name" in elem_data:
+                target_step.element.tag_name = elem_data["tag_name"]
+
+    save_testcase(tc_file, testcase)
+    return testcase
+
+
+def reorder_testcase_step(identifier: str, step_number: int, direction: str) -> TestCase:
+    """Move a step up or down in the sequence and re-index numbers."""
+    tc_file, testcase = resolve_testcase_file(identifier)
+    idx = -1
+    for i, s in enumerate(testcase.steps):
+        if s.number == step_number:
+            idx = i
+            break
+
+    if idx == -1:
+        raise ValueError(f"Step {step_number} not found in test case {identifier}")
+
+    if direction == "up" and idx > 0:
+        testcase.steps[idx], testcase.steps[idx - 1] = testcase.steps[idx - 1], testcase.steps[idx]
+    elif direction == "down" and idx < len(testcase.steps) - 1:
+        testcase.steps[idx], testcase.steps[idx + 1] = testcase.steps[idx + 1], testcase.steps[idx]
+    else:
+        return testcase
+
+    # Re-index all step numbers
+    for i, step in enumerate(testcase.steps):
+        step.number = i + 1
+
+    save_testcase(tc_file, testcase)
+    return testcase
+
+
+def delete_testcase_step(identifier: str, step_number: int) -> TestCase:
+    """Delete a step from the test case and re-index remaining steps."""
+    tc_file, testcase = resolve_testcase_file(identifier)
+    testcase.steps = [s for s in testcase.steps if s.number != step_number]
+
+    # Re-index step numbers
+    for i, step in enumerate(testcase.steps):
+        step.number = i + 1
+
+    testcase.total_steps = len(testcase.steps)
+    save_testcase(tc_file, testcase)
+    return testcase
+
+
+def add_testcase_step(
+    identifier: str, step_data: dict[str, Any], position: int | None = None
+) -> TestCase:
+    """Add a new step to the test case at the given position (1-based) or append."""
+    tc_file, testcase = resolve_testcase_file(identifier)
+    action_type = step_data.get("action_type", "click")
+    selector = step_data.get("selector") or (
+        step_data.get("element", {}).get("selector")
+        if isinstance(step_data.get("element"), dict)
+        else ""
+    )
+
+    elem: ElementInfo | None = None
+    if selector:
+        elem = ElementInfo(
+            selector=selector,
+            xpath=step_data.get("xpath"),
+            tag_name=step_data.get("tag_name", "button"),
+            text=step_data.get("text"),
+            attributes={},
+            bounding_box={"x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0},
+        )
+
+    short_desc = step_data.get("description_short")
+    if not short_desc:
+        if action_type == "navigate":
+            short_desc = f"Navigate to {step_data.get('url', '')}"
+        elif action_type == "input":
+            short_desc = f"Enter '{step_data.get('input_value', '')}' into {selector or 'field'}"
+        else:
+            short_desc = f"{action_type.capitalize()} on {selector or 'element'}"
+
+    new_step = Step(
+        number=len(testcase.steps) + 1,
+        timestamp=datetime.now(),
+        action_type=action_type,
+        element=elem,
+        url=step_data.get("url"),
+        input_value=step_data.get("input_value"),
+        key=step_data.get("key"),
+        description_short=short_desc,
+        description_detailed=step_data.get("description_detailed", short_desc),
+    )
+
+    if position is not None and 1 <= position <= len(testcase.steps):
+        testcase.steps.insert(position - 1, new_step)
+    else:
+        testcase.steps.append(new_step)
+
+    # Re-index
+    for i, step in enumerate(testcase.steps):
+        step.number = i + 1
+
+    testcase.total_steps = len(testcase.steps)
+    save_testcase(tc_file, testcase)
+    return testcase
+
+
+def add_custom_assertion(identifier: str, assertion_data: dict[str, Any]) -> TestCase:
+    """Attach a user-defined assertion to a step in the testcase."""
+    tc_file, testcase = resolve_testcase_file(identifier)
+    new_assertion = {
+        "kind": assertion_data["kind"],
+        "target": assertion_data.get("target"),
+        "expected": assertion_data.get("expected"),
+        "step_number": int(assertion_data.get("step_number", 1)),
+        "source": "manual",
+        "confidence": 1.0,
+        "enforced": bool(assertion_data.get("enforced", True)),
+    }
+    testcase.custom_assertions.append(new_assertion)
+    save_testcase(tc_file, testcase)
+    return testcase
+
+
+def delete_custom_assertion(identifier: str, index: int) -> TestCase:
+    """Remove a custom assertion by index."""
+    tc_file, testcase = resolve_testcase_file(identifier)
+    if 0 <= index < len(testcase.custom_assertions):
+        testcase.custom_assertions.pop(index)
+        save_testcase(tc_file, testcase)
+    return testcase
+
+
+def run_visual_diff_for_step(
+    identifier: str,
+    step_number: int,
+    candidate_filename: str | None = None,
+    threshold: float = 0.1,
+) -> VisualDiffResult:
+    """Compare baseline screenshot of a step against a candidate/replay screenshot."""
+    tc_file, testcase = resolve_testcase_file(identifier)
+    base_dir = tc_file.parent
+
+    target_step = next((s for s in testcase.steps if s.number == step_number), None)
+    if not target_step:
+        raise ValueError(f"Step {step_number} not found in {identifier}")
+
+    baseline_rel = target_step.screenshot_with_highlight or target_step.screenshot_path
+    if not baseline_rel:
+        raise FileNotFoundError(f"No baseline screenshot recorded for step {step_number}")
+
+    baseline_path = (
+        base_dir / baseline_rel if not Path(baseline_rel).is_absolute() else Path(baseline_rel)
+    )
+    if not baseline_path.exists():
+        raise FileNotFoundError(f"Baseline screenshot not found at {baseline_path}")
+
+    # Determine candidate image
+    if candidate_filename:
+        candidate_path = Path(candidate_filename)
+        if not candidate_path.is_absolute():
+            candidate_path = base_dir / candidate_filename
+    else:
+        # Check latest replay run for this step
+        replay_candidates = sorted(
+            base_dir.glob(f"replay_runs/**/{step_number:03d}_*.png"), reverse=True
+        )
+        candidate_path = replay_candidates[0] if replay_candidates else baseline_path
+
+    diff_dir = base_dir / "diffs"
+    diff_dir.mkdir(parents=True, exist_ok=True)
+    diff_output = diff_dir / f"diff_step_{step_number:03d}.png"
+
+    return compare_images(
+        baseline=baseline_path,
+        candidate=candidate_path,
+        diff_output=diff_output,
+        threshold_percent=threshold,
+    )

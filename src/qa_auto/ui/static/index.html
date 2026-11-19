@@ -42,6 +42,39 @@
     ::-webkit-scrollbar-thumb { background: #212a3d; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #323f59; }
     [v-cloak] { display: none; }
+    
+    /* Interactive Split Slider */
+    .split-slider-container {
+      position: relative;
+      overflow: hidden;
+      user-select: none;
+    }
+    .split-slider-before {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 50%;
+      height: 100%;
+      overflow: hidden;
+      border-right: 2px solid #6366f1;
+      z-index: 10;
+    }
+    .split-slider-handle {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #6366f1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 12px rgba(99, 102, 241, 0.6);
+      cursor: ew-resize;
+      z-index: 20;
+    }
   </style>
 </head>
 <body class="bg-dark-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-brand-500 selection:text-white">
@@ -57,8 +90,9 @@
           <div class="flex items-center space-x-2">
             <span class="font-bold tracking-tight text-lg text-white">QA AUTO</span>
             <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/20">STUDIO</span>
+            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">PHASE 2</span>
           </div>
-          <p class="text-[10px] text-slate-400 tracking-wider uppercase font-medium">Kane AI-Inspired QA Platform</p>
+          <p class="text-[10px] text-slate-400 tracking-wider uppercase font-medium">Low-Code Test Editor • Assertions • Visual Diff</p>
         </div>
       </div>
     </div>
@@ -119,7 +153,7 @@
           <i data-lucide="layers" class="w-8 h-8"></i>
         </div>
         <h3 class="text-lg font-semibold text-white mb-1">Select or Record a Test Case</h3>
-        <p class="text-sm text-slate-400 max-w-md mb-6">Choose a recorded test flow from the sidebar to inspect steps, element locators, network requests, and trigger AI replays.</p>
+        <p class="text-sm text-slate-400 max-w-md mb-6">Choose a recorded test flow from the sidebar to inspect, edit steps, add assertions, run visual diffs, and trigger replays.</p>
         <button onclick="openRecordModal()" class="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium transition-colors">
           Record Flow
         </button>
@@ -148,6 +182,10 @@
           </div>
 
           <div class="flex items-center space-x-3">
+            <button onclick="openAddStepModal()" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-brand-600/20 hover:bg-brand-600/30 border border-brand-500/30 text-brand-300 text-xs font-semibold transition-all">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>Add Step</span>
+            </button>
             <button onclick="openCodegenModal()" class="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 border border-dark-600 text-slate-200 text-xs font-medium transition-colors">
               <i data-lucide="code-2" class="w-4 h-4 text-brand-400"></i>
               <span>Export Pytest</span>
@@ -166,18 +204,24 @@
         <!-- SPLIT PANEL: TIMELINE & STEP INSPECTOR -->
         <div class="flex-1 flex overflow-hidden">
 
-          <!-- LEFT: STEP TIMELINE (KANE AI STYLE) -->
+          <!-- LEFT: STEP TIMELINE (KANE AI LOW-CODE EDITOR) -->
           <div class="w-1/2 border-r border-dark-700 flex flex-col bg-dark-900/30 overflow-hidden">
             <div class="px-6 py-3 border-b border-dark-700 bg-dark-900/80 flex items-center justify-between text-xs font-medium text-slate-400">
               <span class="flex items-center space-x-2">
                 <i data-lucide="git-commit" class="w-4 h-4 text-brand-400"></i>
-                <span>Action Timeline & User Interactions</span>
+                <span>Action Timeline & Step Controls</span>
               </span>
-              <span id="timeline-count-badge" class="text-[11px] font-mono text-slate-500">0 Steps</span>
+              <div class="flex items-center space-x-3">
+                <span id="timeline-count-badge" class="text-[11px] font-mono text-slate-500">0 Steps</span>
+                <button onclick="openAddStepModal()" class="text-xs text-brand-400 hover:text-brand-300 font-semibold flex items-center space-x-1">
+                  <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                  <span>New Step</span>
+                </button>
+              </div>
             </div>
 
             <div id="steps-timeline" class="flex-1 overflow-y-auto p-4 space-y-2.5">
-              <!-- Dynamically populated step cards -->
+              <!-- Dynamically populated step cards with edit/reorder/delete buttons -->
             </div>
           </div>
 
@@ -187,11 +231,18 @@
             <div class="px-6 py-2.5 border-b border-dark-700 bg-dark-900/80 flex items-center justify-between text-xs">
               <div class="flex space-x-1" id="inspector-tabs">
                 <button onclick="switchTab('visual')" id="tab-visual" class="px-3 py-1.5 rounded-md font-medium text-slate-200 bg-dark-700 transition-colors">Visual Evidence</button>
+                <button onclick="switchTab('diff')" id="tab-diff" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-slate-200 transition-colors">Visual Diff</button>
                 <button onclick="switchTab('element')" id="tab-element" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-slate-200 transition-colors">DOM Element</button>
+                <button onclick="switchTab('assertions')" id="tab-assertions" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-slate-200 transition-colors">Assertions (<span id="assert-count-pill">0</span>)</button>
                 <button onclick="switchTab('network')" id="tab-network" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-slate-200 transition-colors">Network (<span id="net-count-pill">0</span>)</button>
-                <button onclick="switchTab('console')" id="tab-console" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-slate-200 transition-colors">Console Logs</button>
+                <button onclick="switchTab('console')" id="tab-console" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-slate-200 transition-colors">Console</button>
               </div>
-              <span id="inspector-step-title" class="text-xs font-mono text-brand-400 font-semibold">Step #1</span>
+              <div class="flex items-center space-x-2">
+                <span id="inspector-step-title" class="text-xs font-mono text-brand-400 font-semibold">Step #1</span>
+                <button onclick="openEditStepModal(selectedStepNumber)" title="Edit this step" class="text-slate-400 hover:text-white p-1 rounded hover:bg-dark-800">
+                  <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
             </div>
 
             <!-- Tab 1: Visual Evidence (Screenshot with Highlight) -->
@@ -205,7 +256,79 @@
               </div>
             </div>
 
-            <!-- Tab 2: DOM Element Inspector -->
+            <!-- Tab 2: Visual Regression Diff Inspector (Kane AI Parity) -->
+            <div id="panel-diff" class="flex-1 flex flex-col p-4 overflow-y-auto hidden space-y-4">
+              <!-- Visual Diff Controls -->
+              <div class="flex items-center justify-between p-3 rounded-xl border border-dark-700 bg-dark-900">
+                <div class="flex items-center space-x-3">
+                  <button onclick="runStepVisualDiff()" id="btn-run-diff" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-md shadow-indigo-600/20">
+                    <i data-lucide="scan-eye" class="w-3.5 h-3.5"></i>
+                    <span>Run Visual Diff</span>
+                  </button>
+                  <div class="flex items-center space-x-1 bg-dark-800 p-0.5 rounded-lg border border-dark-700 text-xs">
+                    <button onclick="setDiffViewMode('split')" id="btn-mode-split" class="px-2 py-1 rounded bg-dark-700 text-white font-medium">Split Slider</button>
+                    <button onclick="setDiffViewMode('side')" id="btn-mode-side" class="px-2 py-1 rounded text-slate-400 hover:text-white">Side-by-Side</button>
+                    <button onclick="setDiffViewMode('diff')" id="btn-mode-diff" class="px-2 py-1 rounded text-slate-400 hover:text-white">Diff Highlight</button>
+                  </div>
+                </div>
+
+                <div id="diff-metrics-pill" class="text-xs font-mono text-slate-400">
+                  Tolerance: 0.1%
+                </div>
+              </div>
+
+              <!-- Metric Cards -->
+              <div id="diff-metrics-row" class="grid grid-cols-3 gap-3 hidden">
+                <div class="p-3 rounded-xl border border-dark-700 bg-dark-900 text-center">
+                  <div class="text-[10px] uppercase font-bold text-slate-400">Visual Status</div>
+                  <div id="diff-status-val" class="text-sm font-bold text-emerald-400 mt-0.5">MATCH</div>
+                </div>
+                <div class="p-3 rounded-xl border border-dark-700 bg-dark-900 text-center">
+                  <div class="text-[10px] uppercase font-bold text-slate-400">Diff Pixels</div>
+                  <div id="diff-pixels-val" class="text-sm font-mono text-slate-200 mt-0.5">0 px</div>
+                </div>
+                <div class="p-3 rounded-xl border border-dark-700 bg-dark-900 text-center">
+                  <div class="text-[10px] uppercase font-bold text-slate-400">Diff Percentage</div>
+                  <div id="diff-pct-val" class="text-sm font-mono text-slate-200 mt-0.5">0.00%</div>
+                </div>
+              </div>
+
+              <!-- Diff Canvas: Split Slider View -->
+              <div id="diff-view-split" class="relative min-h-[320px] rounded-xl border border-dark-700 bg-dark-900 overflow-hidden flex items-center justify-center p-2">
+                <div id="split-slider-box" class="split-slider-container relative w-full h-[320px] rounded-lg overflow-hidden flex items-center justify-center">
+                  <img id="split-candidate-img" src="" alt="Candidate" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
+                  <div id="split-before-layer" class="split-slider-before">
+                    <img id="split-baseline-img" src="" alt="Baseline" class="absolute top-0 left-0 max-w-none h-full object-contain pointer-events-none" />
+                  </div>
+                  <div id="split-handle" class="split-slider-handle">
+                    <i data-lucide="chevrons-left-right" class="w-4 h-4 text-white"></i>
+                  </div>
+                </div>
+                <div id="diff-no-images" class="text-center py-12 text-xs text-slate-500">
+                  Click "Run Visual Diff" above to compare baseline against replay candidate
+                </div>
+              </div>
+
+              <!-- Diff Canvas: Side by Side View -->
+              <div id="diff-view-side" class="grid grid-cols-2 gap-3 hidden">
+                <div class="p-3 rounded-xl border border-dark-700 bg-dark-900">
+                  <div class="text-[11px] font-semibold text-slate-400 mb-2">Baseline (Recorded)</div>
+                  <img id="side-baseline-img" src="" class="w-full h-48 object-contain rounded bg-dark-950" />
+                </div>
+                <div class="p-3 rounded-xl border border-dark-700 bg-dark-900">
+                  <div class="text-[11px] font-semibold text-slate-400 mb-2">Candidate (Replay)</div>
+                  <img id="side-candidate-img" src="" class="w-full h-48 object-contain rounded bg-dark-950" />
+                </div>
+              </div>
+
+              <!-- Diff Canvas: Diff Highlight Overlay View -->
+              <div id="diff-view-diff" class="p-3 rounded-xl border border-dark-700 bg-dark-900 hidden flex flex-col items-center">
+                <div class="text-[11px] font-semibold text-slate-400 mb-2 self-start">Pixel Delta Highlight (Differences in Red)</div>
+                <img id="highlight-diff-img" src="" class="max-h-80 object-contain rounded bg-dark-950" />
+              </div>
+            </div>
+
+            <!-- Tab 3: DOM Element Inspector -->
             <div id="panel-element" class="flex-1 p-6 overflow-y-auto hidden space-y-4">
               <div>
                 <label class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">CSS Selector</label>
@@ -252,14 +375,32 @@
               </div>
             </div>
 
-            <!-- Tab 3: Network Waterfall -->
+            <!-- Tab 4: Assertions Builder (Kane AI Parity) -->
+            <div id="panel-assertions" class="flex-1 p-5 overflow-y-auto hidden space-y-4">
+              <div class="flex items-center justify-between pb-2 border-b border-dark-700">
+                <div>
+                  <h4 class="text-xs font-bold text-white uppercase tracking-wider">Step Assertions & Expectations</h4>
+                  <p class="text-[11px] text-slate-400">Derived automatic checks and custom user assertions</p>
+                </div>
+                <button onclick="openAddAssertionModal()" class="px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-md shadow-brand-600/20">
+                  <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+                  <span>Add Assertion</span>
+                </button>
+              </div>
+
+              <div id="assertions-list" class="space-y-2.5">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
+
+            <!-- Tab 5: Network Waterfall -->
             <div id="panel-network" class="flex-1 p-4 overflow-y-auto hidden">
               <div id="network-list" class="space-y-2">
                 <!-- Populated dynamically -->
               </div>
             </div>
 
-            <!-- Tab 4: Console Logs -->
+            <!-- Tab 6: Console Logs -->
             <div id="panel-console" class="flex-1 p-4 overflow-y-auto hidden">
               <div id="console-list" class="space-y-2 font-mono text-xs">
                 <!-- Populated dynamically -->
@@ -270,6 +411,171 @@
         </div>
       </div>
     </main>
+  </div>
+
+  <!-- MODAL: EDIT STEP (LOW-CODE BUILDER) -->
+  <div id="modal-edit-step" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-dark-900 border border-dark-700 w-full max-w-lg rounded-2xl shadow-2xl p-6">
+      <div class="flex items-center justify-between pb-4 border-b border-dark-700">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded-lg bg-brand-500/20 text-brand-400 flex items-center justify-center">
+            <i data-lucide="edit" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Edit Test Step</h3>
+            <p class="text-xs text-slate-400" id="edit-step-subtitle">Modify action type, selector, or input parameters</p>
+          </div>
+        </div>
+        <button onclick="closeEditStepModal()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4 pt-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Action Type</label>
+          <select id="edit-action-type" class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500">
+            <option value="click">click</option>
+            <option value="input">input / fill</option>
+            <option value="navigate">navigate</option>
+            <option value="dblclick">double click</option>
+            <option value="keypress">keypress</option>
+            <option value="select">select option</option>
+            <option value="check">check checkbox</option>
+            <option value="uncheck">uncheck checkbox</option>
+            <option value="hover">hover</option>
+            <option value="scroll">scroll</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Description</label>
+          <input type="text" id="edit-desc-short" class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500" />
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">CSS Selector / Locator</label>
+          <input type="text" id="edit-selector" class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-emerald-400 focus:outline-none focus:border-brand-500" />
+        </div>
+
+        <div id="edit-input-group">
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Input Value</label>
+          <input type="text" id="edit-input-value" class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-brand-500" />
+        </div>
+
+        <div id="edit-url-group">
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Navigation URL</label>
+          <input type="text" id="edit-url" class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-brand-500" />
+        </div>
+
+        <div class="pt-2 flex items-center justify-end space-x-3">
+          <button onclick="closeEditStepModal()" class="px-4 py-2 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300 text-xs font-medium">Cancel</button>
+          <button onclick="saveStepEdits()" class="px-5 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold shadow-md shadow-brand-600/30">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD NEW STEP -->
+  <div id="modal-add-step" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-dark-900 border border-dark-700 w-full max-w-lg rounded-2xl shadow-2xl p-6">
+      <div class="flex items-center justify-between pb-4 border-b border-dark-700">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+            <i data-lucide="plus" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Add New Test Step</h3>
+            <p class="text-xs text-slate-400">Append or insert an interaction into this flow</p>
+          </div>
+        </div>
+        <button onclick="closeAddStepModal()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4 pt-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Action Type *</label>
+          <select id="new-action-type" class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500">
+            <option value="click">click</option>
+            <option value="input">input / fill</option>
+            <option value="navigate">navigate</option>
+            <option value="dblclick">double click</option>
+            <option value="keypress">keypress</option>
+            <option value="hover">hover</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Target Selector (CSS / XPath)</label>
+          <input type="text" id="new-selector" placeholder="e.g. button#submit or input[name='q']" class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-emerald-400 focus:outline-none focus:border-brand-500" />
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Input Value / Key / URL</label>
+          <input type="text" id="new-value" placeholder="e.g. Text to type or https://... for navigate" class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-brand-500" />
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Step Description (Optional)</label>
+          <input type="text" id="new-desc" placeholder="e.g. Click submit button" class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500" />
+        </div>
+
+        <div class="pt-2 flex items-center justify-end space-x-3">
+          <button onclick="closeAddStepModal()" class="px-4 py-2 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300 text-xs font-medium">Cancel</button>
+          <button onclick="submitNewStep()" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md shadow-emerald-600/30">Add Step</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD ASSERTION (KANE AI ASSERTION BUILDER) -->
+  <div id="modal-add-assertion" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-dark-900 border border-dark-700 w-full max-w-lg rounded-2xl shadow-2xl p-6">
+      <div class="flex items-center justify-between pb-4 border-b border-dark-700">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded-lg bg-brand-500/20 text-brand-400 flex items-center justify-center">
+            <i data-lucide="shield-check" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Add Smart Assertion</h3>
+            <p class="text-xs text-slate-400">Validate visibility, content, URL, or API responses</p>
+          </div>
+        </div>
+        <button onclick="closeAddAssertionModal()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4 pt-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Assertion Type *</label>
+          <select id="assert-kind" onchange="updateAssertionFields()" class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500">
+            <option value="visible">Element is Visible (DOM Assertion)</option>
+            <option value="text">Page / Element Contains Text</option>
+            <option value="url">URL Matches / Contains Path</option>
+            <option value="status">HTTP API Status Code (2xx / 200)</option>
+            <option value="no_page_error">Zero JavaScript Exceptions</option>
+          </select>
+        </div>
+
+        <div id="assert-target-group">
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Target Selector or API Endpoint</label>
+          <input type="text" id="assert-target" placeholder="e.g. button#submit or /api/login" class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-emerald-400 focus:outline-none focus:border-brand-500" />
+        </div>
+
+        <div id="assert-expected-group">
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Expected Value</label>
+          <input type="text" id="assert-expected" placeholder="e.g. 'Dashboard' or '2xx' or '/welcome'" class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-brand-500" />
+        </div>
+
+        <div class="pt-2 flex items-center justify-end space-x-3">
+          <button onclick="closeAddAssertionModal()" class="px-4 py-2 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300 text-xs font-medium">Cancel</button>
+          <button onclick="submitNewAssertion()" class="px-5 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold shadow-md shadow-brand-600/30">Attach Assertion</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- MODAL: RECORD NEW TEST -->
@@ -355,7 +661,7 @@
     </div>
   </div>
 
-  <!-- MODAL: REPLAY RUNNER (KANE AI PARITY) -->
+  <!-- MODAL: REPLAY RUNNER -->
   <div id="modal-replay" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
     <div class="bg-dark-900 border border-dark-700 w-full max-w-2xl rounded-2xl shadow-2xl p-6">
       <div class="flex items-center justify-between pb-4 border-b border-dark-700">
@@ -373,7 +679,6 @@
         </button>
       </div>
 
-      <!-- Replay Options Form -->
       <div id="replay-options-view" class="space-y-4 pt-4">
         <div class="grid grid-cols-2 gap-4">
           <label class="flex items-center justify-between p-3 rounded-lg border border-dark-700 bg-dark-850 cursor-pointer hover:border-brand-500/50">
@@ -389,7 +694,7 @@
               <div class="text-xs font-semibold text-white">Visual Regression Diff</div>
               <div class="text-[11px] text-slate-400">Compare screenshots pixel-by-pixel</div>
             </div>
-            <input type="checkbox" id="replay-diff" class="w-4 h-4 rounded text-brand-600 bg-dark-900 border-dark-700 focus:ring-brand-500" />
+            <input type="checkbox" id="replay-diff" checked class="w-4 h-4 rounded text-brand-600 bg-dark-900 border-dark-700 focus:ring-brand-500" />
           </label>
 
           <label class="flex items-center justify-between p-3 rounded-lg border border-dark-700 bg-dark-850 cursor-pointer hover:border-brand-500/50">
@@ -415,9 +720,7 @@
         </button>
       </div>
 
-      <!-- Replay Execution Status & Results -->
       <div id="replay-results-view" class="hidden pt-4 space-y-4">
-        <!-- Replay Status Banner -->
         <div id="replay-status-banner" class="p-4 rounded-xl border flex items-center justify-between">
           <div class="flex items-center space-x-3">
             <div id="replay-status-icon" class="w-8 h-8 rounded-lg flex items-center justify-center"></div>
@@ -429,7 +732,6 @@
           <button onclick="resetReplayModal()" class="text-xs px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300">Run Again</button>
         </div>
 
-        <!-- Step Results List -->
         <div class="border border-dark-700 rounded-xl overflow-hidden">
           <div class="px-4 py-2 bg-dark-800/80 border-b border-dark-700 text-xs font-semibold text-slate-300">Step Replay Log</div>
           <div id="replay-steps-log" class="max-h-60 overflow-y-auto p-3 space-y-2 text-xs font-mono">
@@ -478,6 +780,8 @@
     let currentTestCase = null;
     let selectedStepNumber = 1;
     let activePollInterval = null;
+    let currentDiffMode = 'split';
+    let isSliderDragging = false;
 
     // Action color themes
     const actionColors = {
@@ -487,6 +791,8 @@
       navigate: { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' },
       keypress: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/20' },
       select: { bg: 'bg-indigo-500/10', text: 'text-indigo-400', border: 'border-indigo-500/20' },
+      check: { bg: 'bg-teal-500/10', text: 'text-teal-400', border: 'border-teal-500/20' },
+      uncheck: { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/20' },
       hover: { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
       scroll: { bg: 'bg-slate-500/10', text: 'text-slate-400', border: 'border-slate-500/20' }
     };
@@ -494,6 +800,7 @@
     // Initialize application
     async function init() {
       lucide.createIcons();
+      setupSplitSlider();
       await loadTestCases();
     }
 
@@ -580,9 +887,10 @@
         // Render steps timeline
         renderStepsTimeline(currentTestCase.steps);
 
-        // Select first step
+        // Select first step or maintain selected step
+        const stepToSelect = currentTestCase.steps.find(s => s.number === selectedStepNumber) ? selectedStepNumber : (currentTestCase.steps[0]?.number || 1);
         if (currentTestCase.steps.length > 0) {
-          inspectStep(currentTestCase.steps[0].number);
+          inspectStep(stepToSelect);
         }
 
         lucide.createIcons();
@@ -591,24 +899,30 @@
       }
     }
 
-    // Render Kane AI-style Steps Timeline
+    // Render Kane AI-style Steps Timeline with Low-Code Editor Controls
     function renderStepsTimeline(steps) {
       const container = document.getElementById('steps-timeline');
       if (!steps || steps.length === 0) {
-        container.innerHTML = '<div class="p-8 text-center text-xs text-slate-500">No steps recorded in this flow</div>';
+        container.innerHTML = `
+          <div class="p-8 text-center text-xs text-slate-500">
+            <p class="mb-3">No steps recorded in this flow</p>
+            <button onclick="openAddStepModal()" class="px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-semibold">+ Add First Step</button>
+          </div>
+        `;
         return;
       }
 
-      container.innerHTML = steps.map(step => {
+      container.innerHTML = steps.map((step, idx) => {
         const isSelected = step.number === selectedStepNumber;
         const color = actionColors[step.action_type] || { bg: 'bg-slate-500/10', text: 'text-slate-400', border: 'border-slate-500/20' };
         const shotFilename = step.screenshot_with_highlight || step.screenshot_path;
         const shotUrl = shotFilename ? `/api/testcases/${encodeURIComponent(currentTestCase.id)}/screenshots/${encodeURIComponent(shotFilename.split('/').pop())}` : null;
         const netCount = (step.network_requests || []).length;
         const logCount = (step.console_logs || []).length;
+        const customAssertionsCount = (currentTestCase.custom_assertions || []).filter(a => a.step_number === step.number).length;
 
         return `
-          <div onclick="inspectStep(${step.number})" class="p-3 rounded-xl border cursor-pointer transition-all flex items-start space-x-3.5 ${isSelected ? 'bg-dark-850 border-brand-500 shadow-md ring-1 ring-brand-500/30' : 'bg-dark-900 border-dark-700/80 hover:border-dark-600 hover:bg-dark-850/60'}">
+          <div onclick="inspectStep(${step.number})" class="group relative p-3 rounded-xl border cursor-pointer transition-all flex items-start space-x-3.5 ${isSelected ? 'bg-dark-850 border-brand-500 shadow-md ring-1 ring-brand-500/30' : 'bg-dark-900 border-dark-700/80 hover:border-dark-600 hover:bg-dark-850/60'}">
             <!-- Step Number Badge -->
             <div class="w-7 h-7 rounded-lg bg-dark-800 border border-dark-700 flex items-center justify-center text-xs font-mono font-bold text-slate-300 flex-shrink-0 mt-0.5">
               ${step.number}
@@ -628,9 +942,9 @@
               
               <!-- Badges -->
               <div class="flex items-center space-x-2 text-[10px] text-slate-400">
-                ${step.element?.selector ? `<span class="truncate max-w-[180px] font-mono text-slate-400 bg-dark-800 px-1.5 py-0.5 rounded">${escapeHtml(step.element.selector)}</span>` : ''}
+                ${step.element?.selector ? `<span class="truncate max-w-[160px] font-mono text-slate-400 bg-dark-800 px-1.5 py-0.5 rounded">${escapeHtml(step.element.selector)}</span>` : ''}
                 ${netCount > 0 ? `<span class="text-slate-400 font-mono">${netCount} reqs</span>` : ''}
-                ${logCount > 0 ? `<span class="text-amber-400 font-mono">${logCount} logs</span>` : ''}
+                ${customAssertionsCount > 0 ? `<span class="text-indigo-400 font-mono font-semibold bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">${customAssertionsCount} assert</span>` : ''}
               </div>
             </div>
 
@@ -640,6 +954,22 @@
                 <img src="${shotUrl}" alt="Step ${step.number}" class="w-full h-full object-cover" />
               </div>
             ` : ''}
+
+            <!-- Quick Action Toolbar (Pencil, Reorder, Delete) -->
+            <div class="opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 top-2 flex items-center space-x-1 bg-dark-950/90 border border-dark-700 p-1 rounded-lg shadow-lg" onclick="event.stopPropagation()">
+              <button onclick="reorderStep(${step.number}, 'up')" title="Move Up" ${idx === 0 ? 'disabled class="opacity-30 p-1 text-slate-400"' : 'class="p-1 text-slate-400 hover:text-white hover:bg-dark-800 rounded"'}>
+                <i data-lucide="chevron-up" class="w-3.5 h-3.5"></i>
+              </button>
+              <button onclick="reorderStep(${step.number}, 'down')" title="Move Down" ${idx === steps.length - 1 ? 'disabled class="opacity-30 p-1 text-slate-400"' : 'class="p-1 text-slate-400 hover:text-white hover:bg-dark-800 rounded"'}>
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+              </button>
+              <button onclick="openEditStepModal(${step.number})" title="Edit Step" class="p-1 text-slate-400 hover:text-brand-400 hover:bg-dark-800 rounded">
+                <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
+              </button>
+              <button onclick="deleteStep(${step.number})" title="Delete Step" class="p-1 text-slate-400 hover:text-rose-400 hover:bg-dark-800 rounded">
+                <i data-lucide="trash" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
           </div>
         `;
       }).join('');
@@ -664,9 +994,16 @@
       const placeholder = document.getElementById('no-screenshot-placeholder');
 
       if (shotFilename) {
-        shotImg.src = `/api/testcases/${encodeURIComponent(currentTestCase.id)}/screenshots/${encodeURIComponent(shotFilename.split('/').pop())}`;
+        const shotUrl = `/api/testcases/${encodeURIComponent(currentTestCase.id)}/screenshots/${encodeURIComponent(shotFilename.split('/').pop())}`;
+        shotImg.src = shotUrl;
         shotImg.classList.remove('hidden');
         placeholder.classList.add('hidden');
+
+        // Prepopulate Visual Diff images
+        document.getElementById('split-baseline-img').src = shotUrl;
+        document.getElementById('split-candidate-img').src = shotUrl;
+        document.getElementById('side-baseline-img').src = shotUrl;
+        document.getElementById('side-candidate-img').src = shotUrl;
       } else {
         shotImg.classList.add('hidden');
         placeholder.classList.remove('hidden');
@@ -694,7 +1031,10 @@
         attrsContainer.innerHTML = '<span class="text-slate-500">No HTML attributes</span>';
       }
 
-      // Tab 3: Network
+      // Tab 3: Assertions (Kane AI Builder)
+      renderStepAssertions(step);
+
+      // Tab 4: Network
       const netRequests = step.network_requests || [];
       document.getElementById('net-count-pill').textContent = netRequests.length;
       const netContainer = document.getElementById('network-list');
@@ -715,7 +1055,7 @@
         netContainer.innerHTML = '<div class="text-center py-8 text-xs text-slate-500">No network requests triggered by this step</div>';
       }
 
-      // Tab 4: Console
+      // Tab 5: Console
       const consoleLogs = step.console_logs || [];
       const consoleContainer = document.getElementById('console-list');
       if (consoleLogs.length > 0) {
@@ -728,16 +1068,367 @@
       } else {
         consoleContainer.innerHTML = '<div class="text-center py-8 text-xs text-slate-500 font-sans">No console logs captured</div>';
       }
+
+      lucide.createIcons();
     }
 
     // Switch inspector tab
     function switchTab(tabName) {
-      ['visual', 'element', 'network', 'console'].forEach(t => {
-        document.getElementById(`panel-${t}`).classList.add('hidden');
-        document.getElementById(`tab-${t}`).className = 'px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-slate-200 transition-colors';
+      ['visual', 'diff', 'element', 'assertions', 'network', 'console'].forEach(t => {
+        const panel = document.getElementById(`panel-${t}`);
+        const tab = document.getElementById(`tab-${t}`);
+        if (panel) panel.classList.add('hidden');
+        if (tab) tab.className = 'px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-slate-200 transition-colors';
       });
-      document.getElementById(`panel-${tabName}`).classList.remove('hidden');
-      document.getElementById(`tab-${tabName}`).className = 'px-3 py-1.5 rounded-md font-medium text-slate-200 bg-dark-700 transition-colors';
+      const activePanel = document.getElementById(`panel-${tabName}`);
+      const activeTab = document.getElementById(`tab-${tabName}`);
+      if (activePanel) activePanel.classList.remove('hidden');
+      if (activeTab) activeTab.className = 'px-3 py-1.5 rounded-md font-medium text-slate-200 bg-dark-700 transition-colors';
+      lucide.createIcons();
+    }
+
+    // LOW-CODE STEP ACTIONS: REORDER, DELETE, EDIT, ADD
+    async function reorderStep(stepNum, direction) {
+      try {
+        const res = await fetch(`/api/testcases/${encodeURIComponent(currentTestCase.id)}/steps/${stepNum}/reorder`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ direction })
+        });
+        if (!res.ok) throw new Error('Failed to reorder');
+        const updated = await res.json();
+        currentTestCase = updated;
+        const newNum = direction === 'up' ? Math.max(1, stepNum - 1) : Math.min(updated.steps.length, stepNum + 1);
+        inspectStep(newNum);
+      } catch (err) {
+        alert(`Error reordering step: ${err.message}`);
+      }
+    }
+
+    async function deleteStep(stepNum) {
+      if (!confirm(`Are you sure you want to delete Step #${stepNum}?`)) return;
+      try {
+        const res = await fetch(`/api/testcases/${encodeURIComponent(currentTestCase.id)}/steps/${stepNum}`, {
+          method: 'DELETE'
+        });
+        if (!res.ok) throw new Error('Failed to delete step');
+        const updated = await res.json();
+        currentTestCase = updated;
+        const nextNum = Math.min(stepNum, updated.steps.length);
+        if (updated.steps.length > 0) {
+          inspectStep(nextNum);
+        } else {
+          renderStepsTimeline([]);
+        }
+      } catch (err) {
+        alert(`Error deleting step: ${err.message}`);
+      }
+    }
+
+    function openEditStepModal(stepNum) {
+      if (!currentTestCase) return;
+      const step = currentTestCase.steps.find(s => s.number === stepNum);
+      if (!step) return;
+
+      document.getElementById('edit-step-subtitle').textContent = `Modifying Step #${step.number}`;
+      document.getElementById('edit-action-type').value = step.action_type || 'click';
+      document.getElementById('edit-desc-short').value = step.description_short || '';
+      document.getElementById('edit-selector').value = step.element?.selector || '';
+      document.getElementById('edit-input-value').value = step.input_value || '';
+      document.getElementById('edit-url').value = step.url || '';
+
+      document.getElementById('modal-edit-step').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function closeEditStepModal() {
+      document.getElementById('modal-edit-step').classList.add('hidden');
+    }
+
+    async function saveStepEdits() {
+      const action_type = document.getElementById('edit-action-type').value;
+      const description_short = document.getElementById('edit-desc-short').value.trim();
+      const selector = document.getElementById('edit-selector').value.trim();
+      const input_value = document.getElementById('edit-input-value').value;
+      const url = document.getElementById('edit-url').value.trim();
+
+      const payload = {
+        action_type,
+        description_short,
+        input_value: input_value || null,
+        url: url || null,
+        element: selector ? { selector } : null
+      };
+
+      try {
+        const res = await fetch(`/api/testcases/${encodeURIComponent(currentTestCase.id)}/steps/${selectedStepNumber}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('Failed to save step changes');
+        const updated = await res.json();
+        currentTestCase = updated;
+        closeEditStepModal();
+        inspectStep(selectedStepNumber);
+      } catch (err) {
+        alert(`Error saving step: ${err.message}`);
+      }
+    }
+
+    function openAddStepModal() {
+      document.getElementById('modal-add-step').classList.remove('hidden');
+      document.getElementById('new-action-type').value = 'click';
+      document.getElementById('new-selector').value = '';
+      document.getElementById('new-value').value = '';
+      document.getElementById('new-desc').value = '';
+      lucide.createIcons();
+    }
+
+    function closeAddStepModal() {
+      document.getElementById('modal-add-step').classList.add('hidden');
+    }
+
+    async function submitNewStep() {
+      const action_type = document.getElementById('new-action-type').value;
+      const selector = document.getElementById('new-selector').value.trim();
+      const val = document.getElementById('new-value').value.trim();
+      const description_short = document.getElementById('new-desc').value.trim();
+
+      const payload = {
+        action_type,
+        selector: selector || null,
+        input_value: action_type === 'input' ? val : null,
+        url: action_type === 'navigate' ? val : null,
+        key: action_type === 'keypress' ? val : null,
+        description_short: description_short || null,
+        position: selectedStepNumber + 1
+      };
+
+      try {
+        const res = await fetch(`/api/testcases/${encodeURIComponent(currentTestCase.id)}/steps`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('Failed to add step');
+        const updated = await res.json();
+        currentTestCase = updated;
+        closeAddStepModal();
+        inspectStep(selectedStepNumber + 1);
+      } catch (err) {
+        alert(`Error adding step: ${err.message}`);
+      }
+    }
+
+    // ASSERTION BUILDER LOGIC (KANE AI PARITY)
+    function renderStepAssertions(step) {
+      const custom = (currentTestCase.custom_assertions || []).filter(a => a.step_number === step.number);
+      document.getElementById('assert-count-pill').textContent = custom.length;
+
+      const container = document.getElementById('assertions-list');
+      if (custom.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-8 text-xs text-slate-500 border border-dashed border-dark-700 rounded-xl p-6">
+            <i data-lucide="shield-alert" class="w-6 h-6 mx-auto mb-2 opacity-40"></i>
+            <p>No custom assertions attached to Step #${step.number}</p>
+            <button onclick="openAddAssertionModal()" class="mt-3 px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-brand-400 font-semibold text-xs border border-dark-700">
+              + Add Visibility / Text / URL Assertion
+            </button>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = custom.map((a, idx) => `
+        <div class="p-3 rounded-xl border border-dark-700 bg-dark-900 flex items-center justify-between">
+          <div class="flex items-center space-x-3">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-brand-500/10 text-brand-400 border border-brand-500/20">
+              ${a.kind}
+            </span>
+            <div>
+              <div class="text-xs font-semibold text-white">
+                ${a.kind === 'visible' ? `Element is visible: <span class="font-mono text-emerald-400">${escapeHtml(a.target || step.element?.selector || '')}</span>` : ''}
+                ${a.kind === 'text' ? `Contains text: <span class="font-mono text-amber-400">"${escapeHtml(a.expected || '')}"</span>` : ''}
+                ${a.kind === 'url' ? `URL path matches: <span class="font-mono text-purple-400">${escapeHtml(a.expected || '')}</span>` : ''}
+                ${a.kind === 'status' ? `API Status: <span class="font-mono text-sky-400">${escapeHtml(String(a.expected || '2xx'))}</span> for ${escapeHtml(a.target || '')}` : ''}
+                ${a.kind === 'no_page_error' ? `Zero JavaScript errors on page` : ''}
+              </div>
+              <div class="text-[10px] text-slate-500 font-mono">Enforced during replay</div>
+            </div>
+          </div>
+          <button onclick="deleteAssertion(${idx})" title="Remove assertion" class="text-slate-500 hover:text-rose-400 p-1 rounded hover:bg-dark-800">
+            <i data-lucide="trash" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+      `).join('');
+    }
+
+    function openAddAssertionModal() {
+      if (!currentTestCase) return;
+      const step = currentTestCase.steps.find(s => s.number === selectedStepNumber);
+      document.getElementById('modal-add-assertion').classList.remove('hidden');
+      document.getElementById('assert-kind').value = 'visible';
+      document.getElementById('assert-target').value = step?.element?.selector || '';
+      document.getElementById('assert-expected').value = '';
+      updateAssertionFields();
+      lucide.createIcons();
+    }
+
+    function closeAddAssertionModal() {
+      document.getElementById('modal-add-assertion').classList.add('hidden');
+    }
+
+    function updateAssertionFields() {
+      const kind = document.getElementById('assert-kind').value;
+      const targetGroup = document.getElementById('assert-target-group');
+      const expectedGroup = document.getElementById('assert-expected-group');
+
+      if (kind === 'visible') {
+        targetGroup.classList.remove('hidden');
+        expectedGroup.classList.add('hidden');
+      } else if (kind === 'text') {
+        targetGroup.classList.add('hidden');
+        expectedGroup.classList.remove('hidden');
+      } else if (kind === 'url') {
+        targetGroup.classList.add('hidden');
+        expectedGroup.classList.remove('hidden');
+      } else if (kind === 'status') {
+        targetGroup.classList.remove('hidden');
+        expectedGroup.classList.remove('hidden');
+      } else if (kind === 'no_page_error') {
+        targetGroup.classList.add('hidden');
+        expectedGroup.classList.add('hidden');
+      }
+    }
+
+    async function submitNewAssertion() {
+      const kind = document.getElementById('assert-kind').value;
+      const target = document.getElementById('assert-target').value.trim() || null;
+      const expected = document.getElementById('assert-expected').value.trim() || null;
+
+      const payload = {
+        kind,
+        target,
+        expected,
+        step_number: selectedStepNumber,
+        enforced: true
+      };
+
+      try {
+        const res = await fetch(`/api/testcases/${encodeURIComponent(currentTestCase.id)}/assertions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('Failed to attach assertion');
+        const updated = await res.json();
+        currentTestCase = updated;
+        closeAddAssertionModal();
+        inspectStep(selectedStepNumber);
+      } catch (err) {
+        alert(`Error adding assertion: ${err.message}`);
+      }
+    }
+
+    async function deleteAssertion(index) {
+      if (!confirm('Remove this assertion?')) return;
+      try {
+        const res = await fetch(`/api/testcases/${encodeURIComponent(currentTestCase.id)}/assertions/${index}`, {
+          method: 'DELETE'
+        });
+        if (!res.ok) throw new Error('Failed to delete assertion');
+        const updated = await res.json();
+        currentTestCase = updated;
+        inspectStep(selectedStepNumber);
+      } catch (err) {
+        alert(`Error removing assertion: ${err.message}`);
+      }
+    }
+
+    // VISUAL DIFF VIEWER LOGIC (KANE AI PARITY)
+    function setDiffViewMode(mode) {
+      currentDiffMode = mode;
+      ['split', 'side', 'diff'].forEach(m => {
+        document.getElementById(`diff-view-${m}`).classList.add('hidden');
+        document.getElementById(`btn-mode-${m}`).className = 'px-2 py-1 rounded text-slate-400 hover:text-white';
+      });
+      document.getElementById(`diff-view-${mode}`).classList.remove('hidden');
+      document.getElementById(`btn-mode-${mode}`).className = 'px-2 py-1 rounded bg-dark-700 text-white font-medium';
+    }
+
+    async function runStepVisualDiff() {
+      const btn = document.getElementById('btn-run-diff');
+      btn.disabled = true;
+      btn.innerHTML = `<span class="animate-spin mr-1">⚡</span> Comparing Pixels...`;
+
+      try {
+        const res = await fetch(`/api/testcases/${encodeURIComponent(currentTestCase.id)}/steps/${selectedStepNumber}/visual-diff`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ threshold: 0.1 })
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Visual diff failed');
+        }
+        const diffRes = await res.json();
+
+        // Update metrics
+        document.getElementById('diff-metrics-row').classList.remove('hidden');
+        document.getElementById('diff-no-images')?.classList.add('hidden');
+
+        const statusVal = document.getElementById('diff-status-val');
+        statusVal.textContent = diffRes.passed ? 'MATCH (PASS)' : 'DIFF DETECTED';
+        statusVal.className = `text-sm font-bold mt-0.5 ${diffRes.passed ? 'text-emerald-400' : 'text-rose-400'}`;
+
+        document.getElementById('diff-pixels-val').textContent = `${diffRes.diff_pixels} px`;
+        document.getElementById('diff-pct-val').textContent = `${diffRes.diff_percentage.toFixed(3)}%`;
+
+        // If diff image was saved
+        if (diffRes.diff_path) {
+          const diffUrl = `/api/diff/image?path=${encodeURIComponent(diffRes.diff_path)}`;
+          document.getElementById('highlight-diff-img').src = diffUrl;
+        }
+
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="scan-eye" class="w-3.5 h-3.5 mr-1.5"></i><span>Run Visual Diff</span>`;
+        lucide.createIcons();
+      } catch (err) {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="scan-eye" class="w-3.5 h-3.5 mr-1.5"></i><span>Run Visual Diff</span>`;
+        alert(`Visual diff error: ${err.message}`);
+      }
+    }
+
+    // Interactive Slider Drag handler
+    function setupSplitSlider() {
+      const container = document.getElementById('split-slider-box');
+      const beforeLayer = document.getElementById('split-before-layer');
+      const handle = document.getElementById('split-handle');
+
+      if (!container || !beforeLayer || !handle) return;
+
+      const onMove = (e) => {
+        if (!isSliderDragging) return;
+        const rect = container.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        let pos = (clientX - rect.left) / rect.width;
+        pos = Math.max(0, Math.min(1, pos));
+        beforeLayer.style.width = `${pos * 100}%`;
+        handle.style.left = `${pos * 100}%`;
+      };
+
+      const startDrag = () => { isSliderDragging = true; };
+      const stopDrag = () => { isSliderDragging = false; };
+
+      handle.addEventListener('mousedown', startDrag);
+      window.addEventListener('mouseup', stopDrag);
+      window.addEventListener('mousemove', onMove);
+
+      handle.addEventListener('touchstart', startDrag);
+      window.addEventListener('touchend', stopDrag);
+      window.addEventListener('touchmove', onMove);
     }
 
     // RECORD MODAL LOGIC
@@ -780,7 +1471,6 @@
           return;
         }
 
-        // Start polling status
         activePollInterval = setInterval(async () => {
           try {
             const statusRes = await fetch('/api/record/status');
@@ -851,7 +1541,6 @@
         document.getElementById('replay-options-view').classList.add('hidden');
         document.getElementById('replay-results-view').classList.remove('hidden');
 
-        // Banner styling
         const banner = document.getElementById('replay-status-banner');
         const icon = document.getElementById('replay-status-icon');
         const statusText = document.getElementById('replay-status-text');
@@ -864,7 +1553,6 @@
         statusText.textContent = isPassed ? 'REPLAY PASSED' : 'REPLAY FAILED';
         metrics.textContent = `${result.steps.length} steps executed • Exit Code: ${result.exit_code}`;
 
-        // Render step log
         const logContainer = document.getElementById('replay-steps-log');
         logContainer.innerHTML = result.steps.map(s => `
           <div class="flex items-center justify-between p-2 rounded bg-dark-900 border border-dark-700/60">
@@ -909,20 +1597,17 @@
       alert('Pytest code copied to clipboard!');
     }
 
-    // Open full HTML report
     function openHtmlReport() {
       if (!currentTestCase) return;
       window.open(`/api/testcases/${encodeURIComponent(currentTestCase.id)}/html`, '_blank');
     }
 
-    // Helper: copy to clipboard
     function copyToClipboard(elementId) {
       const val = document.getElementById(elementId).value;
       navigator.clipboard.writeText(val);
       alert('Copied to clipboard!');
     }
 
-    // Helper: HTML escape
     function escapeHtml(str) {
       if (!str) return '';
       return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

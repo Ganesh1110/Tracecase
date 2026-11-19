@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -120,6 +120,9 @@ class TestCase(BaseModel):
 
     # Steps
     steps: list[Step] = Field(default_factory=list, description="List of recorded steps")
+    custom_assertions: list[dict[str, Any]] = Field(
+        default_factory=list, description="User-defined custom assertions"
+    )
 
     # All logs and requests (full timeline)
     console_logs: list[ConsoleLog] = Field(default_factory=list, description="Console logs")

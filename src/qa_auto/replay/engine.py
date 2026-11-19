@@ -41,6 +41,7 @@ class ReplayEngine:
         diff_threshold: float = 0.1,
         visual_fail: bool = False,
         testcase_dir: Path | None = None,
+        step_callback: Any = None,
     ) -> None:
         self.testcase = testcase
         self.browser_type = browser_type or testcase.browser
@@ -54,10 +55,20 @@ class ReplayEngine:
         self.diff_threshold = diff_threshold
         self.visual_fail = visual_fail
         self.testcase_dir = Path(testcase_dir) if testcase_dir is not None else None
+        self.step_callback = step_callback
 
     async def run(self) -> ReplayResult:
         started_at = datetime.now()
         assertions = derive_assertions(self.testcase) if self.assertions_enabled else []
+        custom_assertions = getattr(self.testcase, "custom_assertions", []) or []
+        if self.assertions_enabled and custom_assertions:
+            from qa_auto.replay.models import Assertion
+
+            for ca in custom_assertions:
+                if isinstance(ca, dict):
+                    assertions.append(Assertion.model_validate(ca))
+                elif isinstance(ca, Assertion):
+                    assertions.append(ca)
         manager = BrowserManager(
             browser_type=cast(BrowserType, self.browser_type),
             headless=self.headless,
@@ -93,6 +104,13 @@ class ReplayEngine:
             for step in self.testcase.steps:
                 result = await self._run_step(context, step, assertions, responses, errors)
                 step_results.append(result)
+                if self.step_callback:
+                    try:
+                        cb_res = self.step_callback(result, step.number, len(self.testcase.steps))
+                        if asyncio.iscoroutine(cb_res):
+                            await cb_res
+                    except Exception:
+                        pass
         except Exception as exc:
             step_results.append(StepResult(number=0, status="error", error=str(exc)))
         finally:
@@ -206,12 +224,26 @@ class ReplayEngine:
         for url, status_code in responses[response_count_start:]:
             step_statuses.setdefault(url, []).append(status_code)
 
+        page_text: str | None = None
+        visible_targets: set[str] = set()
+        with contextlib.suppress(Exception):
+            page_text = await page.inner_text("body")
+        for item in step_assertions:
+            if item.kind == "visible":
+                target = item.target or (step.element.selector if step.element else None)
+                if target:
+                    with contextlib.suppress(Exception):
+                        if await page.locator(target).first.is_visible():
+                            visible_targets.add(target)
+
         assertion_results = evaluate_assertions(
             step,
             step_assertions,
             response_statuses=step_statuses,
             final_url=page.url,
             new_page_errors=errors[error_count_start:],
+            visible_targets=visible_targets,
+            page_text=page_text,
         )
         failed = any(not result.passed for result in assertion_results)
 
