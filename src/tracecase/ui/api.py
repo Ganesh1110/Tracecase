@@ -27,6 +27,14 @@ from tracecase.exploration.planner import plan_requirement_against_graph
 from tracecase.exploration.regression import select_intelligent_regression_suite
 from tracecase.exploration.synthesizer import synthesize_test_journeys
 from tracecase.exporters.html_exporter import HTMLExporter
+from tracecase.artifact_manager import (
+    ArtifactManager,
+    PrunePolicy,
+    PruneRequest,
+    PruneResult,
+    RetentionPolicy,
+    StorageSummary,
+)
 from tracecase.index.search import get_coverage_report, search_testcases
 from tracecase.index.store import index_testcase
 from tracecase.models import TestCase
@@ -1650,63 +1658,57 @@ async def repo_reindex() -> dict[str, Any]:
 # Storage Management & Settings
 # ---------------------------------------------------------------------------
 
+@router.get("/storage/summary", response_model=StorageSummary)
+async def get_storage_summary_endpoint() -> StorageSummary:
+    """Detailed storage metrics across recordings, runs, diffs, explorations, and DB."""
+    manager = ArtifactManager()
+    return manager.get_storage_summary()
+
+
+@router.post("/storage/prune", response_model=PruneResult)
+async def prune_storage_endpoint(req: PruneRequest) -> PruneResult:
+    """Execute fine-grained artifact pruning across age, runs, diffs, or quota."""
+    manager = ArtifactManager()
+    return manager.prune_artifacts(req)
+
+
+@router.get("/storage/retention", response_model=RetentionPolicy)
+async def get_retention_policy_endpoint() -> RetentionPolicy:
+    """Retrieve active artifact retention policy."""
+    manager = ArtifactManager()
+    return manager.get_policy()
+
+
+@router.put("/storage/retention", response_model=RetentionPolicy)
+async def update_retention_policy_endpoint(policy: RetentionPolicy) -> RetentionPolicy:
+    """Update active artifact retention policy."""
+    manager = ArtifactManager()
+    return manager.save_policy(policy)
+
+
 @router.get("/storage/stats")
 async def storage_stats() -> dict[str, Any]:
     """Calculate disk usage across recordings, screenshots, and databases."""
-    recordings_dir = Path("recordings")
-    total_size = 0
-    screenshots_size = 0
-    screenshots_count = 0
-    recordings_count = 0
-
-    if recordings_dir.exists():
-        for p in recordings_dir.rglob("*"):
-            if p.is_file():
-                sz = p.stat().st_size
-                total_size += sz
-                if p.suffix.lower() == ".png":
-                    screenshots_size += sz
-                    screenshots_count += 1
-                elif p.name == "testcase.json":
-                    recordings_count += 1
-
+    manager = ArtifactManager()
+    summary = manager.get_storage_summary()
     return {
-        "recordings_count": recordings_count,
-        "total_size_mb": round(total_size / (1024 * 1024), 2),
-        "screenshots_size_mb": round(screenshots_size / (1024 * 1024), 2),
-        "screenshots_count": screenshots_count,
-        "database_path": str(Path(".tracecase/studio.db").resolve()),
+        "recordings_count": summary.recordings_count,
+        "total_size_mb": summary.total_size_mb,
+        "screenshots_size_mb": summary.diffs_size_mb + summary.replay_runs_size_mb,
+        "screenshots_count": summary.diffs_count + summary.replay_screenshots_count,
+        "database_path": summary.database_path,
     }
 
 
 @router.post("/storage/clean")
 async def storage_clean(clean_diffs: bool = True, clean_old_runs: bool = False) -> dict[str, Any]:
     """Prune temporary diff images and replay runs."""
-    cleaned_bytes = 0
-    deleted_files = 0
-    recordings_dir = Path("recordings")
-    if recordings_dir.exists():
-        if clean_diffs:
-            for d in recordings_dir.rglob("diffs"):
-                if d.is_dir():
-                    for f in d.glob("*.png"):
-                        cleaned_bytes += f.stat().st_size
-                        f.unlink()
-                        deleted_files += 1
-        if clean_old_runs:
-            for r in recordings_dir.rglob("replay_runs"):
-                if r.is_dir():
-                    for sub in r.iterdir():
-                        if sub.is_dir():
-                            for f in sub.rglob("*"):
-                                if f.is_file():
-                                    cleaned_bytes += f.stat().st_size
-                                    deleted_files += 1
-                            shutil.rmtree(sub, ignore_errors=True)
-
+    manager = ArtifactManager()
+    req = PruneRequest(clean_diffs=clean_diffs, clean_old_runs=clean_old_runs, dry_run=False)
+    res = manager.prune_artifacts(req)
     return {
-        "deleted_files": deleted_files,
-        "freed_mb": round(cleaned_bytes / (1024 * 1024), 2),
+        "deleted_files": res.deleted_files,
+        "freed_mb": res.freed_mb,
     }
 
 

@@ -1017,6 +1017,162 @@ def clean(
 
 
 @app.command()
+def storage(
+    prune_diffs: Annotated[
+        bool,
+        typer.Option("--diffs", help="Prune visual regression diff images"),
+    ] = False,
+    clean_runs: Annotated[
+        bool,
+        typer.Option("--clean-runs", help="Prune all old replay run outputs"),
+    ] = False,
+    failures_only: Annotated[
+        bool,
+        typer.Option("--failures-only", help="Prune screenshots from passing runs"),
+    ] = False,
+    older_than: Annotated[
+        int | None,
+        typer.Option("--older-than", help="Prune replay runs older than N days"),
+    ] = None,
+    keep_latest: Annotated[
+        int | None,
+        typer.Option("--keep-latest", help="Keep latest N replay runs per testcase"),
+    ] = None,
+    max_mb: Annotated[
+        int | None,
+        typer.Option("--max-mb", help="Enforce target maximum storage quota in MB"),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Simulate pruning without deleting files"),
+    ] = False,
+) -> None:
+    """Inspect disk storage usage and prune execution artifacts."""
+    from rich.table import Table
+    from tracecase.artifact_manager import ArtifactManager, PruneRequest
+
+    mgr = ArtifactManager()
+
+    # If any pruning flag is requested, run pruning
+    is_pruning = any([
+        prune_diffs,
+        clean_runs,
+        failures_only,
+        older_than is not None,
+        keep_latest is not None,
+        max_mb is not None,
+    ])
+
+    if is_pruning:
+        req = PruneRequest(
+            clean_diffs=prune_diffs,
+            clean_old_runs=clean_runs,
+            failures_only=failures_only,
+            older_than_days=older_than,
+            keep_latest_runs=keep_latest,
+            max_storage_mb=max_mb,
+            dry_run=dry_run,
+        )
+        res = mgr.prune_artifacts(req)
+        status_prefix = "[yellow][DRY RUN][/yellow] Would free" if dry_run else "[green]✓[/green] Freed"
+        console.print(
+            f"{status_prefix} [bold]{res.freed_mb} MB[/bold] "
+            f"({res.deleted_files} files, {res.deleted_runs} runs pruned). "
+            f"Remaining storage: [bold]{res.remaining_storage_mb} MB[/bold]."
+        )
+        return
+
+    # Default action: print storage summary table
+    summary = mgr.get_storage_summary()
+
+    table = Table(title="Tracecase Disk Storage Summary", border_style="cyan")
+    table.add_column("Category", style="bold")
+    table.add_column("Count / Items", justify="right")
+    table.add_column("Size (MB)", justify="right")
+    table.add_column("Description", style="dim")
+
+    table.add_row(
+        "Baseline Corpus",
+        str(summary.recordings_count),
+        f"{summary.recordings_size_mb:.2f}",
+        "Test case definitions, metadata, baseline screenshots",
+    )
+    table.add_row(
+        "Replay Runs",
+        f"{summary.replay_runs_count} runs ({summary.replay_screenshots_count} shots)",
+        f"{summary.replay_runs_size_mb:.2f}",
+        "Execution logs, step screenshots, run reports",
+    )
+    table.add_row(
+        "Visual Diffs",
+        f"{summary.diffs_count} images",
+        f"{summary.diffs_size_mb:.2f}",
+        "Pixel comparison diff images",
+    )
+    table.add_row(
+        "Explorations",
+        f"{summary.explorations_count} runs",
+        f"{summary.explorations_size_mb:.2f}",
+        "Autonomous exploration sessions & state graphs",
+    )
+    table.add_row(
+        "Studio DB",
+        Path(summary.database_path).name,
+        f"{summary.database_size_mb:.2f}",
+        "SQLite runs, attempts, batches, flakiness metrics",
+    )
+    table.add_section()
+    table.add_row(
+        "[bold green]Total Usage[/bold green]",
+        "-",
+        f"[bold green]{summary.total_size_mb:.2f}[/bold green]",
+        "Total disk footprint across all components",
+    )
+
+    console.print(table)
+    pol = summary.retention_policy
+    console.print(
+        f"[dim]Active Retention Policy: mode='{pol.retention_mode}', "
+        f"keep_latest={pol.keep_latest_runs}, max_age={pol.max_age_days}d, "
+        f"max_quota={pol.max_storage_mb}MB[/dim]"
+    )
+
+
+@app.command()
+def benchmark(
+    iterations: Annotated[
+        int,
+        typer.Option("--iterations", "-n", help="Number of benchmark test executions per paradigm"),
+    ] = 6,
+    concurrency: Annotated[
+        int,
+        typer.Option("--concurrency", "-c", help="Worker concurrency for parallel modes"),
+    ] = 3,
+    output_md: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Optional markdown file path to save benchmark report"),
+    ] = None,
+) -> None:
+    """Benchmark sequential cold vs parallel cold vs parallel pooled execution."""
+    from rich.markdown import Markdown
+    from tracecase.benchmark import run_benchmark_suite
+
+    console.print(
+        f"[cyan]Running Tracecase Performance Benchmark[/cyan] "
+        f"({iterations} runs per mode, concurrency={concurrency})...\n"
+    )
+
+    report = asyncio.run(run_benchmark_suite(iterations=iterations, concurrency=concurrency))
+    md_content = report.to_markdown()
+
+    console.print(Markdown(md_content))
+
+    if output_md:
+        output_md.write_text(md_content)
+        console.print(f"\n[green]✓[/green] Saved benchmark report to: {output_md.resolve()}")
+
+
+@app.command()
 def ui(
     host: Annotated[
         str,

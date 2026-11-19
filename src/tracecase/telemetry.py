@@ -30,7 +30,12 @@ def elapsed_ms(start_monotonic: float, end_monotonic: float | None = None) -> fl
 
 
 def get_memory_rss_mb() -> float:
-    """Return the peak resident set size (RSS) in megabytes for the current process."""
+    """Return the peak resident set size (RSS) in megabytes for the current runner process.
+
+    Note: This measures peak memory of the current Python runner process (ru_maxrss
+    via RUSAGE_SELF). It is a peak high-watermark metric rather than a continuous
+    sample, and does not aggregate separate out-of-process browser child processes.
+    """
     try:
         ru = resource.getrusage(resource.RUSAGE_SELF)
         # On macOS, ru_maxrss is in bytes; on Linux, it is in kilobytes

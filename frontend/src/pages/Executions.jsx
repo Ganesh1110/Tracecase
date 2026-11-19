@@ -743,8 +743,8 @@ export function Executions() {
                         Performance & Resource Telemetry
                       </span>
                       {selectedRun.memory_rss_mb != null && (
-                        <span className="font-normal text-slate-500 text-[10px]">
-                          Process RSS: {Number(selectedRun.memory_rss_mb).toFixed(1)} MB
+                        <span className="font-normal text-slate-500 text-[10px]" title="Peak resident set size of the Python runner process via ru_maxrss">
+                          Peak Runner RSS (ru_maxrss): {Number(selectedRun.memory_rss_mb).toFixed(1)} MB
                         </span>
                       )}
                     </div>

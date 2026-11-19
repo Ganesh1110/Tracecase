@@ -463,6 +463,11 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             "ai_api_base": "http://localhost:11434/v1",
             "ai_api_key": "",
             "theme": "dark",
+            "artifact_retention_mode": "all",
+            "artifact_keep_latest_runs": "10",
+            "artifact_max_age_days": "14",
+            "artifact_max_storage_mb": "500",
+            "artifact_auto_prune_on_complete": "true",
         }
         for k, v in default_settings.items():
             conn.execute(

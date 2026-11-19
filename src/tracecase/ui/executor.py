@@ -9,9 +9,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from tracecase.artifact_manager import ArtifactManager
 from tracecase.browser_pool import BrowserPool
 from tracecase.replay.engine import ReplayEngine
 from tracecase.replay.models import ReplayResult, StepResult
+from tracecase.resource_monitor import ResourceMonitor
 from tracecase.telemetry import (
     elapsed_ms,
     get_cpu_percent,
@@ -67,6 +69,8 @@ class ExecutionOrchestrator:
         self.active_batches: dict[str, dict[str, Any]] = {}
         self.active_matrices: dict[str, dict[str, Any]] = {}
         self.browser_pool = BrowserPool()
+        self.resource_monitor = ResourceMonitor()
+        self.artifact_manager = ArtifactManager()
 
     async def start_execution(
         self,
@@ -497,6 +501,13 @@ class ExecutionOrchestrator:
                 artifact_size_bytes=total_art_bytes,
             )
 
+            # Apply configurable artifact retention policy
+            self.artifact_manager.apply_execution_retention(
+                output_dir=last_output_dir,
+                status=final_status,
+                testcase_dir=testcase_dir,
+            )
+
             await broadcast_execution_event(
                 execution_id=execution_id,
                 event_type="execution_completed" if final_status in ("passed", "flaky") else "execution_failed",
@@ -632,8 +643,7 @@ class ExecutionOrchestrator:
         retries: int = 2,
     ) -> dict[str, Any]:
         """Launch parallel or sequential execution of multiple test cases via a bounded worker pool."""
-        c = 2 if concurrency is None else int(concurrency)
-        bounded_concurrency = max(1, min(8, c))
+        bounded_concurrency = self.resource_monitor.get_safe_concurrency_ceiling(concurrency)
         bounded_retries = max(0, min(3, int(retries)))
 
         # Deduplicate testcase_ids preserving original sequence order
@@ -880,6 +890,28 @@ class ExecutionOrchestrator:
                 break
 
             batch_ctx["running_testcases"].add(testcase.id)
+
+            # Resource pressure check & safe backpressure throttling
+            active_ctx = self.browser_pool.get_active_context_count(browser, not headed)
+            pressure = self.resource_monitor.check_pressure(active_contexts=active_ctx)
+            if pressure.is_under_pressure:
+                logger.warning(
+                    "[%s] Resource pressure active: %s. Applying safe worker backpressure...",
+                    worker_id,
+                    "; ".join(pressure.reasons),
+                )
+                await broadcast_batch_event(
+                    batch_id=batch_id,
+                    event_type="worker_throttled",
+                    data={
+                        "batch_id": batch_id,
+                        "worker_id": worker_id,
+                        "execution_id": execution_id,
+                        "reasons": pressure.reasons,
+                        "load_ratio": pressure.load_ratio,
+                    },
+                )
+                await asyncio.sleep(0.3)
 
             update_execution_run_status(
                 execution_id=execution_id,
@@ -1267,6 +1299,13 @@ class ExecutionOrchestrator:
                     artifact_size_bytes=total_art_bytes,
                 )
 
+                # Apply configurable artifact retention policy
+                self.artifact_manager.apply_execution_retention(
+                    output_dir=last_output_dir,
+                    status=final_status,
+                    testcase_dir=tc_file.parent,
+                )
+
                 await broadcast_execution_event(
                     execution_id=execution_id,
                     event_type="execution_completed" if final_status in ("passed", "flaky") else "execution_failed",
@@ -1514,8 +1553,7 @@ class ExecutionOrchestrator:
         retries: int = 2,
     ) -> dict[str, Any]:
         """Launch cross-browser matrix execution of test cases across configured browser targets."""
-        c = 2 if concurrency is None else int(concurrency)
-        bounded_concurrency = max(1, min(8, c))
+        bounded_concurrency = self.resource_monitor.get_safe_concurrency_ceiling(concurrency)
         bounded_retries = max(0, min(3, int(retries)))
 
         # Validate and normalize browser targets
@@ -1787,6 +1825,30 @@ class ExecutionOrchestrator:
                 break
 
             matrix_ctx["running_keys"].add(run_key)
+
+            # Resource pressure check & safe backpressure throttling
+            active_ctx = self.browser_pool.get_active_context_count(browser, not headed)
+            pressure = self.resource_monitor.check_pressure(active_contexts=active_ctx)
+            if pressure.is_under_pressure:
+                logger.warning(
+                    "[%s][%s] Resource pressure active: %s. Applying safe worker backpressure...",
+                    worker_id,
+                    browser,
+                    "; ".join(pressure.reasons),
+                )
+                await broadcast_matrix_event(
+                    matrix_id=matrix_id,
+                    event_type="worker_throttled",
+                    data={
+                        "matrix_id": matrix_id,
+                        "worker_id": worker_id,
+                        "execution_id": execution_id,
+                        "browser": browser,
+                        "reasons": pressure.reasons,
+                        "load_ratio": pressure.load_ratio,
+                    },
+                )
+                await asyncio.sleep(0.3)
 
             update_execution_run_status(
                 execution_id=execution_id,
@@ -2175,6 +2237,13 @@ class ExecutionOrchestrator:
                     cpu_percent=curr_cpu_pct,
                     load_average=curr_load_avg,
                     artifact_size_bytes=total_art_bytes,
+                )
+
+                # Apply configurable artifact retention policy
+                self.artifact_manager.apply_execution_retention(
+                    output_dir=last_output_dir,
+                    status=final_status,
+                    testcase_dir=tc_file.parent,
                 )
 
                 await broadcast_execution_event(

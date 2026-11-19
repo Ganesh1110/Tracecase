@@ -306,8 +306,14 @@ export const api = {
 
   // Storage Management
   getStorageStats: () => request('/storage/stats'),
+  getStorageSummary: () => request('/storage/summary'),
   cleanStorage: (data = {}) =>
     request('/storage/clean', { method: 'POST', body: JSON.stringify(data) }),
+  pruneStorage: (data = {}) =>
+    request('/storage/prune', { method: 'POST', body: JSON.stringify(data) }),
+  getRetentionPolicy: () => request('/storage/retention'),
+  updateRetentionPolicy: (policy) =>
+    request('/storage/retention', { method: 'PUT', body: JSON.stringify(policy) }),
 
   // Settings
   getSettings: () => request('/settings'),
