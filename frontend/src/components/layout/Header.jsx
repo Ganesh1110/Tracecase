@@ -33,7 +33,7 @@ export function Header({ onOpenRecordModal, onOpenNewCaseModal }) {
           >
             <FolderKanban className="w-4 h-4 text-brand-500" />
             <span className="text-slate-800 dark:text-slate-200 max-w-[160px] truncate">
-              {currentProject?.name || 'Default Project'}
+              {currentProject?.name || 'Tracecase'}
             </span>
             <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
           </button>

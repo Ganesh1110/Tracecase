@@ -359,7 +359,7 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             conn.execute(
                 """
                 INSERT INTO projects (id, name, description, created_at, updated_at, settings_json)
-                VALUES ('default_project', 'Default Project', 'Default testing workspace', ?, ?, '{}')
+                VALUES ('default_project', 'Tracecase', 'Default testing workspace', ?, ?, '{}')
                 """,
                 (now, now),
             )
@@ -1515,7 +1515,7 @@ def get_dashboard_metrics(
         p_filter = "WHERE e.project_id = ?" if project_id else "WHERE 1=1"
         recent_rows = conn.execute(
             f"""
-            SELECT e.id, e.project_id, COALESCE(p.name, 'Default Project') AS project_name,
+            SELECT e.id, e.project_id, COALESCE(p.name, 'Tracecase') AS project_name,
                    e.suite_id, e.testcase_id, e.testcase_name, e.status, e.browser,
                    e.started_at, e.duration_ms, e.passed_steps, e.total_steps
             FROM execution_runs e
@@ -1531,7 +1531,7 @@ def get_dashboard_metrics(
         failed_filter = f"{p_filter} AND (e.status = 'failed' OR e.status = 'error')"
         failed_rows = conn.execute(
             f"""
-            SELECT e.id, e.project_id, COALESCE(p.name, 'Default Project') AS project_name,
+            SELECT e.id, e.project_id, COALESCE(p.name, 'Tracecase') AS project_name,
                    e.testcase_id, e.testcase_name, e.status, e.error_message, e.started_at, e.duration_ms
             FROM execution_runs e
             LEFT JOIN projects p ON e.project_id = p.id

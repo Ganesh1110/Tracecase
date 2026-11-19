@@ -123,7 +123,7 @@ export function NewCaseModal({ isOpen, onClose, onCreated }) {
                 Workspace
               </label>
               <div className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 truncate">
-                {currentProject?.name || 'Default Project'}
+                {currentProject?.name || 'Tracecase'}
               </div>
             </div>
           </div>

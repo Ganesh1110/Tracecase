@@ -568,7 +568,7 @@ export function Overview() {
                       </div>
                     </td>
                     <td className="px-5 py-3.5 text-xs text-slate-500">
-                      {run.project_name || 'Default Project'}
+                      {run.project_name || 'Tracecase'}
                     </td>
                     <td className="px-5 py-3.5">
                       <span
