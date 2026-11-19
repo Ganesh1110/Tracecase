@@ -152,6 +152,22 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
                 conn.execute("ALTER TABLE execution_runs ADD COLUMN failure_step INTEGER")
             if "failure_selector" not in cols:
                 conn.execute("ALTER TABLE execution_runs ADD COLUMN failure_selector TEXT")
+            if "queue_wait_ms" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN queue_wait_ms REAL DEFAULT 0.0")
+            if "browser_startup_ms" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN browser_startup_ms REAL DEFAULT 0.0")
+            if "execution_duration_ms" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN execution_duration_ms REAL DEFAULT 0.0")
+            if "teardown_ms" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN teardown_ms REAL DEFAULT 0.0")
+            if "memory_rss_mb" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN memory_rss_mb REAL DEFAULT 0.0")
+            if "cpu_percent" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN cpu_percent REAL DEFAULT 0.0")
+            if "load_average" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN load_average REAL DEFAULT 0.0")
+            if "artifact_size_bytes" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN artifact_size_bytes INTEGER DEFAULT 0")
         except Exception:
             pass
 
@@ -172,6 +188,22 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             )
             """
         )
+
+        try:
+            a_cursor = conn.execute("PRAGMA table_info(execution_attempts)")
+            a_cols = [row["name"] for row in a_cursor.fetchall()]
+            if "browser_startup_ms" not in a_cols:
+                conn.execute("ALTER TABLE execution_attempts ADD COLUMN browser_startup_ms REAL DEFAULT 0.0")
+            if "execution_duration_ms" not in a_cols:
+                conn.execute("ALTER TABLE execution_attempts ADD COLUMN execution_duration_ms REAL DEFAULT 0.0")
+            if "teardown_ms" not in a_cols:
+                conn.execute("ALTER TABLE execution_attempts ADD COLUMN teardown_ms REAL DEFAULT 0.0")
+            if "memory_rss_mb" not in a_cols:
+                conn.execute("ALTER TABLE execution_attempts ADD COLUMN memory_rss_mb REAL DEFAULT 0.0")
+            if "artifact_size_bytes" not in a_cols:
+                conn.execute("ALTER TABLE execution_attempts ADD COLUMN artifact_size_bytes INTEGER DEFAULT 0")
+        except Exception:
+            pass
 
         conn.execute(
             """
@@ -199,6 +231,12 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             b_cols = [row["name"] for row in b_cursor.fetchall()]
             if "flaky_tests" not in b_cols:
                 conn.execute("ALTER TABLE execution_batches ADD COLUMN flaky_tests INTEGER DEFAULT 0")
+            if "queue_wait_ms" not in b_cols:
+                conn.execute("ALTER TABLE execution_batches ADD COLUMN queue_wait_ms REAL DEFAULT 0.0")
+            if "avg_startup_ms" not in b_cols:
+                conn.execute("ALTER TABLE execution_batches ADD COLUMN avg_startup_ms REAL DEFAULT 0.0")
+            if "artifact_size_bytes" not in b_cols:
+                conn.execute("ALTER TABLE execution_batches ADD COLUMN artifact_size_bytes INTEGER DEFAULT 0")
         except Exception:
             pass
 
@@ -231,6 +269,12 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             m_cols = [row["name"] for row in m_cursor.fetchall()]
             if "flaky_executions" not in m_cols:
                 conn.execute("ALTER TABLE execution_matrices ADD COLUMN flaky_executions INTEGER DEFAULT 0")
+            if "queue_wait_ms" not in m_cols:
+                conn.execute("ALTER TABLE execution_matrices ADD COLUMN queue_wait_ms REAL DEFAULT 0.0")
+            if "avg_startup_ms" not in m_cols:
+                conn.execute("ALTER TABLE execution_matrices ADD COLUMN avg_startup_ms REAL DEFAULT 0.0")
+            if "artifact_size_bytes" not in m_cols:
+                conn.execute("ALTER TABLE execution_matrices ADD COLUMN artifact_size_bytes INTEGER DEFAULT 0")
         except Exception:
             pass
 
@@ -953,6 +997,14 @@ def update_execution_run_status(
     retry_history: list[dict[str, Any]] | None = None,
     failure_step: int | None = None,
     failure_selector: str | None = None,
+    queue_wait_ms: float | None = None,
+    browser_startup_ms: float | None = None,
+    execution_duration_ms: float | None = None,
+    teardown_ms: float | None = None,
+    memory_rss_mb: float | None = None,
+    cpu_percent: float | None = None,
+    load_average: float | None = None,
+    artifact_size_bytes: int | None = None,
     db_path: Path | str | None = None,
 ) -> None:
     """Update execution run results."""
@@ -1010,6 +1062,30 @@ def update_execution_run_status(
         if failure_selector is not None:
             updates.append("failure_selector = ?")
             params.append(failure_selector)
+        if queue_wait_ms is not None:
+            updates.append("queue_wait_ms = ?")
+            params.append(queue_wait_ms)
+        if browser_startup_ms is not None:
+            updates.append("browser_startup_ms = ?")
+            params.append(browser_startup_ms)
+        if execution_duration_ms is not None:
+            updates.append("execution_duration_ms = ?")
+            params.append(execution_duration_ms)
+        if teardown_ms is not None:
+            updates.append("teardown_ms = ?")
+            params.append(teardown_ms)
+        if memory_rss_mb is not None:
+            updates.append("memory_rss_mb = ?")
+            params.append(memory_rss_mb)
+        if cpu_percent is not None:
+            updates.append("cpu_percent = ?")
+            params.append(cpu_percent)
+        if load_average is not None:
+            updates.append("load_average = ?")
+            params.append(load_average)
+        if artifact_size_bytes is not None:
+            updates.append("artifact_size_bytes = ?")
+            params.append(artifact_size_bytes)
 
         params.append(execution_id)
         with conn:
@@ -1176,9 +1252,14 @@ def record_execution_attempt(
     failed_step: int | None = None,
     failed_selector: str | None = None,
     report_path: str | None = None,
+    browser_startup_ms: float = 0.0,
+    execution_duration_ms: float = 0.0,
+    teardown_ms: float = 0.0,
+    memory_rss_mb: float = 0.0,
+    artifact_size_bytes: int = 0,
     db_path: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Record an individual execution attempt permanently."""
+    """Record an individual execution attempt permanently with telemetry metrics."""
     init_studio_db(db_path)
     conn = get_connection(db_path)
     attempt_id = f"att_{uuid.uuid4().hex[:12]}"
@@ -1189,9 +1270,10 @@ def record_execution_attempt(
                 """
                 INSERT INTO execution_attempts (
                     id, execution_id, attempt_number, status, duration_ms,
-                    error_message, failed_step, failed_selector, report_path, created_at
+                    error_message, failed_step, failed_selector, report_path, created_at,
+                    browser_startup_ms, execution_duration_ms, teardown_ms, memory_rss_mb, artifact_size_bytes
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     attempt_id,
@@ -1204,6 +1286,11 @@ def record_execution_attempt(
                     failed_selector,
                     report_path,
                     now_iso,
+                    browser_startup_ms,
+                    execution_duration_ms,
+                    teardown_ms,
+                    memory_rss_mb,
+                    artifact_size_bytes,
                 ),
             )
         return {
@@ -1216,6 +1303,11 @@ def record_execution_attempt(
             "failed_step": failed_step,
             "failed_selector": failed_selector,
             "report_path": report_path,
+            "browser_startup_ms": browser_startup_ms,
+            "execution_duration_ms": execution_duration_ms,
+            "teardown_ms": teardown_ms,
+            "memory_rss_mb": memory_rss_mb,
+            "artifact_size_bytes": artifact_size_bytes,
             "created_at": now_iso,
         }
     finally:
@@ -1403,6 +1495,9 @@ def update_execution_batch(
     flaky_tests: int | None = None,
     finished_at: str | None = None,
     duration_ms: float | None = None,
+    queue_wait_ms: float | None = None,
+    avg_startup_ms: float | None = None,
+    artifact_size_bytes: int | None = None,
     db_path: Path | str | None = None,
 ) -> dict[str, Any] | None:
     """Update execution batch state."""
@@ -1432,6 +1527,15 @@ def update_execution_batch(
         if duration_ms is not None:
             updates.append("duration_ms = ?")
             params.append(duration_ms)
+        if queue_wait_ms is not None:
+            updates.append("queue_wait_ms = ?")
+            params.append(queue_wait_ms)
+        if avg_startup_ms is not None:
+            updates.append("avg_startup_ms = ?")
+            params.append(avg_startup_ms)
+        if artifact_size_bytes is not None:
+            updates.append("artifact_size_bytes = ?")
+            params.append(artifact_size_bytes)
 
         if updates:
             params.append(batch_id)
@@ -1559,6 +1663,9 @@ def update_execution_matrix(
     divergence_count: int | None = None,
     finished_at: str | None = None,
     duration_ms: float | None = None,
+    queue_wait_ms: float | None = None,
+    avg_startup_ms: float | None = None,
+    artifact_size_bytes: int | None = None,
     db_path: Path | str | None = None,
 ) -> dict[str, Any] | None:
     """Update execution matrix state."""
@@ -1591,6 +1698,15 @@ def update_execution_matrix(
         if duration_ms is not None:
             updates.append("duration_ms = ?")
             params.append(duration_ms)
+        if queue_wait_ms is not None:
+            updates.append("queue_wait_ms = ?")
+            params.append(queue_wait_ms)
+        if avg_startup_ms is not None:
+            updates.append("avg_startup_ms = ?")
+            params.append(avg_startup_ms)
+        if artifact_size_bytes is not None:
+            updates.append("artifact_size_bytes = ?")
+            params.append(artifact_size_bytes)
 
         if updates:
             params.append(matrix_id)

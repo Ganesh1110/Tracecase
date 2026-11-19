@@ -9,8 +9,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from tracecase.browser_pool import BrowserPool
 from tracecase.replay.engine import ReplayEngine
 from tracecase.replay.models import ReplayResult, StepResult
+from tracecase.telemetry import (
+    elapsed_ms,
+    get_cpu_percent,
+    get_directory_size_bytes,
+    get_load_average,
+    get_memory_rss_mb,
+    get_monotonic_time,
+)
 from tracecase.ui.broadcaster import (
     broadcast_batch_event,
     broadcast_execution_event,
@@ -51,12 +60,13 @@ def is_browser_env_error(err_msg: str | None) -> bool:
 
 
 class ExecutionOrchestrator:
-    """Manages active and queued background execution tasks."""
+    """Manages active and queued background execution tasks and owns the central browser pool."""
 
     def __init__(self) -> None:
         self.active_tasks: dict[str, asyncio.Task[Any]] = {}
         self.active_batches: dict[str, dict[str, Any]] = {}
         self.active_matrices: dict[str, dict[str, Any]] = {}
+        self.browser_pool = BrowserPool()
 
     async def start_execution(
         self,
@@ -82,6 +92,7 @@ class ExecutionOrchestrator:
             raise ValueError(f"Cannot execute test case '{testcase.id}': draft requires human approval before execution.")
 
         bounded_retries = max(0, min(3, int(retries)))
+        queued_at_mono = get_monotonic_time()
 
         # Create record in database
         run_record = create_execution_run(
@@ -111,6 +122,7 @@ class ExecutionOrchestrator:
                 visual_diff=visual_diff,
                 diff_threshold=diff_threshold,
                 retries=bounded_retries,
+                queued_at_monotonic=queued_at_mono,
             )
         )
         self.active_tasks[execution_id] = task
@@ -136,8 +148,10 @@ class ExecutionOrchestrator:
         visual_diff: bool,
         diff_threshold: float,
         retries: int = 2,
+        queued_at_monotonic: float | None = None,
     ) -> None:
         """Internal execution loop with retry intelligence and attempt history."""
+        queue_wait_ms = elapsed_ms(queued_at_monotonic) if queued_at_monotonic is not None else 0.0
         _, testcase = resolve_testcase_file(testcase_id)
         testcase_dir = tc_file.parent
 
@@ -145,11 +159,17 @@ class ExecutionOrchestrator:
         update_execution_run_status(
             execution_id=execution_id,
             status="running",
+            queue_wait_ms=queue_wait_ms,
         )
         await broadcast_execution_event(
             execution_id=execution_id,
             event_type="execution_started",
-            data={"status": "running", "total_steps": len(testcase.steps), "retries": retries},
+            data={
+                "status": "running",
+                "total_steps": len(testcase.steps),
+                "retries": retries,
+                "queue_wait_ms": queue_wait_ms,
+            },
         )
 
         overall_logs: list[str] = []
@@ -279,6 +299,7 @@ class ExecutionOrchestrator:
                         output_dir=output_dir,
                         testcase_dir=testcase_dir,
                         step_callback=_step_callback,
+                        browser_pool=self.browser_pool,
                     )
                     replay_res: ReplayResult = await engine.run()
                     att_finish = datetime.now()
@@ -310,6 +331,11 @@ class ExecutionOrchestrator:
                         last_error_message = first_err
 
                     att_status = "passed" if replay_res.status == "passed" else ("error" if env_err else "failed")
+                    att_startup_ms = getattr(replay_res, "browser_startup_ms", 0.0)
+                    att_exec_ms = getattr(replay_res, "execution_duration_ms", 0.0)
+                    att_teardown_ms = getattr(replay_res, "teardown_ms", 0.0)
+                    att_art_bytes = get_directory_size_bytes(output_dir)
+                    att_mem_mb = get_memory_rss_mb()
 
                     # Record attempt permanently in database
                     record_execution_attempt(
@@ -321,6 +347,11 @@ class ExecutionOrchestrator:
                         failed_step=first_f_step,
                         failed_selector=first_f_sel,
                         report_path=str(output_dir),
+                        browser_startup_ms=att_startup_ms,
+                        execution_duration_ms=att_exec_ms,
+                        teardown_ms=att_teardown_ms,
+                        memory_rss_mb=att_mem_mb,
+                        artifact_size_bytes=att_art_bytes,
                     )
                     attempt_history.append({
                         "attempt_number": attempt,
@@ -330,6 +361,11 @@ class ExecutionOrchestrator:
                         "failed_step": first_f_step,
                         "failed_selector": first_f_sel,
                         "report_path": str(output_dir),
+                        "browser_startup_ms": att_startup_ms,
+                        "execution_duration_ms": att_exec_ms,
+                        "teardown_ms": att_teardown_ms,
+                        "memory_rss_mb": att_mem_mb,
+                        "artifact_size_bytes": att_art_bytes,
                     })
 
                     if replay_res.status == "passed":
@@ -350,6 +386,8 @@ class ExecutionOrchestrator:
                 except asyncio.CancelledError:
                     att_finish = datetime.now()
                     att_duration = (att_finish - att_start).total_seconds() * 1000.0
+                    att_art_bytes = get_directory_size_bytes(output_dir)
+                    att_mem_mb = get_memory_rss_mb()
                     record_execution_attempt(
                         execution_id=execution_id,
                         attempt_number=attempt,
@@ -357,6 +395,11 @@ class ExecutionOrchestrator:
                         duration_ms=att_duration,
                         error_message="Execution cancelled.",
                         report_path=str(output_dir),
+                        browser_startup_ms=0.0,
+                        execution_duration_ms=att_duration,
+                        teardown_ms=0.0,
+                        memory_rss_mb=att_mem_mb,
+                        artifact_size_bytes=att_art_bytes,
                     )
                     attempt_history.append({
                         "attempt_number": attempt,
@@ -364,12 +407,19 @@ class ExecutionOrchestrator:
                         "duration_ms": att_duration,
                         "error_message": "Execution cancelled.",
                         "report_path": str(output_dir),
+                        "browser_startup_ms": 0.0,
+                        "execution_duration_ms": att_duration,
+                        "teardown_ms": 0.0,
+                        "memory_rss_mb": att_mem_mb,
+                        "artifact_size_bytes": att_art_bytes,
                     })
                     final_status = "cancelled"
                     raise
                 except Exception as exc:
                     att_finish = datetime.now()
                     att_duration = (att_finish - att_start).total_seconds() * 1000.0
+                    att_art_bytes = get_directory_size_bytes(output_dir)
+                    att_mem_mb = get_memory_rss_mb()
                     err_str = str(exc)
                     last_error_message = err_str
                     env_err = is_browser_env_error(err_str)
@@ -385,6 +435,11 @@ class ExecutionOrchestrator:
                         duration_ms=att_duration,
                         error_message=err_str,
                         report_path=str(output_dir),
+                        browser_startup_ms=0.0,
+                        execution_duration_ms=att_duration,
+                        teardown_ms=0.0,
+                        memory_rss_mb=att_mem_mb,
+                        artifact_size_bytes=att_art_bytes,
                     )
                     attempt_history.append({
                         "attempt_number": attempt,
@@ -392,6 +447,11 @@ class ExecutionOrchestrator:
                         "duration_ms": att_duration,
                         "error_message": err_str,
                         "report_path": str(output_dir),
+                        "browser_startup_ms": 0.0,
+                        "execution_duration_ms": att_duration,
+                        "teardown_ms": 0.0,
+                        "memory_rss_mb": att_mem_mb,
+                        "artifact_size_bytes": att_art_bytes,
                     })
 
                     if env_err or attempt >= total_attempts:
@@ -403,6 +463,13 @@ class ExecutionOrchestrator:
 
             finish_time = datetime.now()
             duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
+            total_art_bytes = sum(int(att.get("artifact_size_bytes") or 0) for att in attempt_history)
+            total_startup_ms = sum(float(att.get("browser_startup_ms") or 0.0) for att in attempt_history)
+            total_exec_ms = sum(float(att.get("execution_duration_ms") or 0.0) for att in attempt_history)
+            total_teardown_ms = sum(float(att.get("teardown_ms") or 0.0) for att in attempt_history)
+            curr_mem_mb = get_memory_rss_mb()
+            curr_cpu_pct = get_cpu_percent()
+            curr_load_avg = get_load_average()
 
             update_execution_run_status(
                 execution_id=execution_id,
@@ -420,6 +487,14 @@ class ExecutionOrchestrator:
                 retry_history=attempt_history,
                 failure_step=last_failure_step,
                 failure_selector=last_failure_selector,
+                queue_wait_ms=queue_wait_ms,
+                browser_startup_ms=total_startup_ms,
+                execution_duration_ms=total_exec_ms,
+                teardown_ms=total_teardown_ms,
+                memory_rss_mb=curr_mem_mb,
+                cpu_percent=curr_cpu_pct,
+                load_average=curr_load_avg,
+                artifact_size_bytes=total_art_bytes,
             )
 
             await broadcast_execution_event(
@@ -438,11 +513,27 @@ class ExecutionOrchestrator:
                     "failure_selector": last_failure_selector,
                     "error_message": last_error_message,
                     "logs": overall_logs,
+                    "queue_wait_ms": queue_wait_ms,
+                    "browser_startup_ms": total_startup_ms,
+                    "execution_duration_ms": total_exec_ms,
+                    "teardown_ms": total_teardown_ms,
+                    "memory_rss_mb": curr_mem_mb,
+                    "cpu_percent": curr_cpu_pct,
+                    "load_average": curr_load_avg,
+                    "artifact_size_bytes": total_art_bytes,
                 },
             )
         except asyncio.CancelledError:
             finish_time = datetime.now()
             duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
+            total_art_bytes = sum(int(att.get("artifact_size_bytes") or 0) for att in attempt_history)
+            total_startup_ms = sum(float(att.get("browser_startup_ms") or 0.0) for att in attempt_history)
+            total_exec_ms = sum(float(att.get("execution_duration_ms") or 0.0) for att in attempt_history)
+            total_teardown_ms = sum(float(att.get("teardown_ms") or 0.0) for att in attempt_history)
+            curr_mem_mb = get_memory_rss_mb()
+            curr_cpu_pct = get_cpu_percent()
+            curr_load_avg = get_load_average()
+
             update_execution_run_status(
                 execution_id=execution_id,
                 status="cancelled",
@@ -452,6 +543,14 @@ class ExecutionOrchestrator:
                 attempt_count=len(attempt_history),
                 retry_history=attempt_history,
                 logs=overall_logs,
+                queue_wait_ms=queue_wait_ms,
+                browser_startup_ms=total_startup_ms,
+                execution_duration_ms=total_exec_ms,
+                teardown_ms=total_teardown_ms,
+                memory_rss_mb=curr_mem_mb,
+                cpu_percent=curr_cpu_pct,
+                load_average=curr_load_avg,
+                artifact_size_bytes=total_art_bytes,
             )
             await broadcast_execution_event(
                 execution_id=execution_id,
@@ -465,6 +564,13 @@ class ExecutionOrchestrator:
             duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
             error_str = str(exc)
             overall_logs.append(f"Execution Error: {error_str}")
+            total_art_bytes = sum(int(att.get("artifact_size_bytes") or 0) for att in attempt_history)
+            total_startup_ms = sum(float(att.get("browser_startup_ms") or 0.0) for att in attempt_history)
+            total_exec_ms = sum(float(att.get("execution_duration_ms") or 0.0) for att in attempt_history)
+            total_teardown_ms = sum(float(att.get("teardown_ms") or 0.0) for att in attempt_history)
+            curr_mem_mb = get_memory_rss_mb()
+            curr_cpu_pct = get_cpu_percent()
+            curr_load_avg = get_load_average()
 
             update_execution_run_status(
                 execution_id=execution_id,
@@ -475,6 +581,14 @@ class ExecutionOrchestrator:
                 logs=overall_logs,
                 attempt_count=len(attempt_history),
                 retry_history=attempt_history,
+                queue_wait_ms=queue_wait_ms,
+                browser_startup_ms=total_startup_ms,
+                execution_duration_ms=total_exec_ms,
+                teardown_ms=total_teardown_ms,
+                memory_rss_mb=curr_mem_mb,
+                cpu_percent=curr_cpu_pct,
+                load_average=curr_load_avg,
+                artifact_size_bytes=total_art_bytes,
             )
             await broadcast_execution_event(
                 execution_id=execution_id,
@@ -572,7 +686,8 @@ class ExecutionOrchestrator:
                 concurrency=bounded_concurrency,
                 retries=bounded_retries,
             )
-            queued_items.append((tc_file, testcase, run_rec))
+            queued_at_mono = get_monotonic_time()
+            queued_items.append((tc_file, testcase, run_rec, queued_at_mono))
             run_records.append(run_rec)
 
         queue: asyncio.Queue = asyncio.Queue()
@@ -594,6 +709,7 @@ class ExecutionOrchestrator:
             "flaky_tests": 0,
             "running_testcases": set(),
             "start_time": datetime.now(),
+            "run_metrics": [],
         }
         self.active_batches[batch_id] = batch_ctx
 
@@ -679,6 +795,17 @@ class ExecutionOrchestrator:
             else:
                 status = "passed"
 
+            run_metrics = batch_ctx.get("run_metrics", [])
+            avg_queue_wait = (
+                sum(float(m.get("queue_wait_ms", 0.0)) for m in run_metrics) / len(run_metrics)
+                if run_metrics else 0.0
+            )
+            avg_startup = (
+                sum(float(m.get("browser_startup_ms", 0.0)) for m in run_metrics) / len(run_metrics)
+                if run_metrics else 0.0
+            )
+            total_batch_art_bytes = sum(int(m.get("artifact_size_bytes", 0)) for m in run_metrics)
+
             update_execution_batch(
                 batch_id=batch_id,
                 status=status,
@@ -688,6 +815,9 @@ class ExecutionOrchestrator:
                 flaky_tests=batch_ctx.get("flaky_tests", 0),
                 finished_at=finish_time.isoformat(),
                 duration_ms=duration_ms,
+                queue_wait_ms=avg_queue_wait,
+                avg_startup_ms=avg_startup,
+                artifact_size_bytes=total_batch_art_bytes,
             )
 
             await broadcast_batch_event(
@@ -702,6 +832,9 @@ class ExecutionOrchestrator:
                     "cancelled_tests": batch_ctx["cancelled_tests"],
                     "flaky_tests": batch_ctx.get("flaky_tests", 0),
                     "duration_ms": duration_ms,
+                    "queue_wait_ms": avg_queue_wait,
+                    "avg_startup_ms": avg_startup,
+                    "artifact_size_bytes": total_batch_art_bytes,
                 },
             )
 
@@ -727,7 +860,7 @@ class ExecutionOrchestrator:
 
         while not queue.empty() and not batch_ctx.get("cancelled", False):
             try:
-                tc_file, testcase, run_record = queue.get_nowait()
+                tc_file, testcase, run_record, queued_at_mono = queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
 
@@ -736,6 +869,7 @@ class ExecutionOrchestrator:
                 break
 
             execution_id = run_record["id"]
+            queue_wait_ms = elapsed_ms(queued_at_mono)
 
             # Mutual exclusion: avoid simultaneous execution of identical test cases
             while testcase.id in batch_ctx["running_testcases"] and not batch_ctx.get("cancelled", False):
@@ -752,6 +886,7 @@ class ExecutionOrchestrator:
                 status="running",
                 worker_id=worker_id,
                 batch_id=batch_id,
+                queue_wait_ms=queue_wait_ms,
             )
 
             await broadcast_batch_event(
@@ -763,6 +898,7 @@ class ExecutionOrchestrator:
                     "execution_id": execution_id,
                     "testcase_id": testcase.id,
                     "testcase_name": testcase.name,
+                    "queue_wait_ms": queue_wait_ms,
                 },
             )
 
@@ -917,6 +1053,7 @@ class ExecutionOrchestrator:
                             output_dir=output_dir,
                             testcase_dir=tc_file.parent,
                             step_callback=_step_callback,
+                            browser_pool=self.browser_pool,
                         )
                         replay_res: ReplayResult = await engine.run()
                         att_finish = datetime.now()
@@ -948,6 +1085,11 @@ class ExecutionOrchestrator:
                             last_error_message = first_err
 
                         att_status = "passed" if replay_res.status == "passed" else ("error" if env_err else "failed")
+                        att_startup_ms = getattr(replay_res, "browser_startup_ms", 0.0)
+                        att_exec_ms = getattr(replay_res, "execution_duration_ms", 0.0)
+                        att_teardown_ms = getattr(replay_res, "teardown_ms", 0.0)
+                        att_art_bytes = get_directory_size_bytes(output_dir)
+                        att_mem_mb = get_memory_rss_mb()
 
                         record_execution_attempt(
                             execution_id=execution_id,
@@ -958,6 +1100,11 @@ class ExecutionOrchestrator:
                             failed_step=first_f_step,
                             failed_selector=first_f_sel,
                             report_path=str(output_dir),
+                            browser_startup_ms=att_startup_ms,
+                            execution_duration_ms=att_exec_ms,
+                            teardown_ms=att_teardown_ms,
+                            memory_rss_mb=att_mem_mb,
+                            artifact_size_bytes=att_art_bytes,
                         )
                         attempt_history.append({
                             "attempt_number": attempt,
@@ -967,6 +1114,11 @@ class ExecutionOrchestrator:
                             "failed_step": first_f_step,
                             "failed_selector": first_f_sel,
                             "report_path": str(output_dir),
+                            "browser_startup_ms": att_startup_ms,
+                            "execution_duration_ms": att_exec_ms,
+                            "teardown_ms": att_teardown_ms,
+                            "memory_rss_mb": att_mem_mb,
+                            "artifact_size_bytes": att_art_bytes,
                         })
 
                         if replay_res.status == "passed":
@@ -986,6 +1138,8 @@ class ExecutionOrchestrator:
                     except asyncio.CancelledError:
                         att_finish = datetime.now()
                         att_duration = (att_finish - att_start).total_seconds() * 1000.0
+                        att_art_bytes = get_directory_size_bytes(output_dir)
+                        att_mem_mb = get_memory_rss_mb()
                         record_execution_attempt(
                             execution_id=execution_id,
                             attempt_number=attempt,
@@ -993,6 +1147,11 @@ class ExecutionOrchestrator:
                             duration_ms=att_duration,
                             error_message="Execution cancelled.",
                             report_path=str(output_dir),
+                            browser_startup_ms=0.0,
+                            execution_duration_ms=att_duration,
+                            teardown_ms=0.0,
+                            memory_rss_mb=att_mem_mb,
+                            artifact_size_bytes=att_art_bytes,
                         )
                         attempt_history.append({
                             "attempt_number": attempt,
@@ -1000,12 +1159,19 @@ class ExecutionOrchestrator:
                             "duration_ms": att_duration,
                             "error_message": "Execution cancelled.",
                             "report_path": str(output_dir),
+                            "browser_startup_ms": 0.0,
+                            "execution_duration_ms": att_duration,
+                            "teardown_ms": 0.0,
+                            "memory_rss_mb": att_mem_mb,
+                            "artifact_size_bytes": att_art_bytes,
                         })
                         final_status = "cancelled"
                         raise
                     except Exception as exc:
                         att_finish = datetime.now()
                         att_duration = (att_finish - att_start).total_seconds() * 1000.0
+                        att_art_bytes = get_directory_size_bytes(output_dir)
+                        att_mem_mb = get_memory_rss_mb()
                         err_str = str(exc)
                         last_error_message = err_str
                         env_err = is_browser_env_error(err_str)
@@ -1021,6 +1187,11 @@ class ExecutionOrchestrator:
                             duration_ms=att_duration,
                             error_message=err_str,
                             report_path=str(output_dir),
+                            browser_startup_ms=0.0,
+                            execution_duration_ms=att_duration,
+                            teardown_ms=0.0,
+                            memory_rss_mb=att_mem_mb,
+                            artifact_size_bytes=att_art_bytes,
                         )
                         attempt_history.append({
                             "attempt_number": attempt,
@@ -1028,6 +1199,11 @@ class ExecutionOrchestrator:
                             "duration_ms": att_duration,
                             "error_message": err_str,
                             "report_path": str(output_dir),
+                            "browser_startup_ms": 0.0,
+                            "execution_duration_ms": att_duration,
+                            "teardown_ms": 0.0,
+                            "memory_rss_mb": att_mem_mb,
+                            "artifact_size_bytes": att_art_bytes,
                         })
 
                         if env_err or attempt >= total_attempts:
@@ -1039,6 +1215,19 @@ class ExecutionOrchestrator:
 
                 finish_time = datetime.now()
                 duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
+                total_art_bytes = sum(int(att.get("artifact_size_bytes") or 0) for att in attempt_history)
+                total_startup_ms = sum(float(att.get("browser_startup_ms") or 0.0) for att in attempt_history)
+                total_exec_ms = sum(float(att.get("execution_duration_ms") or 0.0) for att in attempt_history)
+                total_teardown_ms = sum(float(att.get("teardown_ms") or 0.0) for att in attempt_history)
+                curr_mem_mb = get_memory_rss_mb()
+                curr_cpu_pct = get_cpu_percent()
+                curr_load_avg = get_load_average()
+
+                batch_ctx.setdefault("run_metrics", []).append({
+                    "queue_wait_ms": queue_wait_ms,
+                    "browser_startup_ms": total_startup_ms,
+                    "artifact_size_bytes": total_art_bytes,
+                })
 
                 if final_status == "passed":
                     batch_ctx["passed_tests"] += 1
@@ -1068,6 +1257,14 @@ class ExecutionOrchestrator:
                     retry_history=attempt_history,
                     failure_step=last_failure_step,
                     failure_selector=last_failure_selector,
+                    queue_wait_ms=queue_wait_ms,
+                    browser_startup_ms=total_startup_ms,
+                    execution_duration_ms=total_exec_ms,
+                    teardown_ms=total_teardown_ms,
+                    memory_rss_mb=curr_mem_mb,
+                    cpu_percent=curr_cpu_pct,
+                    load_average=curr_load_avg,
+                    artifact_size_bytes=total_art_bytes,
                 )
 
                 await broadcast_execution_event(
@@ -1085,6 +1282,14 @@ class ExecutionOrchestrator:
                         "batch_id": batch_id,
                         "attempt_count": len(attempt_history),
                         "retry_history": attempt_history,
+                        "queue_wait_ms": queue_wait_ms,
+                        "browser_startup_ms": total_startup_ms,
+                        "execution_duration_ms": total_exec_ms,
+                        "teardown_ms": total_teardown_ms,
+                        "memory_rss_mb": curr_mem_mb,
+                        "cpu_percent": curr_cpu_pct,
+                        "load_average": curr_load_avg,
+                        "artifact_size_bytes": total_art_bytes,
                     },
                 )
                 await broadcast_batch_event(
@@ -1100,12 +1305,23 @@ class ExecutionOrchestrator:
                         "passed_steps": passed_count,
                         "failed_steps": failed_count,
                         "attempt_count": len(attempt_history),
+                        "queue_wait_ms": queue_wait_ms,
+                        "browser_startup_ms": total_startup_ms,
+                        "artifact_size_bytes": total_art_bytes,
                     },
                 )
             except asyncio.CancelledError:
                 finish_time = datetime.now()
                 duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
                 batch_ctx["cancelled_tests"] += 1
+                total_art_bytes = sum(int(att.get("artifact_size_bytes") or 0) for att in attempt_history)
+                total_startup_ms = sum(float(att.get("browser_startup_ms") or 0.0) for att in attempt_history)
+                total_exec_ms = sum(float(att.get("execution_duration_ms") or 0.0) for att in attempt_history)
+                total_teardown_ms = sum(float(att.get("teardown_ms") or 0.0) for att in attempt_history)
+                curr_mem_mb = get_memory_rss_mb()
+                curr_cpu_pct = get_cpu_percent()
+                curr_load_avg = get_load_average()
+
                 update_execution_run_status(
                     execution_id=execution_id,
                     status="cancelled",
@@ -1116,6 +1332,14 @@ class ExecutionOrchestrator:
                     batch_id=batch_id,
                     attempt_count=len(attempt_history),
                     retry_history=attempt_history,
+                    queue_wait_ms=queue_wait_ms,
+                    browser_startup_ms=total_startup_ms,
+                    execution_duration_ms=total_exec_ms,
+                    teardown_ms=total_teardown_ms,
+                    memory_rss_mb=curr_mem_mb,
+                    cpu_percent=curr_cpu_pct,
+                    load_average=curr_load_avg,
+                    artifact_size_bytes=total_art_bytes,
                 )
                 raise
             except Exception as exc:
@@ -1126,6 +1350,14 @@ class ExecutionOrchestrator:
                 batch_ctx["failed_tests"] += 1
                 err_msg = str(exc)
                 overall_logs.append(f"Worker Error: {err_msg}")
+                total_art_bytes = sum(int(att.get("artifact_size_bytes") or 0) for att in attempt_history)
+                total_startup_ms = sum(float(att.get("browser_startup_ms") or 0.0) for att in attempt_history)
+                total_exec_ms = sum(float(att.get("execution_duration_ms") or 0.0) for att in attempt_history)
+                total_teardown_ms = sum(float(att.get("teardown_ms") or 0.0) for att in attempt_history)
+                curr_mem_mb = get_memory_rss_mb()
+                curr_cpu_pct = get_cpu_percent()
+                curr_load_avg = get_load_average()
+
                 update_execution_run_status(
                     execution_id=execution_id,
                     status="error",
@@ -1137,6 +1369,14 @@ class ExecutionOrchestrator:
                     batch_id=batch_id,
                     attempt_count=len(attempt_history),
                     retry_history=attempt_history,
+                    queue_wait_ms=queue_wait_ms,
+                    browser_startup_ms=total_startup_ms,
+                    execution_duration_ms=total_exec_ms,
+                    teardown_ms=total_teardown_ms,
+                    memory_rss_mb=curr_mem_mb,
+                    cpu_percent=curr_cpu_pct,
+                    load_average=curr_load_avg,
+                    artifact_size_bytes=total_art_bytes,
                 )
                 await broadcast_execution_event(
                     execution_id=execution_id,
@@ -1197,7 +1437,8 @@ class ExecutionOrchestrator:
             # Drain queued unstarted tests and mark them cancelled
             while not queue.empty():
                 try:
-                    tc_file, testcase, run_record = queue.get_nowait()
+                    item = queue.get_nowait()
+                    run_record = item[2]
                     batch_ctx["cancelled_tests"] += 1
                     update_execution_run_status(
                         execution_id=run_record["id"],
@@ -1339,7 +1580,8 @@ class ExecutionOrchestrator:
                     concurrency=bounded_concurrency,
                     retries=bounded_retries,
                 )
-                queued_items.append((tc_file, testcase, b, run_rec))
+                queued_at_mono = get_monotonic_time()
+                queued_items.append((tc_file, testcase, b, run_rec, queued_at_mono))
                 run_records.append(run_rec)
 
         queue: asyncio.Queue = asyncio.Queue()
@@ -1362,6 +1604,7 @@ class ExecutionOrchestrator:
             "flaky_executions": 0,
             "running_keys": set(),
             "start_time": datetime.now(),
+            "run_metrics": [],
         }
         self.active_matrices[matrix_id] = matrix_ctx
 
@@ -1449,6 +1692,17 @@ class ExecutionOrchestrator:
             else:
                 status = "passed"
 
+            run_metrics = matrix_ctx.get("run_metrics", [])
+            avg_queue_wait = (
+                sum(float(m.get("queue_wait_ms", 0.0)) for m in run_metrics) / len(run_metrics)
+                if run_metrics else 0.0
+            )
+            avg_startup = (
+                sum(float(m.get("browser_startup_ms", 0.0)) for m in run_metrics) / len(run_metrics)
+                if run_metrics else 0.0
+            )
+            total_matrix_art_bytes = sum(int(m.get("artifact_size_bytes", 0)) for m in run_metrics)
+
             # Fetch consolidated grid & compute divergence count
             matrix_data = get_execution_matrix(matrix_id) or {}
             divergence_count = matrix_data.get("divergent_testcases_count", 0)
@@ -1463,6 +1717,9 @@ class ExecutionOrchestrator:
                 divergence_count=divergence_count,
                 finished_at=finish_time.isoformat(),
                 duration_ms=duration_ms,
+                queue_wait_ms=avg_queue_wait,
+                avg_startup_ms=avg_startup,
+                artifact_size_bytes=total_matrix_art_bytes,
             )
 
             final_matrix = get_execution_matrix(matrix_id) or {}
@@ -1482,6 +1739,9 @@ class ExecutionOrchestrator:
                     "cross_browser_parity_pct": final_matrix.get("cross_browser_parity_pct", 100.0),
                     "browser_pass_rates": final_matrix.get("browser_pass_rates", {}),
                     "duration_ms": duration_ms,
+                    "queue_wait_ms": avg_queue_wait,
+                    "avg_startup_ms": avg_startup,
+                    "artifact_size_bytes": total_matrix_art_bytes,
                 },
             )
 
@@ -1506,7 +1766,7 @@ class ExecutionOrchestrator:
 
         while not queue.empty() and not matrix_ctx.get("cancelled", False):
             try:
-                tc_file, testcase, browser, run_record = queue.get_nowait()
+                tc_file, testcase, browser, run_record, queued_at_mono = queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
 
@@ -1515,6 +1775,7 @@ class ExecutionOrchestrator:
                 break
 
             execution_id = run_record["id"]
+            queue_wait_ms = elapsed_ms(queued_at_mono)
             run_key = f"{testcase.id}::{browser}"
 
             # Avoid concurrent collision on the exact same (testcase, browser) tuple
@@ -1532,6 +1793,7 @@ class ExecutionOrchestrator:
                 status="running",
                 worker_id=worker_id,
                 matrix_id=matrix_id,
+                queue_wait_ms=queue_wait_ms,
             )
 
             await broadcast_matrix_event(
@@ -1544,6 +1806,7 @@ class ExecutionOrchestrator:
                     "testcase_id": testcase.id,
                     "testcase_name": testcase.name,
                     "browser": browser,
+                    "queue_wait_ms": queue_wait_ms,
                 },
             )
 
@@ -1700,6 +1963,7 @@ class ExecutionOrchestrator:
                             output_dir=output_dir,
                             testcase_dir=tc_file.parent,
                             step_callback=_step_callback,
+                            browser_pool=self.browser_pool,
                         )
                         replay_res: ReplayResult = await engine.run()
                         att_finish = datetime.now()
@@ -1731,6 +1995,11 @@ class ExecutionOrchestrator:
                             last_error_message = first_err
 
                         att_status = "passed" if replay_res.status == "passed" else ("error" if env_err else "failed")
+                        att_startup_ms = getattr(replay_res, "browser_startup_ms", 0.0)
+                        att_exec_ms = getattr(replay_res, "execution_duration_ms", 0.0)
+                        att_teardown_ms = getattr(replay_res, "teardown_ms", 0.0)
+                        att_art_bytes = get_directory_size_bytes(output_dir)
+                        att_mem_mb = get_memory_rss_mb()
 
                         record_execution_attempt(
                             execution_id=execution_id,
@@ -1741,6 +2010,11 @@ class ExecutionOrchestrator:
                             failed_step=first_f_step,
                             failed_selector=first_f_sel,
                             report_path=str(output_dir),
+                            browser_startup_ms=att_startup_ms,
+                            execution_duration_ms=att_exec_ms,
+                            teardown_ms=att_teardown_ms,
+                            memory_rss_mb=att_mem_mb,
+                            artifact_size_bytes=att_art_bytes,
                         )
                         attempt_history.append({
                             "attempt_number": attempt,
@@ -1750,6 +2024,11 @@ class ExecutionOrchestrator:
                             "failed_step": first_f_step,
                             "failed_selector": first_f_sel,
                             "report_path": str(output_dir),
+                            "browser_startup_ms": att_startup_ms,
+                            "execution_duration_ms": att_exec_ms,
+                            "teardown_ms": att_teardown_ms,
+                            "memory_rss_mb": att_mem_mb,
+                            "artifact_size_bytes": att_art_bytes,
                         })
 
                         if replay_res.status == "passed":
@@ -1769,6 +2048,8 @@ class ExecutionOrchestrator:
                     except asyncio.CancelledError:
                         att_finish = datetime.now()
                         att_duration = (att_finish - att_start).total_seconds() * 1000.0
+                        att_art_bytes = get_directory_size_bytes(output_dir)
+                        att_mem_mb = get_memory_rss_mb()
                         record_execution_attempt(
                             execution_id=execution_id,
                             attempt_number=attempt,
@@ -1776,6 +2057,11 @@ class ExecutionOrchestrator:
                             duration_ms=att_duration,
                             error_message="Execution cancelled.",
                             report_path=str(output_dir),
+                            browser_startup_ms=0.0,
+                            execution_duration_ms=att_duration,
+                            teardown_ms=0.0,
+                            memory_rss_mb=att_mem_mb,
+                            artifact_size_bytes=att_art_bytes,
                         )
                         attempt_history.append({
                             "attempt_number": attempt,
@@ -1783,12 +2069,19 @@ class ExecutionOrchestrator:
                             "duration_ms": att_duration,
                             "error_message": "Execution cancelled.",
                             "report_path": str(output_dir),
+                            "browser_startup_ms": 0.0,
+                            "execution_duration_ms": att_duration,
+                            "teardown_ms": 0.0,
+                            "memory_rss_mb": att_mem_mb,
+                            "artifact_size_bytes": att_art_bytes,
                         })
                         final_status = "cancelled"
                         raise
                     except Exception as exc:
                         att_finish = datetime.now()
                         att_duration = (att_finish - att_start).total_seconds() * 1000.0
+                        att_art_bytes = get_directory_size_bytes(output_dir)
+                        att_mem_mb = get_memory_rss_mb()
                         err_str = str(exc)
                         last_error_message = err_str
                         env_err = is_browser_env_error(err_str)
@@ -1804,6 +2097,11 @@ class ExecutionOrchestrator:
                             duration_ms=att_duration,
                             error_message=err_str,
                             report_path=str(output_dir),
+                            browser_startup_ms=0.0,
+                            execution_duration_ms=att_duration,
+                            teardown_ms=0.0,
+                            memory_rss_mb=att_mem_mb,
+                            artifact_size_bytes=att_art_bytes,
                         )
                         attempt_history.append({
                             "attempt_number": attempt,
@@ -1811,6 +2109,11 @@ class ExecutionOrchestrator:
                             "duration_ms": att_duration,
                             "error_message": err_str,
                             "report_path": str(output_dir),
+                            "browser_startup_ms": 0.0,
+                            "execution_duration_ms": att_duration,
+                            "teardown_ms": 0.0,
+                            "memory_rss_mb": att_mem_mb,
+                            "artifact_size_bytes": att_art_bytes,
                         })
 
                         if env_err or attempt >= total_attempts:
@@ -1822,6 +2125,19 @@ class ExecutionOrchestrator:
 
                 finish_time = datetime.now()
                 duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
+                total_art_bytes = sum(int(att.get("artifact_size_bytes") or 0) for att in attempt_history)
+                total_startup_ms = sum(float(att.get("browser_startup_ms") or 0.0) for att in attempt_history)
+                total_exec_ms = sum(float(att.get("execution_duration_ms") or 0.0) for att in attempt_history)
+                total_teardown_ms = sum(float(att.get("teardown_ms") or 0.0) for att in attempt_history)
+                curr_mem_mb = get_memory_rss_mb()
+                curr_cpu_pct = get_cpu_percent()
+                curr_load_avg = get_load_average()
+
+                matrix_ctx.setdefault("run_metrics", []).append({
+                    "queue_wait_ms": queue_wait_ms,
+                    "browser_startup_ms": total_startup_ms,
+                    "artifact_size_bytes": total_art_bytes,
+                })
 
                 if final_status == "passed":
                     matrix_ctx["passed_executions"] += 1
@@ -1851,6 +2167,14 @@ class ExecutionOrchestrator:
                     retry_history=attempt_history,
                     failure_step=last_failure_step,
                     failure_selector=last_failure_selector,
+                    queue_wait_ms=queue_wait_ms,
+                    browser_startup_ms=total_startup_ms,
+                    execution_duration_ms=total_exec_ms,
+                    teardown_ms=total_teardown_ms,
+                    memory_rss_mb=curr_mem_mb,
+                    cpu_percent=curr_cpu_pct,
+                    load_average=curr_load_avg,
+                    artifact_size_bytes=total_art_bytes,
                 )
 
                 await broadcast_execution_event(
@@ -1869,6 +2193,14 @@ class ExecutionOrchestrator:
                         "browser": browser,
                         "attempt_count": len(attempt_history),
                         "retry_history": attempt_history,
+                        "queue_wait_ms": queue_wait_ms,
+                        "browser_startup_ms": total_startup_ms,
+                        "execution_duration_ms": total_exec_ms,
+                        "teardown_ms": total_teardown_ms,
+                        "memory_rss_mb": curr_mem_mb,
+                        "cpu_percent": curr_cpu_pct,
+                        "load_average": curr_load_avg,
+                        "artifact_size_bytes": total_art_bytes,
                     },
                 )
                 await broadcast_matrix_event(
@@ -1885,12 +2217,23 @@ class ExecutionOrchestrator:
                         "passed_steps": passed_count,
                         "failed_steps": failed_count,
                         "attempt_count": len(attempt_history),
+                        "queue_wait_ms": queue_wait_ms,
+                        "browser_startup_ms": total_startup_ms,
+                        "artifact_size_bytes": total_art_bytes,
                     },
                 )
             except asyncio.CancelledError:
                 finish_time = datetime.now()
                 duration_ms = (finish_time - overall_start_time).total_seconds() * 1000.0
                 matrix_ctx["cancelled_executions"] += 1
+                total_art_bytes = sum(int(att.get("artifact_size_bytes") or 0) for att in attempt_history)
+                total_startup_ms = sum(float(att.get("browser_startup_ms") or 0.0) for att in attempt_history)
+                total_exec_ms = sum(float(att.get("execution_duration_ms") or 0.0) for att in attempt_history)
+                total_teardown_ms = sum(float(att.get("teardown_ms") or 0.0) for att in attempt_history)
+                curr_mem_mb = get_memory_rss_mb()
+                curr_cpu_pct = get_cpu_percent()
+                curr_load_avg = get_load_average()
+
                 update_execution_run_status(
                     execution_id=execution_id,
                     status="cancelled",
@@ -1901,6 +2244,14 @@ class ExecutionOrchestrator:
                     matrix_id=matrix_id,
                     attempt_count=len(attempt_history),
                     retry_history=attempt_history,
+                    queue_wait_ms=queue_wait_ms,
+                    browser_startup_ms=total_startup_ms,
+                    execution_duration_ms=total_exec_ms,
+                    teardown_ms=total_teardown_ms,
+                    memory_rss_mb=curr_mem_mb,
+                    cpu_percent=curr_cpu_pct,
+                    load_average=curr_load_avg,
+                    artifact_size_bytes=total_art_bytes,
                 )
                 raise
             except Exception as exc:
@@ -1916,6 +2267,14 @@ class ExecutionOrchestrator:
                     err_msg = raw_err
 
                 overall_logs.append(f"Worker Error: {err_msg}")
+                total_art_bytes = sum(int(att.get("artifact_size_bytes") or 0) for att in attempt_history)
+                total_startup_ms = sum(float(att.get("browser_startup_ms") or 0.0) for att in attempt_history)
+                total_exec_ms = sum(float(att.get("execution_duration_ms") or 0.0) for att in attempt_history)
+                total_teardown_ms = sum(float(att.get("teardown_ms") or 0.0) for att in attempt_history)
+                curr_mem_mb = get_memory_rss_mb()
+                curr_cpu_pct = get_cpu_percent()
+                curr_load_avg = get_load_average()
+
                 update_execution_run_status(
                     execution_id=execution_id,
                     status="error",
@@ -1927,6 +2286,14 @@ class ExecutionOrchestrator:
                     matrix_id=matrix_id,
                     attempt_count=len(attempt_history),
                     retry_history=attempt_history,
+                    queue_wait_ms=queue_wait_ms,
+                    browser_startup_ms=total_startup_ms,
+                    execution_duration_ms=total_exec_ms,
+                    teardown_ms=total_teardown_ms,
+                    memory_rss_mb=curr_mem_mb,
+                    cpu_percent=curr_cpu_pct,
+                    load_average=curr_load_avg,
+                    artifact_size_bytes=total_art_bytes,
                 )
                 await broadcast_execution_event(
                     execution_id=execution_id,
@@ -1989,7 +2356,8 @@ class ExecutionOrchestrator:
             # Drain queued unstarted runs and mark them cancelled
             while not queue.empty():
                 try:
-                    tc_file, testcase, browser, run_record = queue.get_nowait()
+                    item = queue.get_nowait()
+                    run_record = item[3]
                     matrix_ctx["cancelled_executions"] += 1
                     update_execution_run_status(
                         execution_id=run_record["id"],
@@ -2048,6 +2416,18 @@ class ExecutionOrchestrator:
             )
             return True
         return False
+
+    async def shutdown(self) -> None:
+        """Gracefully cancel all active tasks and shut down the managed browser pool."""
+        tasks_to_cancel = [t for t in self.active_tasks.values() if not t.done()]
+        for t in tasks_to_cancel:
+            t.cancel()
+        if tasks_to_cancel:
+            await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+        self.active_tasks.clear()
+        self.active_batches.clear()
+        self.active_matrices.clear()
+        await self.browser_pool.shutdown()
 
 
 # Singleton orchestrator

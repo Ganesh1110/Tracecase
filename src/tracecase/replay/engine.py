@@ -21,10 +21,11 @@ from tracecase.replay.visual import compare_images
 
 if TYPE_CHECKING:
     from playwright.async_api import BrowserContext, Locator, Page
+    from tracecase.browser_pool import BrowserPool
 
 
 class ReplayEngine:
-    """Replay a recorded test case in a fresh browser."""
+    """Replay a recorded test case in a fresh browser or context-isolated pool."""
 
     def __init__(
         self,
@@ -42,6 +43,7 @@ class ReplayEngine:
         visual_fail: bool = False,
         testcase_dir: Path | None = None,
         step_callback: Any = None,
+        browser_pool: BrowserPool | None = None,
     ) -> None:
         self.testcase = testcase
         self.browser_type = browser_type or testcase.browser
@@ -56,8 +58,10 @@ class ReplayEngine:
         self.visual_fail = visual_fail
         self.testcase_dir = Path(testcase_dir) if testcase_dir is not None else None
         self.step_callback = step_callback
+        self.browser_pool = browser_pool
 
     async def run(self) -> ReplayResult:
+        mono_start = time.monotonic()
         started_at = datetime.now()
         assertions = derive_assertions(self.testcase) if self.assertions_enabled else []
         custom_assertions = getattr(self.testcase, "custom_assertions", []) or []
@@ -69,22 +73,44 @@ class ReplayEngine:
                     assertions.append(Assertion.model_validate(ca))
                 elif isinstance(ca, Assertion):
                     assertions.append(ca)
-        manager = BrowserManager(
-            browser_type=cast(BrowserType, self.browser_type),
-            headless=self.headless,
-            viewport=(
-                self.testcase.viewport.get("width", 1280),
-                self.testcase.viewport.get("height", 720),
-            ),
-            timeout=self.timeout,
-        )
+
+        manager: BrowserManager | None = None
+        context: BrowserContext | None = None
+        page: Page | None = None
         responses: list[tuple[str, int]] = []
         errors: list[str] = []
         step_results: list[StepResult] = []
 
+        browser_startup_ms = 0.0
+        execution_duration_ms = 0.0
+        teardown_ms = 0.0
+
         try:
-            page = await manager.start()
-            context = manager.context
+            t0 = time.monotonic()
+            if self.browser_pool is not None:
+                context, page = await self.browser_pool.acquire_context(
+                    browser_type=cast(BrowserType, self.browser_type),
+                    headless=self.headless,
+                    viewport=(
+                        self.testcase.viewport.get("width", 1280),
+                        self.testcase.viewport.get("height", 720),
+                    ),
+                    timeout=self.timeout,
+                )
+            else:
+                manager = BrowserManager(
+                    browser_type=cast(BrowserType, self.browser_type),
+                    headless=self.headless,
+                    viewport=(
+                        self.testcase.viewport.get("width", 1280),
+                        self.testcase.viewport.get("height", 720),
+                    ),
+                    timeout=self.timeout,
+                )
+                page = await manager.start()
+                context = manager.context
+
+            browser_startup_ms = round((time.monotonic() - t0) * 1000.0, 2)
 
             def _attach_page_listeners(p: Page) -> None:
                 p.on(
@@ -99,6 +125,7 @@ class ReplayEngine:
             if self.har is not None:
                 await install_har_routes(context, self.har)
 
+            t_exec_start = time.monotonic()
             await page.goto(self.testcase.start_url, wait_until="domcontentloaded")
 
             for step in self.testcase.steps:
@@ -111,13 +138,21 @@ class ReplayEngine:
                             await cb_res
                     except Exception:
                         pass
+            execution_duration_ms = round((time.monotonic() - t_exec_start) * 1000.0, 2)
         except Exception as exc:
             step_results.append(StepResult(number=0, status="error", error=str(exc)))
         finally:
-            with contextlib.suppress(Exception):
-                await manager.close()
+            t_td_start = time.monotonic()
+            if self.browser_pool is not None and context is not None:
+                with contextlib.suppress(Exception):
+                    await self.browser_pool.release_context(context)
+            elif manager is not None:
+                with contextlib.suppress(Exception):
+                    await manager.close()
+            teardown_ms = round((time.monotonic() - t_td_start) * 1000.0, 2)
 
         finished_at = datetime.now()
+        total_duration_ms = round((time.monotonic() - mono_start) * 1000.0, 2)
         errored = any(result.status == "error" for result in step_results)
         failed = any(result.status == "failed" for result in step_results)
 
@@ -142,6 +177,10 @@ class ReplayEngine:
             exit_code=exit_code,
             steps=step_results,
             visual_diffs=visual_diffs,
+            browser_startup_ms=browser_startup_ms,
+            execution_duration_ms=execution_duration_ms,
+            teardown_ms=teardown_ms,
+            total_duration_ms=total_duration_ms,
         )
 
     async def _get_target_page(self, context: BrowserContext, page_id: int | None) -> Page:

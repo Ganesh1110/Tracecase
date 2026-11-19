@@ -58,3 +58,7 @@ class ReplayResult(BaseModel):
     exit_code: int
     steps: list[StepResult] = Field(default_factory=list)
     visual_diffs: list[VisualDiffResult] = Field(default_factory=list)
+    browser_startup_ms: float = 0.0
+    execution_duration_ms: float = 0.0
+    teardown_ms: float = 0.0
+    total_duration_ms: float = 0.0

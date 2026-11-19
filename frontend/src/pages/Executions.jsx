@@ -24,6 +24,7 @@ import {
   Sliders,
   Check,
   Globe,
+  Activity,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useWebSocket } from '../context/WebSocketContext';
@@ -715,6 +716,10 @@ export function Executions() {
                           </div>
                           <div className="flex flex-wrap items-center gap-3 text-slate-500 text-[11px]">
                             <span>Duration: {(att.duration_ms || 0).toFixed(1)}ms</span>
+                            {att.browser_startup_ms != null && <span>Startup: {Number(att.browser_startup_ms).toFixed(1)}ms</span>}
+                            {att.artifact_size_bytes != null && (
+                              <span>Artifacts: {att.artifact_size_bytes < 1024 ? `${att.artifact_size_bytes}B` : `${(att.artifact_size_bytes / 1024).toFixed(1)}KB`}</span>
+                            )}
                             {att.failed_step != null && <span>Failed Step: #{att.failed_step}</span>}
                             {att.failed_selector && <span className="font-mono truncate max-w-xs">Selector: {att.failed_selector}</span>}
                           </div>
@@ -725,6 +730,53 @@ export function Executions() {
                           )}
                         </div>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Telemetry & Resource Profile */}
+                {(selectedRun.browser_startup_ms != null || selectedRun.queue_wait_ms != null || selectedRun.memory_rss_mb != null) && (
+                  <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 text-xs shadow-sm space-y-3">
+                    <div className="flex items-center justify-between text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider text-[11px]">
+                      <span className="flex items-center gap-1.5">
+                        <Activity className="w-3.5 h-3.5 text-blue-500" />
+                        Performance & Resource Telemetry
+                      </span>
+                      {selectedRun.memory_rss_mb != null && (
+                        <span className="font-normal text-slate-500 text-[10px]">
+                          Process RSS: {Number(selectedRun.memory_rss_mb).toFixed(1)} MB
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                      {selectedRun.queue_wait_ms != null && (
+                        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/60 flex flex-col">
+                          <span className="text-slate-400 text-[10px]">Queue Wait</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">{Number(selectedRun.queue_wait_ms).toFixed(1)} ms</span>
+                        </div>
+                      )}
+                      {selectedRun.browser_startup_ms != null && (
+                        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/60 flex flex-col">
+                          <span className="text-slate-400 text-[10px]">Browser Startup</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">{Number(selectedRun.browser_startup_ms).toFixed(1)} ms</span>
+                        </div>
+                      )}
+                      {selectedRun.execution_duration_ms != null && (
+                        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/60 flex flex-col">
+                          <span className="text-slate-400 text-[10px]">Test Execution</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">{Number(selectedRun.execution_duration_ms).toFixed(1)} ms</span>
+                        </div>
+                      )}
+                      {selectedRun.artifact_size_bytes != null && (
+                        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/60 flex flex-col">
+                          <span className="text-slate-400 text-[10px]">Artifacts</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">
+                            {selectedRun.artifact_size_bytes < 1024
+                              ? `${selectedRun.artifact_size_bytes} B`
+                              : `${(selectedRun.artifact_size_bytes / 1024).toFixed(1)} KB`}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

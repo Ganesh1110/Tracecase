@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import webbrowser
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
@@ -14,10 +15,17 @@ from fastapi.staticfiles import StaticFiles
 
 from tracecase import __version__
 from tracecase.ui.api import router as api_router
+from tracecase.ui.executor import orchestrator
 
 logger = logging.getLogger("tracecase.ui.server")
 STATIC_DIR = Path(__file__).parent / "static"
 ASSETS_DIR = STATIC_DIR / "assets"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await orchestrator.shutdown()
 
 
 def create_app() -> FastAPI:
@@ -26,6 +34,7 @@ def create_app() -> FastAPI:
         title="Tracecase Studio",
         description="Autonomous Web QA Studio for recording, replaying, and inspecting browser tests.",
         version=__version__,
+        lifespan=lifespan,
     )
 
     # Enable CORS for development flexibility
