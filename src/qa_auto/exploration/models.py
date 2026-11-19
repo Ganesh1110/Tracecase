@@ -169,3 +169,52 @@ class ExplorationConfig(BaseModel):
     allow_destructive: bool = False
     auth_cookies: list[dict[str, Any]] | None = None
     auth_headers: dict[str, str] | None = None
+
+
+class SynthesizedAssertion(BaseModel):
+    """Assertion generated from exploration evidence or marked for human review."""
+
+    assertion_type: Literal[
+        "url_matches", "title_matches", "element_visible", "no_page_error", "text_matches"
+    ]
+    target_selector: str | None = None
+    expected_value: Any = None
+    source: Literal["evidence", "template", "manual"] = "evidence"
+    requires_human_input: bool = False
+    evidence_provenance: dict[str, Any] = Field(default_factory=dict)
+    review_prompt: str | None = None
+
+
+class SynthesizedStep(BaseModel):
+    """Synthesized test step with evidence linkage and verified assertions."""
+
+    number: int
+    action_type: Literal["navigate", "click", "input", "check", "select", "wait"]
+    selector: str | None = None
+    url: str | None = None
+    input_value: str | None = None
+    description_short: str
+    description_detailed: str
+    source_node_id: str | None = None
+    screenshot_path: str | None = None
+    assertions: list[SynthesizedAssertion] = Field(default_factory=list)
+
+
+class TestJourneyDraft(BaseModel):
+    """Test journey synthesized from navigation graph, pending human review and approval."""
+
+    id: str
+    exploration_id: str
+    project_id: str = "default_project"
+    name: str
+    description: str = ""
+    journey_type: Literal["navigation", "form_interaction", "deep_journey"] = "navigation"
+    priority: Literal["high", "medium", "low"] = "medium"
+    start_url: str
+    steps: list[SynthesizedStep] = Field(default_factory=list)
+    status: Literal["pending", "approved", "rejected"] = "pending"
+    approved_testcase_id: str | None = None
+    rejection_reason: str | None = None
+    requires_human_input: bool = False
+    created_at: datetime = Field(default_factory=datetime.now)
+    reviewed_at: datetime | None = None

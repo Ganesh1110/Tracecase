@@ -89,6 +89,20 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             """
         )
 
+        try:
+            cursor = conn.execute("PRAGMA table_info(testcases_meta)")
+            cols = [row["name"] for row in cursor.fetchall()]
+            if "approval_status" not in cols:
+                conn.execute(
+                    "ALTER TABLE testcases_meta ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'approved'"
+                )
+            if "provenance_json" not in cols:
+                conn.execute(
+                    "ALTER TABLE testcases_meta ADD COLUMN provenance_json TEXT DEFAULT '{}'"
+                )
+        except Exception:
+            pass
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS execution_runs (
@@ -113,6 +127,63 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
                 error_message TEXT,
                 report_path TEXT,
                 logs_json TEXT DEFAULT '[]'
+            )
+            """
+        )
+
+        try:
+            cursor = conn.execute("PRAGMA table_info(execution_runs)")
+            cols = [row["name"] for row in cursor.fetchall()]
+            if "batch_id" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN batch_id TEXT")
+            if "worker_id" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN worker_id TEXT")
+            if "concurrency" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN concurrency INTEGER DEFAULT 1")
+            if "matrix_id" not in cols:
+                conn.execute("ALTER TABLE execution_runs ADD COLUMN matrix_id TEXT")
+        except Exception:
+            pass
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS execution_batches (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                suite_id TEXT,
+                status TEXT NOT NULL DEFAULT 'queued',
+                concurrency INTEGER NOT NULL DEFAULT 2,
+                total_tests INTEGER NOT NULL DEFAULT 0,
+                passed_tests INTEGER NOT NULL DEFAULT 0,
+                failed_tests INTEGER NOT NULL DEFAULT 0,
+                cancelled_tests INTEGER NOT NULL DEFAULT 0,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                duration_ms REAL DEFAULT 0.0,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS execution_matrices (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                suite_id TEXT,
+                name TEXT,
+                status TEXT NOT NULL DEFAULT 'queued',
+                concurrency INTEGER NOT NULL DEFAULT 2,
+                browsers_json TEXT NOT NULL DEFAULT '["chromium"]',
+                total_executions INTEGER NOT NULL DEFAULT 0,
+                passed_executions INTEGER NOT NULL DEFAULT 0,
+                failed_executions INTEGER NOT NULL DEFAULT 0,
+                cancelled_executions INTEGER NOT NULL DEFAULT 0,
+                divergence_count INTEGER NOT NULL DEFAULT 0,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                duration_ms REAL DEFAULT 0.0,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             )
             """
         )
@@ -215,6 +286,30 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
 
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS synthesized_drafts (
+                id TEXT PRIMARY KEY,
+                exploration_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                journey_type TEXT NOT NULL,
+                priority TEXT NOT NULL DEFAULT 'medium',
+                start_url TEXT NOT NULL,
+                steps_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                approved_testcase_id TEXT,
+                rejection_reason TEXT,
+                requires_human_input INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                reviewed_at TEXT,
+                FOREIGN KEY (exploration_id) REFERENCES exploration_runs(id) ON DELETE CASCADE,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS exploration_transitions (
                 id TEXT PRIMARY KEY,
                 exploration_id TEXT NOT NULL,
@@ -227,6 +322,30 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
                 duration_ms REAL DEFAULT 0.0,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (exploration_id) REFERENCES exploration_runs(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS synthesized_drafts (
+                id TEXT PRIMARY KEY,
+                exploration_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                journey_type TEXT NOT NULL,
+                priority TEXT NOT NULL DEFAULT 'medium',
+                start_url TEXT NOT NULL,
+                steps_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                approved_testcase_id TEXT,
+                rejection_reason TEXT,
+                requires_human_input INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                reviewed_at TEXT,
+                FOREIGN KEY (exploration_id) REFERENCES exploration_runs(id) ON DELETE CASCADE,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             )
             """
         )
@@ -551,12 +670,36 @@ def update_suite(
         conn.close()
 
 
+def get_testcase_meta(
+    testcase_id: str, db_path: Path | str | None = None
+) -> dict[str, Any] | None:
+    """Retrieve metadata record for a testcase."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM testcases_meta WHERE id = ?", (testcase_id,)
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["tags"] = json.loads(d.get("tags_json") or "[]")
+        d["provenance"] = json.loads(d.get("provenance_json") or "{}")
+        return d
+    finally:
+        conn.close()
+
+
 def add_testcase_to_suite(
     suite_id: str,
     testcase_id: str,
     db_path: Path | str | None = None,
 ) -> dict[str, Any] | None:
-    """Add a testcase to a suite, preventing duplicates."""
+    """Add a testcase to a suite, preventing duplicates and blocking unapproved drafts."""
+    meta = get_testcase_meta(testcase_id, db_path)
+    if meta and meta.get("approval_status") == "draft":
+        raise ValueError(f"Cannot add unapproved draft testcase '{testcase_id}' to a suite.")
+
     suite = get_suite(suite_id, db_path)
     if not suite:
         return None
@@ -601,6 +744,8 @@ def sync_testcase_meta(
     file_path: Path | str,
     project_id: str = "default_project",
     tags: list[str] | None = None,
+    approval_status: str = "approved",
+    provenance: dict[str, Any] | None = None,
     db_path: Path | str | None = None,
 ) -> None:
     """Upsert testcase metadata into testcases_meta."""
@@ -610,6 +755,7 @@ def sync_testcase_meta(
     fpath = Path(file_path).resolve()
     folder_path = str(fpath.parent)
     tags_json = json.dumps(tags or [])
+    prov_json = json.dumps(provenance or {})
     try:
         with conn:
             conn.execute(
@@ -617,9 +763,9 @@ def sync_testcase_meta(
                 INSERT INTO testcases_meta (
                     id, project_id, name, description, start_url, browser,
                     total_steps, total_duration, folder_path, file_path, tags_json,
-                    created_at, updated_at
+                    approval_status, provenance_json, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     start_url = excluded.start_url,
@@ -628,6 +774,8 @@ def sync_testcase_meta(
                     total_duration = excluded.total_duration,
                     folder_path = excluded.folder_path,
                     file_path = excluded.file_path,
+                    approval_status = excluded.approval_status,
+                    provenance_json = excluded.provenance_json,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -642,6 +790,8 @@ def sync_testcase_meta(
                     folder_path,
                     str(fpath),
                     tags_json,
+                    approval_status,
+                    prov_json,
                     testcase.created_at.isoformat() if hasattr(testcase.created_at, "isoformat") else str(testcase.created_at),
                     now,
                 ),
@@ -691,6 +841,10 @@ def create_execution_run(
     heal: bool = True,
     assertions: bool = True,
     visual_diff: bool = False,
+    batch_id: str | None = None,
+    worker_id: str | None = None,
+    concurrency: int = 1,
+    matrix_id: str | None = None,
     db_path: Path | str | None = None,
 ) -> dict[str, Any]:
     """Register a new test execution run in queued status."""
@@ -704,9 +858,10 @@ def create_execution_run(
                 """
                 INSERT INTO execution_runs (
                     id, project_id, suite_id, testcase_id, testcase_name, status,
-                    browser, headed, heal, assertions, visual_diff, started_at
+                    browser, headed, heal, assertions, visual_diff, started_at,
+                    batch_id, worker_id, concurrency, matrix_id
                 )
-                VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     exec_id,
@@ -720,6 +875,10 @@ def create_execution_run(
                     1 if assertions else 0,
                     1 if visual_diff else 0,
                     now,
+                    batch_id,
+                    worker_id,
+                    concurrency,
+                    matrix_id,
                 ),
             )
         return get_execution_run(exec_id, db_path) or {}
@@ -739,6 +898,9 @@ def update_execution_run_status(
     error_message: str | None = None,
     report_path: str | None = None,
     logs: list[str] | None = None,
+    worker_id: str | None = None,
+    batch_id: str | None = None,
+    matrix_id: str | None = None,
     db_path: Path | str | None = None,
 ) -> None:
     """Update execution run results."""
@@ -775,6 +937,15 @@ def update_execution_run_status(
         if logs is not None:
             updates.append("logs_json = ?")
             params.append(json.dumps(logs))
+        if worker_id is not None:
+            updates.append("worker_id = ?")
+            params.append(worker_id)
+        if batch_id is not None:
+            updates.append("batch_id = ?")
+            params.append(batch_id)
+        if matrix_id is not None:
+            updates.append("matrix_id = ?")
+            params.append(matrix_id)
 
         params.append(execution_id)
         with conn:
@@ -870,6 +1041,9 @@ def list_execution_runs(
     testcase_id: str | None = None,
     suite_id: str | None = None,
     status: str | None = None,
+    batch_id: str | None = None,
+    worker_id: str | None = None,
+    matrix_id: str | None = None,
     limit: int = 50,
     db_path: Path | str | None = None,
 ) -> list[dict[str, Any]]:
@@ -891,6 +1065,15 @@ def list_execution_runs(
         if status:
             query += " AND status = ?"
             params.append(status)
+        if batch_id:
+            query += " AND batch_id = ?"
+            params.append(batch_id)
+        if worker_id:
+            query += " AND worker_id = ?"
+            params.append(worker_id)
+        if matrix_id:
+            query += " AND matrix_id = ?"
+            params.append(matrix_id)
 
         query += " ORDER BY started_at DESC LIMIT ?"
         params.append(limit)
@@ -900,6 +1083,370 @@ def list_execution_runs(
         for r in rows:
             d = dict(r)
             d["logs"] = json.loads(d.get("logs_json") or "[]")
+            result.append(d)
+        return result
+    finally:
+        conn.close()
+
+
+def create_execution_batch(
+    batch_id: str,
+    project_id: str = "default_project",
+    suite_id: str | None = None,
+    concurrency: int = 2,
+    total_tests: int = 0,
+    db_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Register a new batch execution in queued status."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    now = datetime.now().isoformat()
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO execution_batches (
+                    id, project_id, suite_id, status, concurrency,
+                    total_tests, passed_tests, failed_tests, cancelled_tests, started_at
+                )
+                VALUES (?, ?, ?, 'queued', ?, ?, 0, 0, 0, ?)
+                """,
+                (batch_id, project_id, suite_id, concurrency, total_tests, now),
+            )
+        return get_execution_batch(batch_id, db_path) or {}
+    finally:
+        conn.close()
+
+
+def update_execution_batch(
+    batch_id: str,
+    status: str | None = None,
+    passed_tests: int | None = None,
+    failed_tests: int | None = None,
+    cancelled_tests: int | None = None,
+    finished_at: str | None = None,
+    duration_ms: float | None = None,
+    db_path: Path | str | None = None,
+) -> dict[str, Any] | None:
+    """Update execution batch state."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        updates = []
+        params: list[Any] = []
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+        if passed_tests is not None:
+            updates.append("passed_tests = ?")
+            params.append(passed_tests)
+        if failed_tests is not None:
+            updates.append("failed_tests = ?")
+            params.append(failed_tests)
+        if cancelled_tests is not None:
+            updates.append("cancelled_tests = ?")
+            params.append(cancelled_tests)
+        if finished_at is not None:
+            updates.append("finished_at = ?")
+            params.append(finished_at)
+        if duration_ms is not None:
+            updates.append("duration_ms = ?")
+            params.append(duration_ms)
+
+        if updates:
+            params.append(batch_id)
+            with conn:
+                conn.execute(
+                    f"UPDATE execution_batches SET {', '.join(updates)} WHERE id = ?",
+                    params,
+                )
+        return get_execution_batch(batch_id, db_path)
+    finally:
+        conn.close()
+
+
+def get_execution_batch(batch_id: str, db_path: Path | str | None = None) -> dict[str, Any] | None:
+    """Fetch execution batch by ID with its child runs."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute("SELECT * FROM execution_batches WHERE id = ?", (batch_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        # Fetch runs belonging to this batch
+        run_rows = conn.execute(
+            "SELECT * FROM execution_runs WHERE batch_id = ? ORDER BY started_at ASC",
+            (batch_id,),
+        ).fetchall()
+        runs = []
+        for rr in run_rows:
+            rd = dict(rr)
+            rd["logs"] = json.loads(rd.get("logs_json") or "[]")
+            runs.append(rd)
+        d["runs"] = runs
+        return d
+    finally:
+        conn.close()
+
+
+def list_execution_batches(
+    project_id: str | None = None,
+    suite_id: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    db_path: Path | str | None = None,
+) -> list[dict[str, Any]]:
+    """List execution batches."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        query = "SELECT * FROM execution_batches WHERE 1=1"
+        params: list[Any] = []
+        if project_id:
+            query += " AND project_id = ?"
+            params.append(project_id)
+        if suite_id:
+            query += " AND suite_id = ?"
+            params.append(suite_id)
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+
+        query += " ORDER BY started_at DESC LIMIT ?"
+        params.append(limit)
+
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Cross-Browser Execution Matrices
+# ---------------------------------------------------------------------------
+
+def create_execution_matrix(
+    matrix_id: str,
+    project_id: str = "default_project",
+    suite_id: str | None = None,
+    name: str | None = None,
+    concurrency: int = 2,
+    browsers: list[str] | None = None,
+    total_executions: int = 0,
+    db_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Register a new cross-browser execution matrix in queued status."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    now = datetime.now().isoformat()
+    target_browsers = browsers or ["chromium"]
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO execution_matrices (
+                    id, project_id, suite_id, name, status, concurrency,
+                    browsers_json, total_executions, passed_executions, failed_executions,
+                    cancelled_executions, divergence_count, started_at
+                )
+                VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, 0, 0, 0, 0, ?)
+                """,
+                (
+                    matrix_id,
+                    project_id,
+                    suite_id,
+                    name or f"Matrix Run ({', '.join(target_browsers)})",
+                    concurrency,
+                    json.dumps(target_browsers),
+                    total_executions,
+                    now,
+                ),
+            )
+        return get_execution_matrix(matrix_id, db_path) or {}
+    finally:
+        conn.close()
+
+
+def update_execution_matrix(
+    matrix_id: str,
+    status: str | None = None,
+    passed_executions: int | None = None,
+    failed_executions: int | None = None,
+    cancelled_executions: int | None = None,
+    divergence_count: int | None = None,
+    finished_at: str | None = None,
+    duration_ms: float | None = None,
+    db_path: Path | str | None = None,
+) -> dict[str, Any] | None:
+    """Update execution matrix state."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        updates = []
+        params: list[Any] = []
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+        if passed_executions is not None:
+            updates.append("passed_executions = ?")
+            params.append(passed_executions)
+        if failed_executions is not None:
+            updates.append("failed_executions = ?")
+            params.append(failed_executions)
+        if cancelled_executions is not None:
+            updates.append("cancelled_executions = ?")
+            params.append(cancelled_executions)
+        if divergence_count is not None:
+            updates.append("divergence_count = ?")
+            params.append(divergence_count)
+        if finished_at is not None:
+            updates.append("finished_at = ?")
+            params.append(finished_at)
+        if duration_ms is not None:
+            updates.append("duration_ms = ?")
+            params.append(duration_ms)
+
+        if updates:
+            params.append(matrix_id)
+            with conn:
+                conn.execute(
+                    f"UPDATE execution_matrices SET {', '.join(updates)} WHERE id = ?",
+                    params,
+                )
+        return get_execution_matrix(matrix_id, db_path)
+    finally:
+        conn.close()
+
+
+def get_execution_matrix(matrix_id: str, db_path: Path | str | None = None) -> dict[str, Any] | None:
+    """Fetch execution matrix by ID with child runs, consolidated grid, and divergence metrics."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute("SELECT * FROM execution_matrices WHERE id = ?", (matrix_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        browsers = json.loads(d.get("browsers_json") or '["chromium"]')
+        d["browsers"] = browsers
+
+        # Fetch runs belonging to this matrix
+        run_rows = conn.execute(
+            "SELECT * FROM execution_runs WHERE matrix_id = ? ORDER BY started_at ASC",
+            (matrix_id,),
+        ).fetchall()
+        runs = []
+        for rr in run_rows:
+            rd = dict(rr)
+            rd["logs"] = json.loads(rd.get("logs_json") or "[]")
+            runs.append(rd)
+        d["runs"] = runs
+
+        # Build consolidated grid: Test Cases x Browsers
+        tc_map: dict[str, dict[str, Any]] = {}
+        for r in runs:
+            t_id = r["testcase_id"]
+            if t_id not in tc_map:
+                tc_map[t_id] = {
+                    "testcase_id": t_id,
+                    "testcase_name": r.get("testcase_name") or t_id,
+                    "browsers": {},
+                }
+            tc_map[t_id]["browsers"][r["browser"]] = {
+                "run_id": r["id"],
+                "status": r["status"],
+                "duration_ms": r.get("duration_ms", 0.0),
+                "error_message": r.get("error_message"),
+                "artifacts_path": r.get("artifacts_path"),
+                "worker_id": r.get("worker_id"),
+            }
+
+        grid = []
+        divergent_testcases = 0
+
+        for t_id, tc_info in tc_map.items():
+            browser_statuses = {
+                b: info["status"]
+                for b, info in tc_info["browsers"].items()
+                if info["status"] in ("passed", "failed", "error")
+            }
+            # Divergence exists if different terminal statuses appear among completed browsers
+            terminal_statuses = set(browser_statuses.values())
+            is_divergent = len(terminal_statuses) > 1
+
+            divergence_notes = None
+            if is_divergent:
+                divergent_testcases += 1
+                parts = [f"{b}: {st}" for b, st in browser_statuses.items()]
+                divergence_notes = f"Divergence detected ({', '.join(parts)})"
+
+            grid.append({
+                "testcase_id": t_id,
+                "testcase_name": tc_info["testcase_name"],
+                "browsers": tc_info["browsers"],
+                "is_divergent": is_divergent,
+                "divergence_notes": divergence_notes,
+            })
+
+        total_tc = len(grid)
+        parity_pct = (
+            round(100.0 * (total_tc - divergent_testcases) / total_tc, 1)
+            if total_tc > 0
+            else 100.0
+        )
+
+        # Calculate pass rates per browser
+        browser_pass_rates: dict[str, float] = {}
+        for b in browsers:
+            b_runs = [r for r in runs if r.get("browser") == b and r.get("status") in ("passed", "failed", "error")]
+            if b_runs:
+                passed_b = sum(1 for r in b_runs if r["status"] == "passed")
+                browser_pass_rates[b] = round(100.0 * passed_b / len(b_runs), 1)
+            else:
+                browser_pass_rates[b] = 0.0
+
+        d["grid"] = grid
+        d["total_testcases"] = total_tc
+        d["divergent_testcases_count"] = divergent_testcases
+        d["cross_browser_parity_pct"] = parity_pct
+        d["browser_pass_rates"] = browser_pass_rates
+        return d
+    finally:
+        conn.close()
+
+
+def list_execution_matrices(
+    project_id: str | None = None,
+    suite_id: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    db_path: Path | str | None = None,
+) -> list[dict[str, Any]]:
+    """List execution matrices."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        query = "SELECT * FROM execution_matrices WHERE 1=1"
+        params: list[Any] = []
+        if project_id:
+            query += " AND project_id = ?"
+            params.append(project_id)
+        if suite_id:
+            query += " AND suite_id = ?"
+            params.append(suite_id)
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+
+        query += " ORDER BY started_at DESC LIMIT ?"
+        params.append(limit)
+
+        rows = conn.execute(query, params).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["browsers"] = json.loads(d.get("browsers_json") or '["chromium"]')
             result.append(d)
         return result
     finally:
@@ -1433,6 +1980,321 @@ def delete_exploration_run(
         with conn:
             cursor = conn.execute(
                 "DELETE FROM exploration_runs WHERE id = ?", (exploration_id,)
+            )
+            return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Test Journey Drafts & Approval Operations
+# ---------------------------------------------------------------------------
+
+def save_synthesized_draft(
+    draft: dict[str, Any], db_path: Path | str | None = None
+) -> dict[str, Any]:
+    """Persist a synthesized test journey draft."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    draft_id = draft.get("id") or f"draft_{uuid.uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    steps_json = json.dumps(draft.get("steps", []))
+    requires_input = 1 if draft.get("requires_human_input") else 0
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO synthesized_drafts (
+                    id, exploration_id, project_id, name, description,
+                    journey_type, priority, start_url, steps_json,
+                    status, approved_testcase_id, rejection_reason,
+                    requires_human_input, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    draft_id,
+                    draft.get("exploration_id", ""),
+                    draft.get("project_id", "default_project"),
+                    draft.get("name", "Synthesized Journey"),
+                    draft.get("description", ""),
+                    draft.get("journey_type", "navigation"),
+                    draft.get("priority", "medium"),
+                    draft.get("start_url", ""),
+                    steps_json,
+                    draft.get("status", "pending"),
+                    draft.get("approved_testcase_id"),
+                    draft.get("rejection_reason"),
+                    requires_input,
+                    draft.get("created_at", now),
+                ),
+            )
+        return get_synthesized_draft(draft_id, db_path) or draft
+    finally:
+        conn.close()
+
+
+def get_synthesized_draft(
+    draft_id: str, db_path: Path | str | None = None
+) -> dict[str, Any] | None:
+    """Retrieve a single synthesized test journey draft."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM synthesized_drafts WHERE id = ?", (draft_id,)
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["steps"] = json.loads(d.get("steps_json") or "[]")
+        d["requires_human_input"] = bool(d.get("requires_human_input", 0))
+        return d
+    finally:
+        conn.close()
+
+
+def list_synthesized_drafts(
+    project_id: str | None = None,
+    exploration_id: str | None = None,
+    status: str | None = None,
+    db_path: Path | str | None = None,
+) -> list[dict[str, Any]]:
+    """List test journey drafts with optional filters."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        clauses = []
+        params = []
+        if project_id:
+            clauses.append("project_id = ?")
+            params.append(project_id)
+        if exploration_id:
+            clauses.append("exploration_id = ?")
+            params.append(exploration_id)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+
+        where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = f"SELECT * FROM synthesized_drafts {where_clause} ORDER BY created_at DESC"
+        rows = conn.execute(sql, tuple(params)).fetchall()
+
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["steps"] = json.loads(d.get("steps_json") or "[]")
+            d["requires_human_input"] = bool(d.get("requires_human_input", 0))
+            result.append(d)
+        return result
+    finally:
+        conn.close()
+
+
+def update_synthesized_draft(
+    draft_id: str,
+    name: str | None = None,
+    description: str | None = None,
+    steps: list[dict[str, Any]] | None = None,
+    db_path: Path | str | None = None,
+) -> dict[str, Any] | None:
+    """
+    Update a draft's name, description, or steps.
+    
+    Security Guardrail:
+    If a draft was previously 'approved', modifying its content automatically
+    invalidates approval status, resetting it to 'pending' and requiring re-approval.
+    """
+    init_studio_db(db_path)
+    draft = get_synthesized_draft(draft_id, db_path)
+    if not draft:
+        return None
+
+    was_approved = draft.get("status") == "approved"
+    conn = get_connection(db_path)
+    now = datetime.now().isoformat()
+    try:
+        with conn:
+            updates = []
+            params: list[Any] = []
+            if name is not None:
+                updates.append("name = ?")
+                params.append(name)
+            if description is not None:
+                updates.append("description = ?")
+                params.append(description)
+            if steps is not None:
+                updates.append("steps_json = ?")
+                params.append(json.dumps(steps))
+
+            if was_approved and (steps is not None or name is not None):
+                # Security invalidation: reset approval status
+                updates.append("status = 'pending'")
+                updates.append("approved_testcase_id = NULL")
+                updates.append("requires_human_input = 1")
+
+            updates.append("reviewed_at = ?")
+            params.append(now)
+
+            params.append(draft_id)
+            sql = f"UPDATE synthesized_drafts SET {', '.join(updates)} WHERE id = ?"
+            conn.execute(sql, tuple(params))
+        return get_synthesized_draft(draft_id, db_path)
+    finally:
+        conn.close()
+
+
+def approve_synthesized_draft(
+    draft_id: str,
+    custom_name: str | None = None,
+    modifications: dict[str, Any] | None = None,
+    base_dir: Path | str | None = None,
+    db_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Approve a synthesized draft journey and promote it into an executable TestCase."""
+    init_studio_db(db_path)
+    draft = get_synthesized_draft(draft_id, db_path)
+    if not draft:
+        raise ValueError(f"Draft '{draft_id}' not found.")
+
+    if draft.get("status") == "approved" and draft.get("approved_testcase_id"):
+        return {
+            "draft_id": draft_id,
+            "testcase_id": draft["approved_testcase_id"],
+            "status": "approved",
+            "message": "Draft already approved.",
+        }
+
+    now = datetime.now()
+    tc_id = f"tc_{uuid.uuid4().hex[:8]}"
+    name = custom_name or draft.get("name") or "Synthesized Test Case"
+    description = draft.get("description", "")
+    start_url = draft.get("start_url", "")
+    project_id = draft.get("project_id", "default_project")
+
+    # Build steps and custom assertions
+    from qa_auto.models import ElementInfo, Step, TestCase
+
+    steps_data = modifications.get("steps") if modifications and "steps" in modifications else draft.get("steps", [])
+    testcase_steps: list[Step] = []
+    custom_assertions: list[dict[str, Any]] = []
+
+    for idx, s in enumerate(steps_data, start=1):
+        action_type = s.get("action_type", "navigate")
+        step_assertions = s.get("assertions", [])
+
+        for a in step_assertions:
+            custom_assertions.append({
+                "id": f"assert_{uuid.uuid4().hex[:6]}",
+                "step_number": idx,
+                "assertion_type": a.get("assertion_type", "url_matches"),
+                "target_selector": a.get("target_selector"),
+                "expected_value": a.get("expected_value"),
+                "source": a.get("source", "evidence"),
+                "provenance": a.get("evidence_provenance", {}),
+            })
+
+        selector = s.get("selector")
+        el_info = None
+        if selector:
+            el_info = ElementInfo(
+                selector=selector,
+                tag_name="element",
+                text=None,
+                bounding_box={"x": 0.0, "y": 0.0, "width": 100.0, "height": 30.0},
+            )
+
+        testcase_steps.append(
+            Step(
+                number=idx,
+                timestamp=now,
+                action_type=action_type,
+                url=s.get("url"),
+                element=el_info,
+                input_value=s.get("input_value"),
+                description_short=s.get("description_short") or f"Step {idx}",
+                description_detailed=s.get("description_detailed") or f"Execute {action_type}",
+            )
+        )
+
+    testcase = TestCase(
+        id=tc_id,
+        name=name,
+        description=description,
+        created_at=now,
+        start_url=start_url,
+        browser="chromium",
+        viewport={"width": 1280, "height": 800},
+        user_agent="Mozilla/5.0 QA-Auto",
+        steps=testcase_steps,
+        custom_assertions=custom_assertions,
+        total_duration=round(len(testcase_steps) * 1.5, 2),
+        total_steps=len(testcase_steps),
+    )
+
+    # Write testcase file to disk
+    target_root = Path(base_dir) if base_dir else Path("recordings")
+    tc_dir = target_root / tc_id
+    tc_dir.mkdir(parents=True, exist_ok=True)
+    tc_file = tc_dir / "testcase.json"
+    tc_file.write_text(testcase.model_dump_json(indent=2), encoding="utf-8")
+
+    # Upsert into testcases_meta with approval_status="approved"
+    sync_testcase_meta(
+        testcase=testcase,
+        file_path=tc_file,
+        project_id=project_id,
+        tags=["synthesized", "autonomous", draft.get("journey_type", "navigation")],
+        approval_status="approved",
+        provenance={"draft_id": draft_id, "exploration_id": draft.get("exploration_id")},
+        db_path=db_path,
+    )
+
+    # Update draft in database
+    conn = get_connection(db_path)
+    try:
+        with conn:
+            conn.execute(
+                """
+                UPDATE synthesized_drafts
+                SET status = 'approved',
+                    approved_testcase_id = ?,
+                    reviewed_at = ?
+                WHERE id = ?
+                """,
+                (tc_id, now.isoformat(), draft_id),
+            )
+    finally:
+        conn.close()
+
+    return {
+        "draft_id": draft_id,
+        "testcase_id": tc_id,
+        "status": "approved",
+        "file_path": str(tc_file),
+        "testcase": testcase.model_dump(mode="json"),
+    }
+
+
+def reject_synthesized_draft(
+    draft_id: str,
+    reason: str | None = None,
+    db_path: Path | str | None = None,
+) -> bool:
+    """Reject a synthesized draft with reason."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    now = datetime.now().isoformat()
+    try:
+        with conn:
+            cursor = conn.execute(
+                """
+                UPDATE synthesized_drafts
+                SET status = 'rejected',
+                    rejection_reason = ?,
+                    reviewed_at = ?
+                WHERE id = ?
+                """,
+                (reason or "Rejected by reviewer", now, draft_id),
             )
             return cursor.rowcount > 0
     finally:

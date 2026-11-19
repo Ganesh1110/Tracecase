@@ -114,3 +114,35 @@ async def broadcast_exploration_event(
     }
     await manager.broadcast(msg, channel=f"exploration:{exploration_id}")
     await manager.broadcast(msg, channel="explorations")
+
+
+async def broadcast_batch_event(
+    batch_id: str,
+    event_type: str,
+    data: dict[str, Any],
+) -> None:
+    """Convenience helper to broadcast batch execution events."""
+    msg = {
+        "channel": f"batch:{batch_id}",
+        "type": event_type,
+        "batch_id": batch_id,
+        "data": data,
+    }
+    await manager.broadcast(msg, channel=f"batch:{batch_id}")
+    await manager.broadcast(msg, channel="executions")
+
+
+async def broadcast_matrix_event(
+    matrix_id: str,
+    event_type: str,
+    data: dict[str, Any],
+) -> None:
+    """Convenience helper to broadcast cross-browser matrix execution events."""
+    msg = {
+        "channel": f"matrix:{matrix_id}",
+        "type": event_type,
+        "matrix_id": matrix_id,
+        "data": data,
+    }
+    await manager.broadcast(msg, channel=f"matrix:{matrix_id}")
+    await manager.broadcast(msg, channel="executions")

@@ -20,6 +20,9 @@ import {
   Filter,
   Sparkles,
   Loader2,
+  Cpu,
+  Sliders,
+  Check,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useWebSocket } from '../context/WebSocketContext';
@@ -39,6 +42,20 @@ export function Executions() {
   const [failureAnalysis, setFailureAnalysis] = useState(null);
   const [analyzingFailure, setAnalyzingFailure] = useState(false);
 
+  // Parallel Batch Execution states
+  const [batches, setBatches] = useState([]);
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [availableTestCases, setAvailableTestCases] = useState([]);
+  const [batchForm, setBatchForm] = useState({
+    testcase_ids: [],
+    concurrency: 2,
+    browser: 'chromium',
+    headed: false,
+    heal: true,
+    assertions: true,
+    visual_diff: false,
+  });
+
   const { subscribe } = useWebSocket();
   const { showToast } = useToast();
   const terminalEndRef = useRef(null);
@@ -46,14 +63,18 @@ export function Executions() {
   const loadRuns = async () => {
     try {
       setLoading(true);
-      const data = await api.getExecutions({ limit: 50 });
-      setRuns(data);
+      const [runsData, batchesData] = await Promise.all([
+        api.getExecutions({ limit: 50 }),
+        api.getBatches ? api.getBatches({ limit: 20 }).catch(() => []) : Promise.resolve([]),
+      ]);
+      setRuns(runsData);
+      setBatches(batchesData || []);
       if (focusedRunId) {
         const found = await api.getExecution(focusedRunId);
         setSelectedRun(found);
         setLiveLogs(found.logs || []);
-      } else if (data.length > 0 && !selectedRun) {
-        const first = await api.getExecution(data[0].id);
+      } else if (runsData.length > 0 && !selectedRun) {
+        const first = await api.getExecution(runsData[0].id);
         setSelectedRun(first);
         setLiveLogs(first.logs || []);
       }
@@ -67,6 +88,23 @@ export function Executions() {
   useEffect(() => {
     loadRuns();
   }, [focusedRunId]);
+
+  // Subscribe to global executions channel for batch & worker events
+  useEffect(() => {
+    const unsub = subscribe('executions', (event) => {
+      if (
+        event.type === 'batch_started' ||
+        event.type === 'batch_progress' ||
+        event.type === 'batch_completed' ||
+        event.type === 'batch_cancelled' ||
+        event.type === 'worker_started' ||
+        event.type === 'worker_completed'
+      ) {
+        loadRuns();
+      }
+    });
+    return unsub;
+  }, [subscribe]);
 
   // Subscribe to WebSocket events for the selected run
   useEffect(() => {
@@ -87,6 +125,59 @@ export function Executions() {
 
     return unsub;
   }, [selectedRun?.id, subscribe]);
+
+  const openBatchModal = async () => {
+    try {
+      const tcs = await api.getTestCases();
+      setAvailableTestCases(tcs);
+      setBatchForm({
+        testcase_ids: tcs.slice(0, 3).map((t) => t.id),
+        concurrency: 2,
+        browser: 'chromium',
+        headed: false,
+        heal: true,
+        assertions: true,
+        visual_diff: false,
+      });
+      setIsBatchModalOpen(true);
+    } catch (err) {
+      showToast('Failed to load test cases: ' + err.message, 'error');
+    }
+  };
+
+  const toggleBatchTestCase = (tcId) => {
+    setBatchForm((prev) => {
+      const current = prev.testcase_ids;
+      return {
+        ...prev,
+        testcase_ids: current.includes(tcId)
+          ? current.filter((id) => id !== tcId)
+          : [...current, tcId],
+      };
+    });
+  };
+
+  const handleStartBatch = async () => {
+    if (!batchForm.testcase_ids.length) {
+      showToast('Select at least one test case to run', 'warning');
+      return;
+    }
+    try {
+      showToast(`Starting batch with concurrency ${batchForm.concurrency}...`, 'info');
+      const batchRes = await api.startBatchExecution(batchForm);
+      showToast(
+        `Batch started! Running ${batchForm.testcase_ids.length} tests with ${batchForm.concurrency} parallel workers.`,
+        'success'
+      );
+      setIsBatchModalOpen(false);
+      loadRuns();
+      if (batchRes.runs && batchRes.runs.length > 0) {
+        handleSelectRun(batchRes.runs[0].id);
+      }
+    } catch (err) {
+      showToast('Failed to start batch: ' + err.message, 'error');
+    }
+  };
 
   const handleSelectRun = async (runId) => {
     try {
@@ -147,6 +238,13 @@ export function Executions() {
     return r.status === statusFilter;
   });
 
+  const activeWorkers = runs.filter(
+    (r) => (r.status === 'running' || r.status === 'queued') && r.worker_id
+  );
+  const queuedRuns = runs.filter((r) => r.status === 'queued');
+  const completedRuns = runs.filter((r) => r.status === 'passed');
+  const failedRuns = runs.filter((r) => r.status === 'failed' || r.status === 'error');
+
   const isRunning = selectedRun?.status === 'running' || selectedRun?.status === 'queued';
 
   return (
@@ -158,16 +256,79 @@ export function Executions() {
             <span>Test Executions & Live Replay</span>
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Real-time step-by-step execution monitor, self-healing diagnostics, and logs.
+            Real-time step-by-step execution monitor, parallel worker pool, and self-healing diagnostics.
           </p>
         </div>
-        <button
-          onClick={loadRuns}
-          className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition-colors self-start sm:self-auto"
-          title="Refresh runs"
-        >
-          <RefreshCw className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={openBatchModal}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20"
+          >
+            <Sliders className="w-4 h-4" />
+            <span>Run Batch (Parallel)</span>
+          </button>
+          <button
+            onClick={loadRuns}
+            className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition-colors self-start sm:self-auto"
+            title="Refresh runs"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Real-Time Worker Pool & Execution Metrics Banner */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-surface-cardDark shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400">
+            <Cpu className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-slate-500">Active Workers</div>
+            <div className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+              <span>{activeWorkers.length}</span>
+              {activeWorkers.length > 0 && (
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400">
+            <Clock className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-slate-500">Queued Tests</div>
+            <div className="text-lg font-bold text-slate-900 dark:text-white">
+              {queuedRuns.length}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
+            <CheckCircle2 className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-slate-500">Completed (Passed)</div>
+            <div className="text-lg font-bold text-slate-900 dark:text-white">
+              {completedRuns.length}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400">
+            <XCircle className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-slate-500">Failed / Errors</div>
+            <div className="text-lg font-bold text-slate-900 dark:text-white">
+              {failedRuns.length}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -209,12 +370,17 @@ export function Executions() {
                       <div className="font-bold text-sm text-slate-900 dark:text-white truncate">
                         {r.testcase_name}
                       </div>
-                      <div className="flex items-center gap-2 mt-1 text-xs text-slate-400">
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1 text-xs text-slate-400">
                         <span className="capitalize">{r.browser}</span>
                         <span>•</span>
                         <span>{new Date(r.started_at).toLocaleTimeString()}</span>
                         <span>•</span>
                         <span>{((r.duration_ms || 0) / 1000).toFixed(1)}s</span>
+                        {r.worker_id && (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-800/50">
+                            {r.worker_id}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <span
@@ -257,8 +423,13 @@ export function Executions() {
                     >
                       {selectedRun.status}
                     </span>
+                    {selectedRun.worker_id && (
+                      <span className="px-2 py-0.5 rounded text-xs font-mono font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                        {selectedRun.worker_id}
+                      </span>
+                    )}
                   </div>
-                  <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 mt-1 font-mono">
+                  <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-400 mt-1 font-mono">
                     <span>ID: {selectedRun.id}</span>
                     <span>•</span>
                     <span>Browser: {selectedRun.browser}</span>
@@ -268,6 +439,22 @@ export function Executions() {
                     <span>
                       Passed: {selectedRun.passed_steps || 0} / {selectedRun.total_steps || 0}
                     </span>
+                    {selectedRun.batch_id && (
+                      <>
+                        <span>•</span>
+                        <span className="text-indigo-500 font-semibold">
+                          Batch: {selectedRun.batch_id}
+                        </span>
+                      </>
+                    )}
+                    {selectedRun.concurrency > 1 && (
+                      <>
+                        <span>•</span>
+                        <span className="text-brand-500 font-semibold">
+                          Pool: {selectedRun.concurrency}x
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -539,6 +726,187 @@ export function Executions() {
           )}
         </div>
       </div>
+
+      {/* Batch / Parallel Execution Modal */}
+      {isBatchModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl max-w-xl w-full p-6 space-y-5 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-50 dark:bg-indigo-950/60 rounded-xl text-indigo-600 dark:text-indigo-400">
+                  <Sliders className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Run Batch (Parallel Execution)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Configure concurrency pool and select test cases to execute
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsBatchModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Concurrency Slider & Info */}
+            <div className="space-y-2 p-3.5 rounded-xl bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40">
+              <div className="flex justify-between items-center text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <span className="flex items-center gap-1.5">
+                  <Cpu className="w-4 h-4 text-indigo-500" />
+                  <span>Parallel Worker Concurrency</span>
+                </span>
+                <span className="font-mono text-indigo-600 dark:text-indigo-400 bg-white dark:bg-indigo-900/60 px-2.5 py-0.5 rounded shadow-sm text-xs font-bold border border-indigo-200/50 dark:border-indigo-800/50">
+                  {batchForm.concurrency}{' '}
+                  {batchForm.concurrency === 1
+                    ? 'Worker (Sequential Mode)'
+                    : 'Workers (Parallel Pool)'}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="8"
+                step="1"
+                value={batchForm.concurrency}
+                onChange={(e) =>
+                  setBatchForm({ ...batchForm, concurrency: parseInt(e.target.value, 10) })
+                }
+                className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+              />
+              <div className="flex justify-between text-[10px] text-slate-400">
+                <span>1 (Sequential)</span>
+                <span className="text-indigo-500 font-semibold">2 (Default)</span>
+                <span>4 (Fast)</span>
+                <span>8 (Maximum)</span>
+              </div>
+            </div>
+
+            {/* Test Case Selection */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <span>
+                  Select Test Cases ({batchForm.testcase_ids.length} / {availableTestCases.length}{' '}
+                  selected)
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setBatchForm({
+                        ...batchForm,
+                        testcase_ids: availableTestCases.map((t) => t.id),
+                      })
+                    }
+                    className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline"
+                  >
+                    Select All
+                  </button>
+                  <span className="text-slate-300">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setBatchForm({ ...batchForm, testcase_ids: [] })}
+                    className="text-[11px] text-slate-400 hover:underline"
+                  >
+                    Deselect All
+                  </button>
+                </div>
+              </div>
+              <div className="max-h-40 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 p-1">
+                {availableTestCases.map((tc) => {
+                  const isChecked = batchForm.testcase_ids.includes(tc.id);
+                  return (
+                    <label
+                      key={tc.id}
+                      className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer text-xs"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleBatchTestCase(tc.id)}
+                        className="rounded text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="font-medium text-slate-800 dark:text-slate-200 truncate">
+                        {tc.name}
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono ml-auto">
+                        {tc.browser}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Browser Selection & Options */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Browser Engine
+                </label>
+                <select
+                  value={batchForm.browser}
+                  onChange={(e) => setBatchForm({ ...batchForm, browser: e.target.value })}
+                  className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300"
+                >
+                  <option value="chromium">Chromium</option>
+                  <option value="firefox">Firefox</option>
+                  <option value="webkit">WebKit (Safari)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2 pt-5">
+                <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={batchForm.heal}
+                    onChange={(e) => setBatchForm({ ...batchForm, heal: e.target.checked })}
+                    className="rounded text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span>Self-Healing</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer ml-3">
+                  <input
+                    type="checkbox"
+                    checked={batchForm.assertions}
+                    onChange={(e) =>
+                      setBatchForm({ ...batchForm, assertions: e.target.checked })
+                    }
+                    className="rounded text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span>Assertions</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsBatchModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleStartBatch}
+                className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/25"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>
+                  Start Batch ({batchForm.testcase_ids.length} tests, {batchForm.concurrency}{' '}
+                  workers)
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

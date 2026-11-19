@@ -13,6 +13,8 @@ import {
   TrendingUp,
   Clock,
   AlertCircle,
+  Sliders,
+  Cpu,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useProject } from '../context/ProjectContext';
@@ -32,6 +34,7 @@ export function TestSuites() {
   const [isCreating, setIsCreating] = useState(false);
   const [editingSuite, setEditingSuite] = useState(null);
   const [viewingSuite, setViewingSuite] = useState(null);
+  const [runSuiteModal, setRunSuiteModal] = useState(null);
   const [suiteExecutions, setSuiteExecutions] = useState([]);
   const [selectedCaseToAdd, setSelectedCaseToAdd] = useState('');
 
@@ -105,11 +108,34 @@ export function TestSuites() {
     }
   };
 
-  const handleRunSuite = async (suiteId) => {
+  const openRunModal = (suite) => {
+    if (!suite) return;
+    setRunSuiteModal({
+      suiteId: suite.id,
+      suiteName: suite.name,
+      testcaseCount: (suite.testcase_ids || []).length,
+      concurrency: 2,
+      browser: 'chromium',
+      headed: false,
+      heal: true,
+      assertions: true,
+    });
+  };
+
+  const handleConfirmRunSuite = async () => {
+    if (!runSuiteModal) return;
     try {
-      showToast('Launching suite execution...', 'info');
-      const runs = await api.runSuite(suiteId);
-      showToast(`Started ${runs.length} test executions!`, 'success');
+      showToast(`Launching ${runSuiteModal.suiteName} (Workers: ${runSuiteModal.concurrency})...`, 'info');
+      const runs = await api.runSuite(runSuiteModal.suiteId, {
+        concurrency: runSuiteModal.concurrency,
+        browser: runSuiteModal.browser,
+        headed: runSuiteModal.headed,
+        heal: runSuiteModal.heal,
+        assertions: runSuiteModal.assertions,
+      });
+      const count = Array.isArray(runs) ? runs.length : (runs?.runs?.length || 0);
+      showToast(`Started ${count} test executions with concurrency ${runSuiteModal.concurrency}!`, 'success');
+      setRunSuiteModal(null);
       loadData();
     } catch (err) {
       showToast('Failed to run suite: ' + err.message, 'error');
@@ -361,7 +387,7 @@ export function TestSuites() {
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => handleRunSuite(viewingSuite.id)}
+                onClick={() => openRunModal(viewingSuite)}
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20"
               >
                 <Play className="w-3.5 h-3.5 fill-current" />
@@ -595,7 +621,7 @@ export function TestSuites() {
                   <ChevronRight className="w-3.5 h-3.5" />
                 </button>
                 <button
-                  onClick={() => handleRunSuite(suite.id)}
+                  onClick={() => openRunModal(suite)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm"
                 >
                   <Play className="w-3.5 h-3.5 fill-current" />
@@ -606,6 +632,133 @@ export function TestSuites() {
           ))
         )}
       </div>
+
+      {/* Parallel Run Configuration Modal */}
+      {runSuiteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-5 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-50 dark:bg-indigo-950/60 rounded-xl text-indigo-600 dark:text-indigo-400">
+                  <Sliders className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Run Suite Configuration
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {runSuiteModal.suiteName} ({runSuiteModal.testcaseCount} test cases)
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setRunSuiteModal(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Concurrency Selector */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <span className="flex items-center gap-1.5">
+                  <Cpu className="w-4 h-4 text-indigo-500" />
+                  <span>Parallel Concurrency Pool</span>
+                </span>
+                <span className="font-mono text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded text-xs font-bold">
+                  {runSuiteModal.concurrency} {runSuiteModal.concurrency === 1 ? 'Worker (Sequential)' : 'Workers (Parallel)'}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="8"
+                step="1"
+                value={runSuiteModal.concurrency}
+                onChange={(e) =>
+                  setRunSuiteModal({ ...runSuiteModal, concurrency: parseInt(e.target.value, 10) })
+                }
+                className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+              />
+              <div className="flex justify-between text-[10px] text-slate-400">
+                <span>1 (Sequential)</span>
+                <span className="text-indigo-500 font-semibold">2 (Default)</span>
+                <span>4</span>
+                <span>8 (Maximum)</span>
+              </div>
+            </div>
+
+            {/* Browser Selection */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Browser Engine
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {['chromium', 'firefox', 'webkit'].map((b) => (
+                  <button
+                    key={b}
+                    type="button"
+                    onClick={() => setRunSuiteModal({ ...runSuiteModal, browser: b })}
+                    className={`py-2 px-3 rounded-xl text-xs font-semibold capitalize border transition-all ${
+                      runSuiteModal.browser === b
+                        ? 'border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                        : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {b}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Options Checkboxes */}
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <label className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 cursor-pointer text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                <input
+                  type="checkbox"
+                  checked={runSuiteModal.headed}
+                  onChange={(e) =>
+                    setRunSuiteModal({ ...runSuiteModal, headed: e.target.checked })
+                  }
+                  className="rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="font-medium">Headed Browser</span>
+              </label>
+              <label className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 cursor-pointer text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                <input
+                  type="checkbox"
+                  checked={runSuiteModal.heal}
+                  onChange={(e) =>
+                    setRunSuiteModal({ ...runSuiteModal, heal: e.target.checked })
+                  }
+                  className="rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="font-medium">Self-Healing</span>
+              </label>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setRunSuiteModal(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRunSuite}
+                className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/25"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>Launch Execution ({runSuiteModal.concurrency} Workers)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -123,6 +123,8 @@ export const api = {
     if (filters.testcaseId) params.set('testcase_id', filters.testcaseId);
     if (filters.suiteId) params.set('suite_id', filters.suiteId);
     if (filters.status) params.set('status', filters.status);
+    if (filters.batchId) params.set('batch_id', filters.batchId);
+    if (filters.workerId) params.set('worker_id', filters.workerId);
     if (filters.limit) params.set('limit', filters.limit);
     const qs = params.toString();
     return request(`/executions${qs ? `?${qs}` : ''}`);
@@ -132,6 +134,22 @@ export const api = {
     request('/executions', { method: 'POST', body: JSON.stringify(data) }),
   cancelExecution: (id) =>
     request(`/executions/${id}/cancel`, { method: 'POST' }),
+
+  // Batch / Parallel Executions
+  getBatches: (filters = {}) => {
+    const params = new URLSearchParams();
+    if (filters.projectId) params.set('project_id', filters.projectId);
+    if (filters.suiteId) params.set('suite_id', filters.suiteId);
+    if (filters.status) params.set('status', filters.status);
+    if (filters.limit) params.set('limit', filters.limit);
+    const qs = params.toString();
+    return request(`/executions/batches${qs ? `?${qs}` : ''}`);
+  },
+  getBatch: (batchId) => request(`/executions/batches/${batchId}`),
+  startBatchExecution: (data) =>
+    request('/executions/batch', { method: 'POST', body: JSON.stringify(data) }),
+  cancelBatchExecution: (batchId) =>
+    request(`/executions/batches/${batchId}/cancel`, { method: 'POST' }),
 
   // Recorder
   startRecording: (data) =>
@@ -221,6 +239,49 @@ export const api = {
     request(`/autonomous/runs/${id}/cancel`, { method: 'POST' }),
   deleteExplorationRun: (id) =>
     request(`/autonomous/runs/${id}`, { method: 'DELETE' }),
+
+  // Journey Synthesis & Human Approval
+  synthesizeJourneys: (explorationId, data = {}) =>
+    request(`/autonomous/runs/${explorationId}/synthesize`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  listDrafts: (params = {}) => {
+    const q = new URLSearchParams();
+    if (params.project_id) q.set('project_id', params.project_id);
+    if (params.exploration_id) q.set('exploration_id', params.exploration_id);
+    if (params.status) q.set('status', params.status);
+    const qs = q.toString();
+    return request(`/autonomous/drafts${qs ? `?${qs}` : ''}`);
+  },
+  getDraft: (draftId) => request(`/autonomous/drafts/${draftId}`),
+  approveDraft: (draftId, data = {}) =>
+    request(`/autonomous/drafts/${draftId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  rejectDraft: (draftId, data = {}) =>
+    request(`/autonomous/drafts/${draftId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateDraft: (draftId, data) =>
+    request(`/autonomous/drafts/${draftId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  // Requirements Planning & Intelligent Regression
+  planRequirement: (data) =>
+    request('/autonomous/requirements/plan', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  selectRegression: (data) =>
+    request('/autonomous/regression/select', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 
   // Storage Management
   getStorageStats: () => request('/storage/stats'),

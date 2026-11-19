@@ -24,7 +24,10 @@ from qa_auto.ai.provider import get_provider
 from qa_auto.ai.selectors import audit_testcase_selectors
 from qa_auto.ai.variations import generate_smart_variations
 from qa_auto.exploration.controller import exploration_controller
-from qa_auto.exploration.models import ExplorationConfig
+from qa_auto.exploration.models import AppNavigationGraph, ExplorationConfig
+from qa_auto.exploration.planner import plan_requirement_against_graph
+from qa_auto.exploration.regression import select_intelligent_regression_suite
+from qa_auto.exploration.synthesizer import synthesize_test_journeys
 from qa_auto.exporters.html_exporter import HTMLExporter
 from qa_auto.index.search import get_coverage_report, search_testcases
 from qa_auto.index.store import index_testcase
@@ -36,6 +39,9 @@ from qa_auto.ui.db import (
     add_testcase_to_suite,
     create_project,
     create_suite,
+    create_execution_batch,
+    get_execution_batch,
+    list_execution_batches,
     delete_project,
     delete_suite,
     get_ai_analyses_for_testcase,
@@ -47,6 +53,12 @@ from qa_auto.ui.db import (
     list_execution_runs,
     list_projects,
     list_suites,
+    approve_synthesized_draft,
+    get_synthesized_draft,
+    list_synthesized_drafts,
+    reject_synthesized_draft,
+    save_synthesized_draft,
+    update_synthesized_draft,
     remove_testcase_from_suite,
     save_ai_analysis,
     sync_all_testcases_from_disk,
@@ -117,11 +129,25 @@ class TestCaseCreateRequest(BaseModel):
 
 
 class ReplayRequest(BaseModel):
-    testcase_id: str = Field(description="ID, folder name, or path of the test case")
+    testcase_id: str | None = Field(default=None, description="ID, folder name, or path of the test case")
     project_id: str = Field(default="default_project", description="Target project ID")
     browser: str | None = Field(default=None, description="Override browser type")
     headed: bool = Field(default=False, description="Display browser window during replay")
     heal: bool = Field(default=True, description="Enable heuristic selector self-healing")
+    assertions: bool = Field(default=True, description="Evaluate assertions")
+    visual_diff: bool = Field(default=False, description="Perform screenshot visual comparison")
+    diff_threshold: float = Field(default=0.1, description="Visual diff tolerance percentage")
+    concurrency: int = Field(default=2, ge=1, le=8, description="Parallel worker count for batch/suite execution")
+
+
+class BatchExecutionRequest(BaseModel):
+    testcase_ids: list[str] = Field(description="List of testcase IDs or paths to execute")
+    project_id: str = Field(default="default_project", description="Target project ID")
+    suite_id: str | None = Field(default=None, description="Optional associated suite ID")
+    concurrency: int = Field(default=2, ge=1, le=8, description="Number of parallel workers (1 to 8)")
+    browser: str = Field(default="chromium", description="Browser engine")
+    headed: bool = Field(default=False, description="Display browser window during replay")
+    heal: bool = Field(default=True, description="Enable selector self-healing")
     assertions: bool = Field(default=True, description="Evaluate assertions")
     visual_diff: bool = Field(default=False, description="Perform screenshot visual comparison")
     diff_threshold: float = Field(default=0.1, description="Visual diff tolerance percentage")
@@ -371,7 +397,7 @@ async def get_suite_executions(suite_id: str) -> list[dict[str, Any]]:
 
 @router.post("/suites/{suite_id}/run")
 async def run_suite(suite_id: str, req: ReplayRequest | None = None) -> list[dict[str, Any]]:
-    """Run all test cases in a suite asynchronously."""
+    """Run all test cases in a suite asynchronously via the bounded worker pool."""
     suite = get_suite(suite_id)
     if not suite:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Suite not found")
@@ -380,28 +406,33 @@ async def run_suite(suite_id: str, req: ReplayRequest | None = None) -> list[dic
     if not tc_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Suite has no test cases")
 
-    runs = []
-    browser = req.browser if req else "chromium"
+    browser = (req.browser if req and req.browser else "chromium")
     headed = req.headed if req else False
     heal = req.heal if req else True
     assertions = req.assertions if req else True
+    visual_diff = req.visual_diff if req else False
+    diff_threshold = req.diff_threshold if req else 0.1
+    concurrency = req.concurrency if req else 2
 
-    for t_id in tc_ids:
-        try:
-            run = await orchestrator.start_execution(
-                testcase_id=t_id,
-                project_id=suite.get("project_id", "default_project"),
-                suite_id=suite_id,
-                browser=browser,
-                headed=headed,
-                heal=heal,
-                assertions=assertions,
-            )
-            runs.append(run)
-        except Exception as exc:
-            logger.warning("Could not launch test %s in suite %s: %s", t_id, suite_id, exc)
-
-    return runs
+    try:
+        batch = await orchestrator.start_batch_execution(
+            testcase_ids=tc_ids,
+            concurrency=concurrency,
+            project_id=suite.get("project_id", "default_project"),
+            suite_id=suite_id,
+            browser=browser,
+            headed=headed,
+            heal=heal,
+            assertions=assertions,
+            visual_diff=visual_diff,
+            diff_threshold=diff_threshold,
+        )
+        return batch.get("runs", [])
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Could not launch suite %s: %s", suite_id, exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -440,6 +471,8 @@ async def remove_testcase(identifier: str) -> dict[str, bool]:
         return {"success": success}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to delete testcase: %s", exc)
         raise HTTPException(
@@ -457,6 +490,8 @@ async def get_testcase_details(identifier: str) -> dict[str, Any]:
         return data
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Error loading test case %s: %s", identifier, exc)
         raise HTTPException(
@@ -480,6 +515,8 @@ async def edit_testcase(identifier: str, req: TestCaseUpdateRequest) -> dict[str
         return data
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to update testcase %s: %s", identifier, exc)
         raise HTTPException(
@@ -518,6 +555,8 @@ async def generate_code(identifier: str) -> dict[str, str]:
         return {"code": code}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
@@ -545,6 +584,8 @@ async def get_executions(
     testcase_id: str | None = None,
     suite_id: str | None = None,
     status: str | None = None,
+    batch_id: str | None = None,
+    worker_id: str | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     return list_execution_runs(
@@ -552,8 +593,70 @@ async def get_executions(
         testcase_id=testcase_id,
         suite_id=suite_id,
         status=status,
+        batch_id=batch_id,
+        worker_id=worker_id,
         limit=limit,
     )
+
+
+@router.post("/executions/batch")
+async def start_batch_execution_endpoint(req: BatchExecutionRequest) -> dict[str, Any]:
+    """Launch parallel or sequential execution of multiple test cases."""
+    try:
+        batch = await orchestrator.start_batch_execution(
+            testcase_ids=req.testcase_ids,
+            concurrency=req.concurrency,
+            project_id=req.project_id,
+            suite_id=req.suite_id,
+            browser=req.browser,
+            headed=req.headed,
+            heal=req.heal,
+            assertions=req.assertions,
+            visual_diff=req.visual_diff,
+            diff_threshold=req.diff_threshold,
+        )
+        return batch
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to start batch execution: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
+@router.get("/executions/batches")
+async def get_execution_batches_endpoint(
+    project_id: str | None = None,
+    suite_id: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List execution batches."""
+    return list_execution_batches(
+        project_id=project_id,
+        suite_id=suite_id,
+        status=status,
+        limit=limit,
+    )
+
+
+@router.get("/executions/batches/{batch_id}")
+async def get_execution_batch_endpoint(batch_id: str) -> dict[str, Any]:
+    """Fetch batch execution status and child test runs."""
+    batch = get_execution_batch(batch_id)
+    if not batch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch execution not found")
+    return batch
+
+
+@router.post("/executions/batches/{batch_id}/cancel")
+async def cancel_batch_execution_endpoint(batch_id: str) -> dict[str, bool]:
+    """Cancel a running batch execution and its workers."""
+    cancelled = await orchestrator.cancel_batch_execution(batch_id)
+    return {"cancelled": cancelled}
 
 
 @router.get("/executions/{execution_id}")
@@ -581,6 +684,8 @@ async def start_new_execution(req: ReplayRequest) -> dict[str, Any]:
         return run
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to start execution: %s", exc)
         raise HTTPException(
@@ -610,6 +715,8 @@ async def run_replay(req: ReplayRequest) -> dict[str, Any]:
         return result.model_dump(mode="json")
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Replay execution failed: %s", exc)
         raise HTTPException(
@@ -699,6 +806,8 @@ async def compare_visual(req: VisualDiffRequest) -> dict[str, Any]:
         return diff_res.model_dump(mode="json")
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
@@ -769,6 +878,8 @@ async def create_step(identifier: str, req: StepCreateRequest) -> dict[str, Any]
         return updated_tc.model_dump(mode="json")
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to add step to %s: %s", identifier, exc)
         raise HTTPException(
@@ -783,6 +894,8 @@ async def remove_step(identifier: str, step_number: int) -> dict[str, Any]:
         return updated_tc.model_dump(mode="json")
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to delete step %d from %s: %s", step_number, identifier, exc)
         raise HTTPException(
@@ -817,6 +930,8 @@ async def create_assertion(identifier: str, req: AssertionCreateRequest) -> dict
         return updated_tc.model_dump(mode="json")
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to add assertion to %s: %s", identifier, exc)
         raise HTTPException(
@@ -831,6 +946,8 @@ async def remove_assertion(identifier: str, index: int) -> dict[str, Any]:
         return updated_tc.model_dump(mode="json")
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to delete assertion %d from %s: %s", index, identifier, exc)
         raise HTTPException(
@@ -901,6 +1018,8 @@ async def analyze_case(
         return saved
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Analysis failed: %s", exc)
         raise HTTPException(
@@ -1041,6 +1160,8 @@ async def api_suggest_assertions(req: SuggestAssertionsRequest) -> dict[str, Any
         return res.model_dump(mode="json")
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Suggest assertions failed: %s", exc)
         raise HTTPException(
@@ -1062,6 +1183,8 @@ async def api_apply_suggested_assertions(
         return updated_tc.model_dump(mode="json")
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Apply suggested assertions failed: %s", exc)
         raise HTTPException(
@@ -1078,6 +1201,8 @@ async def api_audit_selectors(identifier: str) -> dict[str, Any]:
         return report.model_dump(mode="json")
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Selector audit failed: %s", exc)
         raise HTTPException(
@@ -1133,6 +1258,8 @@ async def api_verify_selector_live(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Live selector verification failed: %s", exc)
         raise HTTPException(
@@ -1188,6 +1315,8 @@ async def api_apply_selector_fix(
         raise
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Apply selector fix failed: %s", exc)
         raise HTTPException(
@@ -1247,6 +1376,8 @@ async def api_generate_variations(req: GenerateVariationsRequest) -> list[dict[s
         return [v.model_dump(mode="json") for v in variations]
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Generate variations failed: %s", exc)
         raise HTTPException(
@@ -1305,6 +1436,8 @@ async def generate_mutations(req: MutationGenerateRequest) -> list[dict[str, Any
         ]
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Mutation generation failed: %s", exc)
         raise HTTPException(
@@ -1503,6 +1636,218 @@ async def delete_exploration_run_endpoint(exploration_id: str) -> dict[str, Any]
     return {"exploration_id": exploration_id, "deleted": True}
 
 
+class SynthesizeRequest(BaseModel):
+    project_id: str = "default_project"
+    max_journeys: int = Field(default=6, ge=1, le=20)
+
+
+class DraftApproveRequest(BaseModel):
+    custom_name: str | None = None
+    modifications: dict[str, Any] | None = None
+
+
+class DraftRejectRequest(BaseModel):
+    reason: str | None = None
+
+
+@router.post("/autonomous/runs/{exploration_id}/synthesize")
+async def synthesize_journeys_endpoint(
+    exploration_id: str, req: SynthesizeRequest | None = None
+) -> list[dict[str, Any]]:
+    """Synthesize test journey drafts from an exploration graph."""
+    run = exploration_controller.get_run(exploration_id)
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Exploration run '{exploration_id}' not found",
+        )
+
+    graph_dict = exploration_controller.get_graph(exploration_id)
+    if not graph_dict or not graph_dict.get("nodes"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot synthesize journeys: exploration graph has no discovered page nodes.",
+        )
+
+    # Convert graph dict into AppNavigationGraph model
+    from qa_auto.exploration.models import PageNode, PageTransition
+    nodes = {url: PageNode(**n) for url, n in graph_dict.get("nodes", {}).items()}
+    transitions = [PageTransition(**t) for t in graph_dict.get("transitions", [])]
+    graph = AppNavigationGraph(
+        exploration_id=exploration_id,
+        start_url=graph_dict.get("start_url", run["start_url"]),
+        nodes=nodes,
+        transitions=transitions,
+    )
+
+    proj_id = req.project_id if req else "default_project"
+    max_j = req.max_journeys if req else 6
+    drafts = synthesize_test_journeys(graph=graph, project_id=proj_id, max_journeys=max_j)
+
+    saved_drafts = []
+    for d in drafts:
+        saved = save_synthesized_draft(d.model_dump(mode="json"))
+        saved_drafts.append(saved)
+
+    return saved_drafts
+
+
+@router.get("/autonomous/drafts")
+async def list_drafts_endpoint(
+    project_id: str | None = Query(None, description="Filter by project"),
+    exploration_id: str | None = Query(None, description="Filter by exploration"),
+    status: str | None = Query(None, description="Filter by status (pending, approved, rejected)"),
+) -> list[dict[str, Any]]:
+    """List synthesized test journey drafts."""
+    return list_synthesized_drafts(
+        project_id=project_id, exploration_id=exploration_id, status=status
+    )
+
+
+@router.get("/autonomous/drafts/{draft_id}")
+async def get_draft_endpoint(draft_id: str) -> dict[str, Any]:
+    """Get details of a synthesized test journey draft."""
+    draft = get_synthesized_draft(draft_id)
+    if not draft:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Draft '{draft_id}' not found",
+        )
+    return draft
+
+
+@router.post("/autonomous/drafts/{draft_id}/approve")
+async def approve_draft_endpoint(
+    draft_id: str, req: DraftApproveRequest | None = None
+) -> dict[str, Any]:
+    """Approve a test journey draft and promote it into an executable TestCase."""
+    try:
+        custom_name = req.custom_name if req else None
+        modifications = req.modifications if req else None
+        result = approve_synthesized_draft(
+            draft_id=draft_id,
+            custom_name=custom_name,
+            modifications=modifications,
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed approving draft %s: %s", draft_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed approving draft: {exc}",
+        ) from exc
+
+
+@router.post("/autonomous/drafts/{draft_id}/reject")
+async def reject_draft_endpoint(
+    draft_id: str, req: DraftRejectRequest | None = None
+) -> dict[str, Any]:
+    """Reject a test journey draft with optional reason."""
+    reason = req.reason if req else "Rejected by reviewer"
+    success = reject_synthesized_draft(draft_id=draft_id, reason=reason)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Draft '{draft_id}' not found",
+        )
+    return {"draft_id": draft_id, "status": "rejected", "reason": reason}
+
+
+class DraftUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    steps: list[dict[str, Any]] | None = None
+
+
+class RequirementsPlanRequest(BaseModel):
+    requirement: str
+    exploration_id: str
+    project_id: str = "default_project"
+
+
+class RegressionSelectRequest(BaseModel):
+    changed_routes: list[str] = Field(default_factory=list)
+    changed_selectors: list[str] = Field(default_factory=list)
+    project_id: str = "default_project"
+    max_recommendations: int = Field(default=15, ge=1, le=50)
+
+
+@router.put("/autonomous/drafts/{draft_id}")
+async def update_draft_endpoint(
+    draft_id: str, req: DraftUpdateRequest
+) -> dict[str, Any]:
+    """
+    Update a draft journey.
+    
+    Security Guardrail: If previously approved, content modifications reset
+    approval status to 'pending' to prevent unreviewed test mutations.
+    """
+    updated = update_synthesized_draft(
+        draft_id=draft_id,
+        name=req.name,
+        description=req.description,
+        steps=req.steps,
+    )
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Draft '{draft_id}' not found",
+        )
+    return updated
+
+
+@router.post("/autonomous/requirements/plan")
+async def plan_requirement_endpoint(req: RequirementsPlanRequest) -> dict[str, Any]:
+    """
+    Map natural language user stories/requirements against an exploration graph.
+    Computes coverage gaps and synthesizes an evidence-backed test journey draft.
+    """
+    graph_dict = exploration_controller.get_graph(req.exploration_id)
+    if not graph_dict or not graph_dict.get("nodes"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Exploration '{req.exploration_id}' has no navigation graph nodes.",
+        )
+
+    from qa_auto.exploration.models import PageNode, PageTransition
+    nodes = {url: PageNode(**n) for url, n in graph_dict.get("nodes", {}).items()}
+    transitions = [PageTransition(**t) for t in graph_dict.get("transitions", [])]
+    graph = AppNavigationGraph(
+        exploration_id=req.exploration_id,
+        start_url=graph_dict.get("start_url", ""),
+        nodes=nodes,
+        transitions=transitions,
+    )
+
+    plan_result = plan_requirement_against_graph(
+        requirement=req.requirement,
+        graph=graph,
+        project_id=req.project_id,
+    )
+
+    # If draft was synthesized, persist it into synthesized_drafts as pending review
+    if plan_result.get("synthesized_draft"):
+        saved = save_synthesized_draft(plan_result["synthesized_draft"])
+        plan_result["synthesized_draft"] = saved
+
+    return plan_result
+
+
+@router.post("/autonomous/regression/select")
+async def select_regression_endpoint(req: RegressionSelectRequest) -> dict[str, Any]:
+    """
+    Analyze code/DOM change impact and select an intelligent regression test subset.
+    """
+    return select_intelligent_regression_suite(
+        changed_routes=req.changed_routes,
+        changed_selectors=req.changed_selectors,
+        project_id=req.project_id,
+        max_recommendations=req.max_recommendations,
+    )
+
+
 # ---------------------------------------------------------------------------
 # WebSockets Real-Time Stream
 # ---------------------------------------------------------------------------
@@ -1546,6 +1891,18 @@ async def execution_websocket(websocket: WebSocket, execution_id: str) -> None:
 async def exploration_websocket(websocket: WebSocket, exploration_id: str) -> None:
     """Dedicated WebSocket stream for an autonomous exploration run."""
     channel = f"exploration:{exploration_id}"
+    await manager.connect(websocket, channel=channel)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await manager.disconnect(websocket, channel=channel)
+
+
+@router.websocket("/ws/batches/{batch_id}")
+async def batch_websocket(websocket: WebSocket, batch_id: str) -> None:
+    """Dedicated WebSocket stream for a batch execution run."""
+    channel = f"batch:{batch_id}"
     await manager.connect(websocket, channel=channel)
     try:
         while True:
