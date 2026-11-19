@@ -1173,6 +1173,85 @@ def benchmark(
 
 
 @app.command()
+def changes(
+    repo_path: Annotated[
+        Path,
+        typer.Argument(help="Path to repository directory (defaults to current dir)"),
+    ] = Path("."),
+    base: Annotated[
+        str | None,
+        typer.Option("--base", "-b", help="Base git ref to compare against (e.g. main, HEAD~1)"),
+    ] = None,
+    staged: Annotated[
+        bool,
+        typer.Option("--staged", help="Inspect only staged git changes"),
+    ] = False,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output raw JSON instead of table"),
+    ] = False,
+) -> None:
+    """Analyze git changes, diffs, changed selectors, routes, and symbols (Phase 7.5.1)."""
+    from rich.table import Table
+    from tracecase.intelligence.git_analyzer import GitChangeAnalyzer
+
+    analyzer = GitChangeAnalyzer(repo_path)
+    change_set = analyzer.analyze_repo(base_ref=base, staged_only=staged)
+
+    if as_json:
+        console.print_json(change_set.model_dump_json())
+        return
+
+    # Header
+    branch_str = f"on [bold cyan]{change_set.current_branch or 'detached'}[/bold cyan]"
+    commit_str = f"([dim]{change_set.current_commit or 'unknown'}[/dim])"
+    status_str = "[yellow]dirty[/yellow]" if change_set.is_dirty else "[green]clean[/green]"
+    console.print(f"Git Change Intelligence: {branch_str} {commit_str} - {status_str}\n")
+
+    if not change_set.files:
+        console.print("[dim]No changes detected in repository.[/dim]")
+        return
+
+    # Files table
+    table = Table(title=f"Changed Files ({len(change_set.files)})", border_style="cyan")
+    table.add_column("Type", style="bold")
+    table.add_column("Path")
+    table.add_column("+/-", justify="right")
+    table.add_column("Routes", style="magenta")
+    table.add_column("Selectors", style="yellow")
+    table.add_column("Functions / Classes", style="blue")
+
+    for f in change_set.files:
+        t_style = "green" if f.change_type == "added" else "rose" if f.change_type == "deleted" else "cyan"
+        diff_str = f"[green]+{f.additions}[/green]/[red]-{f.deletions}[/red]"
+        routes_str = ", ".join(f.changed_routes[:2]) if f.changed_routes else "-"
+        selectors_str = ", ".join(f.changed_selectors[:2]) if f.changed_selectors else "-"
+        syms = (f.changed_functions + f.changed_classes)[:2]
+        syms_str = ", ".join(syms) if syms else "-"
+
+        table.add_row(
+            f"[{t_style}]{f.change_type.upper()}[/{t_style}]",
+            f.path,
+            diff_str,
+            routes_str,
+            selectors_str,
+            syms_str,
+        )
+
+    console.print(table)
+
+    # Summary
+    s = change_set.summary
+    console.print(
+        f"\n[bold]Summary:[/bold] {s.total_files_changed} files changed "
+        f"([green]+{s.total_additions}[/green] / [red]-{s.total_deletions}[/red]). "
+        f"Detected [magenta]{len(s.total_changed_routes)} routes[/magenta], "
+        f"[yellow]{len(s.total_changed_selectors)} selectors[/yellow], "
+        f"[blue]{len(s.total_changed_symbols)} symbols[/blue]."
+    )
+
+
+@app.command()
 def ui(
     host: Annotated[
         str,

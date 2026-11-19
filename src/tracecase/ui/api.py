@@ -37,6 +37,8 @@ from tracecase.artifact_manager import (
 )
 from tracecase.index.search import get_coverage_report, search_testcases
 from tracecase.index.store import index_testcase
+from tracecase.intelligence.git_analyzer import GitChangeAnalyzer
+from tracecase.intelligence.models import GitChangeSet
 from tracecase.models import TestCase
 from tracecase.mutation.engine import MutationEngine
 from tracecase.replay.har import build_har
@@ -1720,6 +1722,22 @@ async def get_app_settings() -> dict[str, str]:
 @router.put("/settings")
 async def update_app_settings(req: SettingsUpdateRequest) -> dict[str, str]:
     return update_settings(req.get_dict())
+
+
+# ---------------------------------------------------------------------------
+# Intelligence Endpoints (Phase 7.5)
+# ---------------------------------------------------------------------------
+
+@router.get("/intelligence/git-changes", response_model=GitChangeSet)
+async def get_git_changes_endpoint(
+    repo_path: str = Query(".", description="Path to repository directory"),
+    base_ref: str | None = Query(None, description="Optional base git ref (e.g. main, HEAD~1)"),
+    target_ref: str | None = Query(None, description="Optional target git ref (defaults to HEAD)"),
+    staged_only: bool = Query(False, description="Whether to inspect only staged changes"),
+) -> GitChangeSet:
+    """Analyze git changes, diffs, changed selectors, routes, and symbols."""
+    analyzer = GitChangeAnalyzer(repo_path)
+    return analyzer.analyze_repo(base_ref=base_ref, target_ref=target_ref, staged_only=staged_only)
 
 
 # ---------------------------------------------------------------------------
