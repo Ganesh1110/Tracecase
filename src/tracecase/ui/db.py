@@ -1245,7 +1245,8 @@ def get_testcase_flakiness_stats(
     limit: int = 30,
     db_path: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Calculate flakiness score, reliability score, and browser breakdown across historical runs."""
+    """Calculate flakiness rate, first-attempt pass rate, final pass rate, failure rate,
+    stability score, and per-browser breakdown across historical runs."""
     init_studio_db(db_path)
     conn = get_connection(db_path)
     try:
@@ -1268,14 +1269,37 @@ def get_testcase_flakiness_stats(
         failed_runs = sum(1 for r in runs if r["status"] == "failed")
         error_runs = sum(1 for r in runs if r["status"] == "error")
 
-        flakiness_score = round((flaky_runs / total_runs) * 100, 1) if total_runs > 0 else 0.0
-        reliability_score = round((passed_runs / total_runs) * 100, 1) if total_runs > 0 else 100.0
+        # 1. Flakiness rate: Percentage of runs that recover after retry
+        flakiness_rate = round((flaky_runs / total_runs) * 100, 1) if total_runs > 0 else 0.0
+        flakiness_score = flakiness_rate  # Backward compatibility alias
 
-        if flakiness_score == 0.0:
+        # 2. First-attempt pass rate: Percentage passing without retries
+        first_attempt_pass_rate = round((passed_runs / total_runs) * 100, 1) if total_runs > 0 else 0.0
+
+        # 3. Final pass rate: Percentage passing after all retries
+        final_pass_rate = round(((passed_runs + flaky_runs) / total_runs) * 100, 1) if total_runs > 0 else 0.0
+
+        # 4. Failure rate: Percentage ultimately failing
+        failure_rate = round(((failed_runs + error_runs) / total_runs) * 100, 1) if total_runs > 0 else 0.0
+
+        # 5. Stability score: Consistency of outcomes across repeated runs
+        # Measures modal outcome dominance across terminal outcomes ('passed', 'flaky', 'failed', 'error')
+        max_outcome_count = max(passed_runs, flaky_runs, failed_runs, error_runs) if total_runs > 0 else 0
+        stability_score = round((max_outcome_count / total_runs) * 100, 1) if total_runs > 0 else 100.0
+
+        # Reliability score: Failure-free operation without retries (first-attempt pass rate)
+        # Never defined as 100 - flakiness_score (a consistently failing test has 0% reliability).
+        reliability_score = first_attempt_pass_rate
+
+        if total_runs == 0:
+            rating = "untested"
+        elif final_pass_rate == 0.0:
+            rating = "failing"
+        elif flakiness_rate == 0.0:
             rating = "stable"
-        elif flakiness_score <= 15.0:
+        elif flakiness_rate <= 15.0:
             rating = "low"
-        elif flakiness_score <= 40.0:
+        elif flakiness_rate <= 40.0:
             rating = "moderate"
         else:
             rating = "high"
@@ -1291,7 +1315,13 @@ def get_testcase_flakiness_stats(
                     "passed": 0,
                     "failed": 0,
                     "error": 0,
+                    "flakiness_rate": 0.0,
                     "flakiness_score": 0.0,
+                    "first_attempt_pass_rate": 0.0,
+                    "final_pass_rate": 0.0,
+                    "failure_rate": 0.0,
+                    "stability_score": 100.0,
+                    "reliability_score": 0.0,
                 }
             browsers[b]["total"] += 1
             st = r["status"]
@@ -1300,7 +1330,18 @@ def get_testcase_flakiness_stats(
 
         for b, data in browsers.items():
             t = data["total"]
-            data["flakiness_score"] = round((data["flaky"] / t) * 100, 1) if t > 0 else 0.0
+            f = data["flaky"]
+            p = data["passed"]
+            fail = data["failed"]
+            err = data["error"]
+            data["flakiness_rate"] = round((f / t) * 100, 1) if t > 0 else 0.0
+            data["flakiness_score"] = data["flakiness_rate"]
+            data["first_attempt_pass_rate"] = round((p / t) * 100, 1) if t > 0 else 0.0
+            data["final_pass_rate"] = round(((p + f) / t) * 100, 1) if t > 0 else 0.0
+            data["failure_rate"] = round(((fail + err) / t) * 100, 1) if t > 0 else 0.0
+            max_b = max(p, f, fail, err) if t > 0 else 0
+            data["stability_score"] = round((max_b / t) * 100, 1) if t > 0 else 100.0
+            data["reliability_score"] = data["first_attempt_pass_rate"]
 
         return {
             "testcase_id": testcase_id,
@@ -1309,7 +1350,12 @@ def get_testcase_flakiness_stats(
             "passed_runs": passed_runs,
             "failed_runs": failed_runs,
             "error_runs": error_runs,
+            "flakiness_rate": flakiness_rate,
             "flakiness_score": flakiness_score,
+            "first_attempt_pass_rate": first_attempt_pass_rate,
+            "final_pass_rate": final_pass_rate,
+            "failure_rate": failure_rate,
+            "stability_score": stability_score,
             "reliability_score": reliability_score,
             "rating": rating,
             "flakiness_by_browser": browsers,
@@ -1638,14 +1684,26 @@ def get_execution_matrix(matrix_id: str, db_path: Path | str | None = None) -> d
             else 100.0
         )
 
-        # Calculate pass rates per browser (passed or flaky are considered successful runs)
+        # Calculate granular rates per browser: first-attempt, final pass, and flakiness
         browser_pass_rates: dict[str, float] = {}
+        browser_first_attempt_pass_rates: dict[str, float] = {}
+        browser_final_pass_rates: dict[str, float] = {}
+        browser_flakiness_rates: dict[str, float] = {}
+
         for b in browsers:
             b_runs = [r for r in runs if r.get("browser") == b and r.get("status") in ("passed", "failed", "error", "flaky")]
             if b_runs:
-                passed_b = sum(1 for r in b_runs if r["status"] in ("passed", "flaky"))
-                browser_pass_rates[b] = round(100.0 * passed_b / len(b_runs), 1)
+                clean_passed = sum(1 for r in b_runs if r["status"] == "passed")
+                flaky_b = sum(1 for r in b_runs if r["status"] == "flaky")
+                total_b = len(b_runs)
+                browser_first_attempt_pass_rates[b] = round(100.0 * clean_passed / total_b, 1)
+                browser_final_pass_rates[b] = round(100.0 * (clean_passed + flaky_b) / total_b, 1)
+                browser_flakiness_rates[b] = round(100.0 * flaky_b / total_b, 1)
+                browser_pass_rates[b] = browser_final_pass_rates[b]
             else:
+                browser_first_attempt_pass_rates[b] = 0.0
+                browser_final_pass_rates[b] = 0.0
+                browser_flakiness_rates[b] = 0.0
                 browser_pass_rates[b] = 0.0
 
         d["grid"] = grid
@@ -1653,6 +1711,9 @@ def get_execution_matrix(matrix_id: str, db_path: Path | str | None = None) -> d
         d["divergent_testcases_count"] = divergent_testcases
         d["cross_browser_parity_pct"] = parity_pct
         d["browser_pass_rates"] = browser_pass_rates
+        d["browser_first_attempt_pass_rates"] = browser_first_attempt_pass_rates
+        d["browser_final_pass_rates"] = browser_final_pass_rates
+        d["browser_flakiness_rates"] = browser_flakiness_rates
         return d
     finally:
         conn.close()

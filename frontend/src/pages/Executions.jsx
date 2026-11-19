@@ -1072,8 +1072,16 @@ export function Executions() {
                   {selectedMatrix.browsers?.map((b) => (
                     <div key={b}>
                       <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{b} Pass Rate</div>
-                      <div className="text-base font-bold text-slate-800 dark:text-slate-100">
-                        {selectedMatrix.browser_pass_rates?.[b] ?? 0}%
+                      <div className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                        <span>{selectedMatrix.browser_pass_rates?.[b] ?? 0}%</span>
+                        {selectedMatrix.browser_flakiness_rates?.[b] > 0 && (
+                          <span
+                            className="text-[10px] font-medium text-amber-500"
+                            title={`Clean 1st attempt: ${selectedMatrix.browser_first_attempt_pass_rates?.[b] || 0}% | Flaky recovery: ${selectedMatrix.browser_flakiness_rates[b]}%`}
+                          >
+                            ({selectedMatrix.browser_flakiness_rates[b]}% flaky)
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))}

@@ -72,13 +72,26 @@ def find_free_port() -> int:
 
 class FlakyAppHandler(BaseHTTPRequestHandler):
     """Local HTTP app for testing real browser runs."""
+    fail_then_pass_requests = 0
 
     def log_message(self, format: str, *args: Any) -> None:
         pass
 
     def do_GET(self) -> None:
         path = self.path.split("?")[0].rstrip("/") or "/"
-        if path == "/":
+        if path == "/fail-then-pass":
+            FlakyAppHandler.fail_then_pass_requests += 1
+            if FlakyAppHandler.fail_then_pass_requests == 1:
+                # First attempt: element is missing so click times out
+                body = """<!DOCTYPE html>
+<html><head><title>Flaky Page</title></head>
+<body><h1>Transient State</h1><p id="loading">Components loading...</p></body></html>"""
+            else:
+                # Subsequent attempts (retry): element is present and clickable
+                body = """<!DOCTYPE html>
+<html><head><title>Flaky Page</title></head>
+<body><h1>Ready</h1><button id="btn-action">Click Me</button></body></html>"""
+        elif path == "/":
             body = """<!DOCTYPE html>
 <html><head><title>Flaky Test Page</title></head>
 <body><h1>Flaky App Portal</h1><button id="btn-action">Click Me</button></body></html>"""
@@ -474,12 +487,23 @@ def test_historical_flakiness_and_per_browser_stats(tmp_path: Path):
     assert stats["flaky_runs"] == 3
     assert stats["passed_runs"] == 6
     assert stats["failed_runs"] == 1
+    assert stats["error_runs"] == 0
 
-    # Flakiness score: (3 / 10) * 100 = 30.0%
+    # Separated metrics:
+    # 1. Flakiness rate: 3/10 = 30.0%
+    assert stats["flakiness_rate"] == 30.0
     assert stats["flakiness_score"] == 30.0
-    # Reliability score: (6 / 10) * 100 = 60.0%
+    # 2. First-attempt pass rate: 6/10 = 60.0%
+    assert stats["first_attempt_pass_rate"] == 60.0
+    # 3. Final pass rate: (6 + 3)/10 = 90.0%
+    assert stats["final_pass_rate"] == 90.0
+    # 4. Failure rate: 1/10 = 10.0%
+    assert stats["failure_rate"] == 10.0
+    # 5. Stability score: modal outcome (passed = 6) / 10 = 60.0%
+    assert stats["stability_score"] == 60.0
+    # Reliability score: first attempt pass rate = 60.0% (NOT 100 - flakiness_score = 70.0%)
     assert stats["reliability_score"] == 60.0
-    # Rating: 30% is moderate (<= 40.0)
+    # Rating: 30% flakiness is moderate (<= 40.0)
     assert stats["rating"] == "moderate"
 
     # Per-browser breakdown
@@ -487,18 +511,69 @@ def test_historical_flakiness_and_per_browser_stats(tmp_path: Path):
     assert "chromium" in by_browser
     assert by_browser["chromium"]["total"] == 5
     assert by_browser["chromium"]["flaky"] == 1
-    assert by_browser["chromium"]["flakiness_score"] == 20.0
+    assert by_browser["chromium"]["passed"] == 4
+    assert by_browser["chromium"]["flakiness_rate"] == 20.0
+    assert by_browser["chromium"]["first_attempt_pass_rate"] == 80.0
+    assert by_browser["chromium"]["final_pass_rate"] == 100.0
 
     assert "firefox" in by_browser
     assert by_browser["firefox"]["total"] == 3
     assert by_browser["firefox"]["flaky"] == 1
-    assert by_browser["firefox"]["flakiness_score"] == 33.3
+    assert by_browser["firefox"]["passed"] == 2
+    assert by_browser["firefox"]["flakiness_rate"] == 33.3
+    assert by_browser["firefox"]["first_attempt_pass_rate"] == 66.7
+    assert by_browser["firefox"]["final_pass_rate"] == 100.0
 
     assert "webkit" in by_browser
     assert by_browser["webkit"]["total"] == 2
     assert by_browser["webkit"]["flaky"] == 1
     assert by_browser["webkit"]["failed"] == 1
-    assert by_browser["webkit"]["flakiness_score"] == 50.0
+    assert by_browser["webkit"]["flakiness_rate"] == 50.0
+    assert by_browser["webkit"]["first_attempt_pass_rate"] == 0.0
+    assert by_browser["webkit"]["final_pass_rate"] == 50.0
+    assert by_browser["webkit"]["failure_rate"] == 50.0
+
+
+def test_consistently_failing_test_metrics_not_reliable(tmp_path: Path):
+    """A test that fails every time has 0% flakiness, 100% stability, but 0% reliability and 'failing' rating."""
+    db_file = tmp_path / "studio_failing.db"
+    init_studio_db(db_file)
+    tc_id = "tc_broken_checkout"
+
+    # 30 runs, all failed
+    for _ in range(30):
+        run = create_execution_run(
+            testcase_id=tc_id,
+            testcase_name="Broken Checkout",
+            browser="chromium",
+            db_path=db_file,
+        )
+        update_execution_run_status(
+            execution_id=run["id"],
+            status="failed",
+            attempt_count=3,
+            db_path=db_file,
+        )
+
+    stats = get_testcase_flakiness_stats(tc_id, limit=30, db_path=db_file)
+    assert stats["total_runs"] == 30
+    assert stats["flaky_runs"] == 0
+    assert stats["passed_runs"] == 0
+    assert stats["failed_runs"] == 30
+    assert stats["error_runs"] == 0
+
+    # Explicit metrics verification:
+    assert stats["flakiness_rate"] == 0.0
+    assert stats["flakiness_score"] == 0.0
+    assert stats["first_attempt_pass_rate"] == 0.0
+    assert stats["final_pass_rate"] == 0.0
+    assert stats["failure_rate"] == 100.0
+    # Stability score is 100% because outcome is 100% consistently failing
+    assert stats["stability_score"] == 100.0
+    # CRITICAL: Reliability score must NOT be (100 - flakiness) = 100%. It is 0.0%.
+    assert stats["reliability_score"] == 0.0
+    # Rating must NOT be 'stable'
+    assert stats["rating"] == "failing"
 
 
 # ===========================================================================
@@ -615,13 +690,203 @@ async def test_matrix_execution_with_intelligent_retry(tmp_path: Path, sample_te
         assert grid[0]["browsers"]["chromium"]["attempt_count"] == 2
 
 
+@pytest.mark.asyncio
+async def test_cross_browser_divergence_with_flaky_and_mixed_outcomes(
+    tmp_path: Path, sample_testcase: TestCase, monkeypatch: pytest.MonkeyPatch
+):
+    """Verify cross-browser divergence properly exposes flaky outcomes alongside clean passes and failures.
+    
+    Matrix scenario:
+    - Chromium: Passed (clean on attempt 1)
+    - Firefox: Flaky (failed attempt 1, passed attempt 2)
+    - WebKit: Failed (all attempts failed)
+
+    Divergence must NOT hide Firefox's inconsistency as a generic pass.
+    """
+    monkeypatch.chdir(tmp_path)
+    init_studio_db()
+    sync_testcase_meta(testcase=sample_testcase, file_path=tmp_path / "testcase.json", approval_status="approved")
+
+    orchestrator = ExecutionOrchestrator()
+    calls_per_browser: dict[str, int] = {"chromium": 0, "firefox": 0, "webkit": 0}
+
+    class MockCrossBrowserMatrixEngine:
+        def __init__(self, browser_type: str = "chromium", *args, **kwargs):
+            self.browser = browser_type
+            calls_per_browser[self.browser] = calls_per_browser.get(self.browser, 0) + 1
+            self.call_num = calls_per_browser[self.browser]
+
+        async def run(self):
+            if self.browser == "chromium":
+                # Clean pass
+                return _make_replay_res(status="passed", exit_code=0, steps=[StepResult(number=1, status="passed")])
+            elif self.browser == "firefox":
+                # Attempt 1 fails, Attempt 2 passes (flaky)
+                if self.call_num == 1:
+                    return _make_replay_res(
+                        status="failed",
+                        exit_code=1,
+                        steps=[StepResult(number=1, status="failed", error="Firefox layout reflow race")],
+                    )
+                return _make_replay_res(status="passed", exit_code=0, steps=[StepResult(number=1, status="passed")])
+            else:  # webkit
+                # Fails all attempts
+                return _make_replay_res(
+                    status="failed",
+                    exit_code=1,
+                    steps=[StepResult(number=1, status="failed", error="WebKit SVG rendering crash")],
+                )
+
+    with patch("tracecase.ui.executor.ReplayEngine", MockCrossBrowserMatrixEngine), \
+         patch("tracecase.ui.executor.resolve_testcase_file", return_value=(tmp_path / "testcase.json", sample_testcase)), \
+         patch("tracecase.ui.db.get_testcase_meta", return_value={"approval_status": "approved"}):
+
+        matrix = await orchestrator.start_matrix_execution(
+            testcase_ids=[sample_testcase.id],
+            browsers=["chromium", "firefox", "webkit"],
+            concurrency=3,
+            retries=2,
+        )
+        task = orchestrator.active_tasks.get(matrix["id"])
+        if task:
+            await task
+
+        final_matrix = get_execution_matrix(matrix["id"])
+        # Overall matrix status is failed because webkit failed
+        assert final_matrix["status"] == "failed"
+        assert final_matrix["total_executions"] == 3
+        # 2 passed eventually (chromium clean + firefox recovered)
+        assert final_matrix["passed_executions"] == 2
+        assert final_matrix["flaky_executions"] == 1
+        assert final_matrix["failed_executions"] == 1
+        assert final_matrix["divergence_count"] == 1
+
+        grid = final_matrix["grid"]
+        assert len(grid) == 1
+        row = grid[0]
+
+        # 1. Distinct final outcomes preserved per browser
+        assert row["browsers"]["chromium"]["status"] == "passed"
+        assert row["browsers"]["chromium"]["attempt_count"] == 1
+
+        assert row["browsers"]["firefox"]["status"] == "flaky"
+        assert row["browsers"]["firefox"]["attempt_count"] == 2
+
+        assert row["browsers"]["webkit"]["status"] == "failed"
+        assert row["browsers"]["webkit"]["attempt_count"] == 3
+
+        # 2. Cross-browser consistency flags divergence
+        assert row["is_divergent"] is True
+        assert "chromium: passed" in row["divergence_notes"]
+        assert "firefox: flaky" in row["divergence_notes"]
+        assert "webkit: failed" in row["divergence_notes"]
+
+        # 3. Rates per browser accurately reflect clean vs flaky vs failed
+        assert final_matrix["browser_first_attempt_pass_rates"]["chromium"] == 100.0
+        assert final_matrix["browser_flakiness_rates"]["chromium"] == 0.0
+
+        assert final_matrix["browser_first_attempt_pass_rates"]["firefox"] == 0.0
+        assert final_matrix["browser_flakiness_rates"]["firefox"] == 100.0
+        assert final_matrix["browser_final_pass_rates"]["firefox"] == 100.0
+
+        assert final_matrix["browser_first_attempt_pass_rates"]["webkit"] == 0.0
+        assert final_matrix["browser_final_pass_rates"]["webkit"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_retries_do_not_exceed_concurrency(
+    tmp_path: Path, sample_testcase: TestCase, monkeypatch: pytest.MonkeyPatch
+):
+    """Verify that retries executing inside existing worker pool do not exceed configured concurrency."""
+    monkeypatch.chdir(tmp_path)
+    init_studio_db()
+
+    # Create 4 test cases
+    tc_ids = []
+    tc_files = {}
+    for i in range(1, 5):
+        t_id = f"tc_conc_{i}"
+        tc_ids.append(t_id)
+        tc_obj = _make_testcase(id=t_id, name=f"Case {i}", start_url="http://test/", steps=[
+            Step(
+                number=1,
+                timestamp=datetime.now(),
+                action_type="click",
+                element=_make_element("#btn"),
+                description_short="Click button",
+                description_detailed="Click action button",
+            )
+        ])
+        f_path = tmp_path / f"{t_id}.json"
+        f_path.write_text(tc_obj.model_dump_json(), encoding="utf-8")
+        sync_testcase_meta(testcase=tc_obj, file_path=f_path, approval_status="approved")
+        tc_files[t_id] = (f_path, tc_obj)
+
+    orchestrator = ExecutionOrchestrator()
+
+    # Track concurrent execution
+    active_concurrent = 0
+    max_observed_concurrent = 0
+    lock = asyncio.Lock()
+    call_counts: dict[str, int] = {}
+
+    class MockWorkerBoundRetryEngine:
+        def __init__(self, testcase: TestCase, *args, **kwargs):
+            self.tc_id = testcase.id
+
+        async def run(self):
+            nonlocal active_concurrent, max_observed_concurrent
+            async with lock:
+                active_concurrent += 1
+                if active_concurrent > max_observed_concurrent:
+                    max_observed_concurrent = active_concurrent
+                call_counts[self.tc_id] = call_counts.get(self.tc_id, 0) + 1
+                current_call = call_counts[self.tc_id]
+
+            # Concurrency limit check: must never exceed 2 workers at any time
+            assert active_concurrent <= 2
+
+            # Simulate execution duration
+            await asyncio.sleep(0.05)
+
+            async with lock:
+                active_concurrent -= 1
+
+            # Fail attempt 1, pass attempt 2 (retry)
+            if current_call == 1:
+                return _make_replay_res(status="failed", exit_code=1, steps=[StepResult(number=1, status="failed", error="Retry me")])
+            return _make_replay_res(status="passed", exit_code=0, steps=[StepResult(number=1, status="passed")])
+
+    with patch("tracecase.ui.executor.ReplayEngine", MockWorkerBoundRetryEngine), \
+         patch("tracecase.ui.executor.resolve_testcase_file", side_effect=lambda tid: tc_files[tid]), \
+         patch("tracecase.ui.db.get_testcase_meta", return_value={"approval_status": "approved"}):
+
+        batch = await orchestrator.start_batch_execution(
+            testcase_ids=tc_ids,
+            concurrency=2,
+            retries=1,
+        )
+        task = orchestrator.active_tasks.get(batch["id"])
+        if task:
+            await task
+
+        final_batch = get_execution_batch(batch["id"])
+        assert final_batch["status"] == "passed"
+        assert final_batch["total_tests"] == 4
+        assert final_batch["flaky_tests"] == 4
+
+        # Verify concurrency was strictly bounded at <= 2
+        assert max_observed_concurrent <= 2
+        assert max_observed_concurrent >= 1
+
+
 # ===========================================================================
 # 6. Cancellation During Retries
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_cancellation_during_retry(tmp_path: Path, sample_testcase: TestCase, monkeypatch: pytest.MonkeyPatch):
-    """Cancelling a test during retry attempts terminates cleanly as 'cancelled'."""
+async def test_cancellation_during_retry_preserves_all_attempts(tmp_path: Path, sample_testcase: TestCase, monkeypatch: pytest.MonkeyPatch):
+    """Cancelling a test during retry attempts terminates cleanly and permanently preserves all attempt records."""
     monkeypatch.chdir(tmp_path)
     init_studio_db()
     sync_testcase_meta(testcase=sample_testcase, file_path=tmp_path / "testcase.json", approval_status="approved")
@@ -641,7 +906,7 @@ async def test_cancellation_during_retry(tmp_path: Path, sample_testcase: TestCa
                     exit_code=1,
                     steps=[StepResult(number=1, status="failed", error="Transient error")],
                 )
-            # Attempt 2 takes a while
+            # Attempt 2 takes a while so cancellation hits mid-attempt
             await asyncio.sleep(2.0)
             return _make_replay_res(status="passed", exit_code=0, steps=[])
 
@@ -662,6 +927,22 @@ async def test_cancellation_during_retry(tmp_path: Path, sample_testcase: TestCa
         await asyncio.sleep(0.1)
         final_run = get_execution_run(run["id"])
         assert final_run["status"] == "cancelled"
+
+        # Permanent attempt preservation verification:
+        attempts = get_execution_attempts(run["id"])
+        assert len(attempts) == 2
+        # Attempt 1 must be preserved as failed with initial error details
+        assert attempts[0]["attempt_number"] == 1
+        assert attempts[0]["status"] == "failed"
+        assert attempts[0]["error_message"] == "Transient error"
+        # Attempt 2 must be preserved as cancelled
+        assert attempts[1]["attempt_number"] == 2
+        assert attempts[1]["status"] == "cancelled"
+
+        # Also verified in final_run["attempts"]
+        assert len(final_run["attempts"]) == 2
+        assert final_run["attempts"][0]["status"] == "failed"
+        assert final_run["attempts"][1]["status"] == "cancelled"
 
 
 # ===========================================================================
@@ -686,11 +967,32 @@ def test_api_attempts_and_flakiness_endpoints(tmp_path: Path):
             "testcase_id": "tc_login",
             "total_runs": 10,
             "flaky_runs": 2,
+            "passed_runs": 7,
+            "failed_runs": 1,
+            "error_runs": 0,
+            "flakiness_rate": 20.0,
             "flakiness_score": 20.0,
-            "reliability_score": 80.0,
+            "first_attempt_pass_rate": 70.0,
+            "final_pass_rate": 90.0,
+            "failure_rate": 10.0,
+            "stability_score": 70.0,
+            "reliability_score": 70.0,
             "rating": "low",
             "flakiness_by_browser": {
-                "chromium": {"total": 5, "flaky": 1, "flakiness_score": 20.0}
+                "chromium": {
+                    "total": 5,
+                    "flaky": 1,
+                    "passed": 4,
+                    "failed": 0,
+                    "error": 0,
+                    "flakiness_rate": 20.0,
+                    "flakiness_score": 20.0,
+                    "first_attempt_pass_rate": 80.0,
+                    "final_pass_rate": 100.0,
+                    "failure_rate": 0.0,
+                    "stability_score": 80.0,
+                    "reliability_score": 80.0,
+                }
             },
         }
 
@@ -708,7 +1010,13 @@ def test_api_attempts_and_flakiness_endpoints(tmp_path: Path):
         res2 = client.get("/api/testcases/tc_login/flakiness?limit=25")
         assert res2.status_code == 200
         flakiness = res2.json()
+        assert flakiness["flakiness_rate"] == 20.0
         assert flakiness["flakiness_score"] == 20.0
+        assert flakiness["first_attempt_pass_rate"] == 70.0
+        assert flakiness["final_pass_rate"] == 90.0
+        assert flakiness["failure_rate"] == 10.0
+        assert flakiness["stability_score"] == 70.0
+        assert flakiness["reliability_score"] == 70.0
         assert flakiness["rating"] == "low"
         assert "chromium" in flakiness["flakiness_by_browser"]
 
@@ -747,3 +1055,47 @@ async def test_real_browser_clean_pass_no_flakiness(
         assert final_run["attempt_count"] == 1
         assert len(final_run["attempts"]) == 1
         assert final_run["attempts"][0]["status"] == "passed"
+
+
+@pytest.mark.asyncio
+async def test_real_browser_fail_then_pass_retry(
+    tmp_path: Path, local_app_server: str, sample_testcase: TestCase, monkeypatch: pytest.MonkeyPatch
+):
+    """Verify real Playwright browser execution recovers from an intermittent DOM condition and is classified as flaky."""
+    monkeypatch.chdir(tmp_path)
+    init_studio_db()
+    sync_testcase_meta(testcase=sample_testcase, file_path=tmp_path / "testcase.json", approval_status="approved")
+
+    # Reset server request counter: Request 1 misses button, Request 2 has button
+    FlakyAppHandler.fail_then_pass_requests = 0
+
+    sample_testcase.start_url = f"{local_app_server}/fail-then-pass"
+    sample_testcase.steps[0].element.selector = "#btn-action"
+
+    orchestrator = ExecutionOrchestrator()
+    with patch("tracecase.ui.executor.resolve_testcase_file", return_value=(tmp_path / "testcase.json", sample_testcase)), \
+         patch("tracecase.ui.db.get_testcase_meta", return_value={"approval_status": "approved"}):
+
+        run = await orchestrator.start_execution(
+            testcase_id=sample_testcase.id,
+            browser="chromium",
+            retries=2,
+        )
+        task = orchestrator.active_tasks.get(run["id"])
+        if task:
+            await task
+
+        final_run = get_execution_run(run["id"])
+        assert final_run["status"] == "flaky"
+        assert final_run["attempt_count"] == 2
+        assert len(final_run["attempts"]) == 2
+
+        # Attempt 1: Failed on Playwright click timeout because #btn-action was absent
+        assert final_run["attempts"][0]["status"] == "failed"
+        assert final_run["attempts"][0]["attempt_number"] == 1
+        assert final_run["attempts"][0]["failed_step"] == 1
+        assert final_run["attempts"][0]["failed_selector"] == "#btn-action"
+
+        # Attempt 2: Recovered on retry and passed cleanly
+        assert final_run["attempts"][1]["status"] == "passed"
+        assert final_run["attempts"][1]["attempt_number"] == 2

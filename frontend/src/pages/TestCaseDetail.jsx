@@ -431,12 +431,14 @@ export function TestCaseDetail() {
                         ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
                         : flakinessStats.rating === 'moderate'
                         ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
+                        : flakinessStats.rating === 'failing'
+                        ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
                         : 'bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 border border-rose-200 dark:border-rose-800'
                     }`}
-                    title={`Reliability: ${flakinessStats.reliability_score}% | Flaky Runs: ${flakinessStats.flaky_runs}/${flakinessStats.total_runs}`}
+                    title={`First-Attempt Pass: ${flakinessStats.first_attempt_pass_rate ?? 0}% | Final Pass: ${flakinessStats.final_pass_rate ?? 0}% | Flakiness: ${flakinessStats.flakiness_rate ?? flakinessStats.flakiness_score}% | Stability: ${flakinessStats.stability_score ?? 100}% | Failure Rate: ${flakinessStats.failure_rate ?? 0}%`}
                   >
                     <RefreshCw className="w-3 h-3" />
-                    <span>{flakinessStats.flakiness_score}% Flaky ({flakinessStats.rating})</span>
+                    <span>{flakinessStats.flakiness_rate ?? flakinessStats.flakiness_score}% Flaky ({flakinessStats.rating})</span>
                   </span>
                 )}
                 <button

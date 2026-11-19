@@ -292,6 +292,10 @@ class ExecutionOrchestrator:
                     first_err = next((s.error for s in replay_res.steps if s.error), None)
                     first_f_step = next((s.number for s in replay_res.steps if s.status in ("failed", "error")), None)
                     first_f_sel = next((s.selector_used for s in replay_res.steps if s.status in ("failed", "error")), None)
+                    if first_f_sel is None and first_f_step is not None:
+                        target_step = next((s for s in testcase.steps if s.number == first_f_step), None)
+                        if target_step and target_step.element:
+                            first_f_sel = target_step.element.selector
 
                     if first_err:
                         last_error_message = first_err
@@ -344,6 +348,23 @@ class ExecutionOrchestrator:
                             break
 
                 except asyncio.CancelledError:
+                    att_finish = datetime.now()
+                    att_duration = (att_finish - att_start).total_seconds() * 1000.0
+                    record_execution_attempt(
+                        execution_id=execution_id,
+                        attempt_number=attempt,
+                        status="cancelled",
+                        duration_ms=att_duration,
+                        error_message="Execution cancelled.",
+                        report_path=str(output_dir),
+                    )
+                    attempt_history.append({
+                        "attempt_number": attempt,
+                        "status": "cancelled",
+                        "duration_ms": att_duration,
+                        "error_message": "Execution cancelled.",
+                        "report_path": str(output_dir),
+                    })
                     final_status = "cancelled"
                     raise
                 except Exception as exc:
@@ -909,6 +930,10 @@ class ExecutionOrchestrator:
                         first_err = next((s.error for s in replay_res.steps if s.error), None)
                         first_f_step = next((s.number for s in replay_res.steps if s.status in ("failed", "error")), None)
                         first_f_sel = next((s.selector_used for s in replay_res.steps if s.status in ("failed", "error")), None)
+                        if first_f_sel is None and first_f_step is not None:
+                            target_step = next((s for s in testcase.steps if s.number == first_f_step), None)
+                            if target_step and target_step.element:
+                                first_f_sel = target_step.element.selector
 
                         if first_err:
                             last_error_message = first_err
@@ -959,6 +984,23 @@ class ExecutionOrchestrator:
                                 break
 
                     except asyncio.CancelledError:
+                        att_finish = datetime.now()
+                        att_duration = (att_finish - att_start).total_seconds() * 1000.0
+                        record_execution_attempt(
+                            execution_id=execution_id,
+                            attempt_number=attempt,
+                            status="cancelled",
+                            duration_ms=att_duration,
+                            error_message="Execution cancelled.",
+                            report_path=str(output_dir),
+                        )
+                        attempt_history.append({
+                            "attempt_number": attempt,
+                            "status": "cancelled",
+                            "duration_ms": att_duration,
+                            "error_message": "Execution cancelled.",
+                            "report_path": str(output_dir),
+                        })
                         final_status = "cancelled"
                         raise
                     except Exception as exc:
@@ -1671,6 +1713,10 @@ class ExecutionOrchestrator:
                         first_err = next((s.error for s in replay_res.steps if s.error), None)
                         first_f_step = next((s.number for s in replay_res.steps if s.status in ("failed", "error")), None)
                         first_f_sel = next((s.selector_used for s in replay_res.steps if s.status in ("failed", "error")), None)
+                        if first_f_sel is None and first_f_step is not None:
+                            target_step = next((s for s in testcase.steps if s.number == first_f_step), None)
+                            if target_step and target_step.element:
+                                first_f_sel = target_step.element.selector
 
                         if first_err:
                             last_error_message = first_err
@@ -1721,6 +1767,23 @@ class ExecutionOrchestrator:
                                 break
 
                     except asyncio.CancelledError:
+                        att_finish = datetime.now()
+                        att_duration = (att_finish - att_start).total_seconds() * 1000.0
+                        record_execution_attempt(
+                            execution_id=execution_id,
+                            attempt_number=attempt,
+                            status="cancelled",
+                            duration_ms=att_duration,
+                            error_message="Execution cancelled.",
+                            report_path=str(output_dir),
+                        )
+                        attempt_history.append({
+                            "attempt_number": attempt,
+                            "status": "cancelled",
+                            "duration_ms": att_duration,
+                            "error_message": "Execution cancelled.",
+                            "report_path": str(output_dir),
+                        })
                         final_status = "cancelled"
                         raise
                     except Exception as exc:
