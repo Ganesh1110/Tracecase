@@ -23,6 +23,7 @@ import {
   Cpu,
   Sliders,
   Check,
+  Globe,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useWebSocket } from '../context/WebSocketContext';
@@ -42,6 +43,9 @@ export function Executions() {
   const [failureAnalysis, setFailureAnalysis] = useState(null);
   const [analyzingFailure, setAnalyzingFailure] = useState(false);
 
+  // View mode tab: 'runs' vs 'matrices'
+  const [activeTab, setActiveTab] = useState('runs');
+
   // Parallel Batch Execution states
   const [batches, setBatches] = useState([]);
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
@@ -56,6 +60,20 @@ export function Executions() {
     visual_diff: false,
   });
 
+  // Cross-Browser Matrix Execution states
+  const [matrices, setMatrices] = useState([]);
+  const [selectedMatrix, setSelectedMatrix] = useState(null);
+  const [isMatrixModalOpen, setIsMatrixModalOpen] = useState(false);
+  const [matrixForm, setMatrixForm] = useState({
+    testcase_ids: [],
+    browsers: ['chromium', 'firefox', 'webkit'],
+    concurrency: 2,
+    matrix_name: '',
+    headed: false,
+    heal: true,
+    assertions: true,
+  });
+
   const { subscribe } = useWebSocket();
   const { showToast } = useToast();
   const terminalEndRef = useRef(null);
@@ -63,12 +81,21 @@ export function Executions() {
   const loadRuns = async () => {
     try {
       setLoading(true);
-      const [runsData, batchesData] = await Promise.all([
+      const [runsData, batchesData, matricesData] = await Promise.all([
         api.getExecutions({ limit: 50 }),
         api.getBatches ? api.getBatches({ limit: 20 }).catch(() => []) : Promise.resolve([]),
+        api.getMatrices ? api.getMatrices({ limit: 20 }).catch(() => []) : Promise.resolve([]),
       ]);
       setRuns(runsData);
       setBatches(batchesData || []);
+      setMatrices(matricesData || []);
+
+      if (selectedMatrix?.id) {
+        api.getMatrix(selectedMatrix.id).then(setSelectedMatrix).catch(() => {});
+      } else if (matricesData && matricesData.length > 0 && !selectedMatrix) {
+        api.getMatrix(matricesData[0].id).then(setSelectedMatrix).catch(() => {});
+      }
+
       if (focusedRunId) {
         const found = await api.getExecution(focusedRunId);
         setSelectedRun(found);
@@ -89,16 +116,13 @@ export function Executions() {
     loadRuns();
   }, [focusedRunId]);
 
-  // Subscribe to global executions channel for batch & worker events
+  // Subscribe to global executions channel for batch, matrix & worker events
   useEffect(() => {
     const unsub = subscribe('executions', (event) => {
       if (
-        event.type === 'batch_started' ||
-        event.type === 'batch_progress' ||
-        event.type === 'batch_completed' ||
-        event.type === 'batch_cancelled' ||
-        event.type === 'worker_started' ||
-        event.type === 'worker_completed'
+        event.type?.startsWith('batch_') ||
+        event.type?.startsWith('matrix_') ||
+        event.type?.startsWith('worker_')
       ) {
         loadRuns();
       }
@@ -176,6 +200,93 @@ export function Executions() {
       }
     } catch (err) {
       showToast('Failed to start batch: ' + err.message, 'error');
+    }
+  };
+
+  const openMatrixModal = async () => {
+    try {
+      const tcs = await api.getTestCases();
+      setAvailableTestCases(tcs);
+      setMatrixForm({
+        testcase_ids: tcs.slice(0, 4).map((t) => t.id),
+        browsers: ['chromium', 'firefox', 'webkit'],
+        concurrency: 2,
+        matrix_name: `Cross-Browser Matrix (${new Date().toLocaleTimeString()})`,
+        headed: false,
+        heal: true,
+        assertions: true,
+      });
+      setIsMatrixModalOpen(true);
+    } catch (err) {
+      showToast('Failed to load test cases: ' + err.message, 'error');
+    }
+  };
+
+  const toggleMatrixBrowser = (b) => {
+    setMatrixForm((prev) => {
+      const current = prev.browsers;
+      const next = current.includes(b)
+        ? current.filter((x) => x !== b)
+        : [...current, b];
+      return { ...prev, browsers: next.length > 0 ? next : [b] };
+    });
+  };
+
+  const toggleMatrixTestCase = (tcId) => {
+    setMatrixForm((prev) => {
+      const current = prev.testcase_ids;
+      return {
+        ...prev,
+        testcase_ids: current.includes(tcId)
+          ? current.filter((id) => id !== tcId)
+          : [...current, tcId],
+      };
+    });
+  };
+
+  const handleStartMatrix = async () => {
+    if (!matrixForm.testcase_ids.length) {
+      showToast('Select at least one test case to run', 'warning');
+      return;
+    }
+    if (!matrixForm.browsers.length) {
+      showToast('Select at least one browser engine', 'warning');
+      return;
+    }
+    try {
+      showToast(`Starting cross-browser matrix across [${matrixForm.browsers.join(', ')}]...`, 'info');
+      const matrixRes = await api.startMatrixExecution(matrixForm);
+      showToast(
+        `Matrix started! ${matrixForm.testcase_ids.length} tests x ${matrixForm.browsers.length} browsers (${matrixForm.concurrency} workers).`,
+        'success'
+      );
+      setIsMatrixModalOpen(false);
+      setActiveTab('matrices');
+      loadRuns();
+      if (matrixRes?.id) {
+        handleSelectMatrix(matrixRes.id);
+      }
+    } catch (err) {
+      showToast('Failed to start matrix: ' + err.message, 'error');
+    }
+  };
+
+  const handleSelectMatrix = async (matrixId) => {
+    try {
+      const data = await api.getMatrix(matrixId);
+      setSelectedMatrix(data);
+    } catch (err) {
+      showToast('Could not load matrix details: ' + err.message, 'error');
+    }
+  };
+
+  const handleCancelMatrix = async (matrixId) => {
+    try {
+      await api.cancelMatrixExecution(matrixId);
+      showToast('Matrix execution cancelled.', 'info');
+      loadRuns();
+    } catch (err) {
+      showToast('Failed to cancel matrix: ' + err.message, 'error');
     }
   };
 
@@ -261,6 +372,13 @@ export function Executions() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={openMatrixModal}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-600/20"
+          >
+            <Globe className="w-4 h-4" />
+            <span>Run Matrix (Cross-Browser)</span>
+          </button>
+          <button
             onClick={openBatchModal}
             className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20"
           >
@@ -275,6 +393,32 @@ export function Executions() {
             <RefreshCw className="w-4 h-4" />
           </button>
         </div>
+      </div>
+
+      {/* View Mode Toggle: Runs vs Cross-Browser Matrices */}
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+        <button
+          onClick={() => setActiveTab('runs')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'runs'
+              ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          <PlayCircle className="w-4 h-4" />
+          <span>Individual Runs ({runs.length})</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('matrices')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'matrices'
+              ? 'bg-purple-600 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          <Globe className="w-4 h-4" />
+          <span>Cross-Browser Matrices ({matrices.length})</span>
+        </button>
       </div>
 
       {/* Real-Time Worker Pool & Execution Metrics Banner */}
@@ -331,8 +475,10 @@ export function Executions() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Executions History List */}
+      {/* Main Content Area */}
+      {activeTab === 'runs' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left: Executions History List */}
         <div className="rounded-2xl border border-slate-200 dark:border-surface-borderDark bg-white dark:bg-surface-cardDark shadow-sm overflow-hidden flex flex-col h-[740px]">
           <div className="p-3.5 border-b border-slate-100 dark:border-surface-borderDark bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-between gap-2">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -726,6 +872,239 @@ export function Executions() {
           )}
         </div>
       </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left: Matrices List */}
+          <div className="rounded-2xl border border-slate-200 dark:border-surface-borderDark bg-white dark:bg-surface-cardDark shadow-sm overflow-hidden flex flex-col h-[740px]">
+            <div className="p-3.5 border-b border-slate-100 dark:border-surface-borderDark bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-between gap-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Cross-Browser Matrices ({matrices.length})
+              </h3>
+            </div>
+            <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60">
+              {matrices.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500">
+                  No matrix executions recorded yet. Click "Run Matrix" to launch one!
+                </div>
+              ) : (
+                matrices.map((m) => {
+                  const isSelected = selectedMatrix?.id === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => handleSelectMatrix(m.id)}
+                      className={`w-full text-left p-4 transition-colors flex items-center justify-between ${
+                        isSelected
+                          ? 'bg-purple-50/60 dark:bg-purple-950/40 border-l-4 border-purple-500'
+                          : 'hover:bg-slate-50/60 dark:hover:bg-slate-800/40'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1 pr-2">
+                        <div className="font-bold text-sm text-slate-900 dark:text-white truncate">
+                          {m.name || m.id}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-xs text-slate-400">
+                          <span className="font-mono text-[11px]">
+                            {new Date(m.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          <span>•</span>
+                          <span>{m.total_executions} runs</span>
+                          <span>•</span>
+                          <span className="capitalize">{m.concurrency}w</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-2">
+                          {m.browsers?.map((b) => (
+                            <span key={b} className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                              {b}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1.5">
+                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                          m.status === 'passed' ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400' :
+                          m.status === 'failed' ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400' :
+                          m.status === 'running' ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 animate-pulse' :
+                          'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                        }`}>
+                          {m.status}
+                        </span>
+                        {m.divergence_count > 0 ? (
+                          <span className="text-[10px] font-bold text-rose-500 flex items-center gap-0.5">
+                            <AlertCircle className="w-3 h-3" />
+                            <span>{m.divergence_count} Divergent</span>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-semibold text-emerald-500 flex items-center gap-0.5">
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>Parity</span>
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* Right: Consolidated Matrix Comparison Grid */}
+          <div className="lg:col-span-2 rounded-2xl border border-slate-200 dark:border-surface-borderDark bg-white dark:bg-surface-cardDark shadow-sm overflow-hidden flex flex-col h-[740px]">
+            {selectedMatrix ? (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {/* Matrix Header */}
+                <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                        {selectedMatrix.name || selectedMatrix.id}
+                      </h2>
+                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                        selectedMatrix.status === 'passed' ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400' :
+                        selectedMatrix.status === 'failed' ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400' :
+                        selectedMatrix.status === 'running' ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 animate-pulse' :
+                        'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                      }`}>
+                        {selectedMatrix.status}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-slate-400">
+                      <span>Started: {new Date(selectedMatrix.started_at).toLocaleTimeString()}</span>
+                      <span>•</span>
+                      <span>Duration: {selectedMatrix.duration_ms ? `${(selectedMatrix.duration_ms / 1000).toFixed(1)}s` : 'Active'}</span>
+                      <span>•</span>
+                      <span>Concurrency: {selectedMatrix.concurrency} workers</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {(selectedMatrix.status === 'running' || selectedMatrix.status === 'queued') && (
+                      <button
+                        onClick={() => handleCancelMatrix(selectedMatrix.id)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 transition-colors"
+                      >
+                        <StopCircle className="w-3.5 h-3.5" />
+                        <span>Cancel Matrix</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Parity & Pass Rate Summary Banner */}
+                <div className="p-3.5 bg-purple-50/30 dark:bg-purple-950/20 border-b border-purple-100 dark:border-purple-900/30 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <div className="text-[11px] font-semibold text-slate-400">Cross-Browser Parity</div>
+                    <div className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1">
+                      <span>{selectedMatrix.cross_browser_parity_pct ?? 100}%</span>
+                      {selectedMatrix.divergent_testcases_count > 0 ? (
+                        <span className="text-xs text-rose-500 font-semibold">({selectedMatrix.divergent_testcases_count} divergent)</span>
+                      ) : (
+                        <span className="text-xs text-emerald-500 font-semibold">(100% Consistent)</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {selectedMatrix.browsers?.map((b) => (
+                    <div key={b}>
+                      <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{b} Pass Rate</div>
+                      <div className="text-base font-bold text-slate-800 dark:text-slate-100">
+                        {selectedMatrix.browser_pass_rates?.[b] ?? 0}%
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Consolidated Matrix Comparison Grid Table */}
+                <div className="flex-1 overflow-auto p-4">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-400 uppercase tracking-wider font-semibold">
+                        <th className="py-2.5 px-3">Test Case</th>
+                        {selectedMatrix.browsers?.map((b) => (
+                          <th key={b} className="py-2.5 px-3 capitalize">{b}</th>
+                        ))}
+                        <th className="py-2.5 px-3">Divergence Analysis</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                      {selectedMatrix.grid?.map((row) => (
+                        <tr
+                          key={row.testcase_id}
+                          className={`transition-colors ${
+                            row.is_divergent
+                              ? 'bg-amber-50/50 dark:bg-amber-950/20 border-l-4 border-amber-500'
+                              : 'hover:bg-slate-50/50 dark:hover:bg-slate-800/30'
+                          }`}
+                        >
+                          <td className="py-3 px-3 font-medium text-slate-900 dark:text-white">
+                            <div className="truncate max-w-[180px] font-semibold">{row.testcase_name}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">{row.testcase_id}</div>
+                          </td>
+
+                          {selectedMatrix.browsers?.map((b) => {
+                            const bInfo = row.browsers?.[b];
+                            if (!bInfo) {
+                              return (
+                                <td key={b} className="py-3 px-3 text-slate-400 italic">
+                                  Not Run
+                                </td>
+                              );
+                            }
+                            return (
+                              <td key={b} className="py-3 px-3">
+                                <div className="flex flex-col gap-0.5">
+                                  <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full w-fit ${
+                                    bInfo.status === 'passed' ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400' :
+                                    bInfo.status === 'failed' ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400' :
+                                    bInfo.status === 'error' ? 'bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400' :
+                                    bInfo.status === 'running' ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 animate-pulse' :
+                                    'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                                  }`}>
+                                    {bInfo.status === 'passed' && <CheckCircle2 className="w-2.5 h-2.5" />}
+                                    {bInfo.status === 'failed' && <XCircle className="w-2.5 h-2.5" />}
+                                    {bInfo.status === 'error' && <AlertCircle className="w-2.5 h-2.5" />}
+                                    <span>{bInfo.status}</span>
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 font-mono">
+                                    {bInfo.duration_ms ? `${(bInfo.duration_ms / 1000).toFixed(1)}s` : ''}
+                                  </span>
+                                  {bInfo.error_message && (
+                                    <span className="text-[10px] text-rose-500 truncate max-w-[120px]" title={bInfo.error_message}>
+                                      {bInfo.error_message}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                            );
+                          })}
+
+                          <td className="py-3 px-3">
+                            {row.is_divergent ? (
+                              <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-semibold text-xs">
+                                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                                <span>{row.divergence_notes || 'Cross-browser divergence detected'}</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-xs">
+                                <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                                <span>Consistent across browsers</span>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="p-12 text-center text-slate-500 text-sm m-auto">
+                Select a matrix run from the list to view its cross-browser comparison grid.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Batch / Parallel Execution Modal */}
       {isBatchModalOpen && (
@@ -901,6 +1280,204 @@ export function Executions() {
                 <span>
                   Start Batch ({batchForm.testcase_ids.length} tests, {batchForm.concurrency}{' '}
                   workers)
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cross-Browser Matrix Execution Modal */}
+      {isMatrixModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl max-w-xl w-full p-6 space-y-5 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-purple-50 dark:bg-purple-950/60 rounded-xl text-purple-600 dark:text-purple-400">
+                  <Globe className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Run Cross-Browser Matrix
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Execute test cases across Chromium, Firefox, and WebKit simultaneously
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsMatrixModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Matrix Name */}
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Matrix Execution Name
+              </label>
+              <input
+                type="text"
+                value={matrixForm.matrix_name}
+                onChange={(e) => setMatrixForm({ ...matrixForm, matrix_name: e.target.value })}
+                placeholder="e.g. Full Regression Matrix"
+                className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300"
+              />
+            </div>
+
+            {/* Browser Selection */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Target Browsers ({matrixForm.browsers.length} selected)
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {['chromium', 'firefox', 'webkit'].map((b) => {
+                  const isChecked = matrixForm.browsers.includes(b);
+                  return (
+                    <button
+                      key={b}
+                      type="button"
+                      onClick={() => toggleMatrixBrowser(b)}
+                      className={`py-2 px-3 rounded-xl text-xs font-semibold capitalize border transition-all flex items-center justify-center gap-1.5 ${
+                        isChecked
+                          ? 'border-purple-600 bg-purple-50/70 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400 shadow-sm'
+                          : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      {isChecked && <Check className="w-3.5 h-3.5" />}
+                      <span>{b}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Concurrency Slider & Info */}
+            <div className="space-y-2 p-3.5 rounded-xl bg-purple-50/40 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/40">
+              <div className="flex justify-between items-center text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <span className="flex items-center gap-1.5">
+                  <Cpu className="w-4 h-4 text-purple-500" />
+                  <span>Parallel Worker Concurrency</span>
+                </span>
+                <span className="font-mono text-purple-600 dark:text-purple-400 bg-white dark:bg-purple-900/60 px-2.5 py-0.5 rounded shadow-sm text-xs font-bold border border-purple-200/50 dark:border-purple-800/50">
+                  {matrixForm.concurrency} Workers
+                </span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="8"
+                step="1"
+                value={matrixForm.concurrency}
+                onChange={(e) =>
+                  setMatrixForm({ ...matrixForm, concurrency: parseInt(e.target.value, 10) })
+                }
+                className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-600"
+              />
+              <div className="flex justify-between text-[10px] text-slate-400">
+                <span>1 (Sequential)</span>
+                <span className="text-purple-500 font-semibold">2 (Default)</span>
+                <span>4 (Fast)</span>
+                <span>8 (Maximum)</span>
+              </div>
+            </div>
+
+            {/* Test Case Selection */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <span>
+                  Select Test Cases ({matrixForm.testcase_ids.length} / {availableTestCases.length} selected)
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMatrixForm({
+                        ...matrixForm,
+                        testcase_ids: availableTestCases.map((t) => t.id),
+                      })
+                    }
+                    className="text-[11px] text-purple-600 dark:text-purple-400 hover:underline"
+                  >
+                    Select All
+                  </button>
+                  <span className="text-slate-300">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setMatrixForm({ ...matrixForm, testcase_ids: [] })}
+                    className="text-[11px] text-slate-400 hover:underline"
+                  >
+                    Deselect All
+                  </button>
+                </div>
+              </div>
+              <div className="max-h-40 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 p-1">
+                {availableTestCases.map((tc) => {
+                  const isChecked = matrixForm.testcase_ids.includes(tc.id);
+                  return (
+                    <label
+                      key={tc.id}
+                      className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer text-xs"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleMatrixTestCase(tc.id)}
+                        className="rounded text-purple-600 focus:ring-purple-500"
+                      />
+                      <span className="font-medium text-slate-800 dark:text-slate-200 truncate">
+                        {tc.name}
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono ml-auto">
+                        {tc.browser}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Options */}
+            <div className="flex items-center gap-4 pt-1">
+              <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={matrixForm.heal}
+                  onChange={(e) => setMatrixForm({ ...matrixForm, heal: e.target.checked })}
+                  className="rounded text-purple-600 focus:ring-purple-500"
+                />
+                <span>Self-Healing</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={matrixForm.assertions}
+                  onChange={(e) => setMatrixForm({ ...matrixForm, assertions: e.target.checked })}
+                  className="rounded text-purple-600 focus:ring-purple-500"
+                />
+                <span>Assertions</span>
+              </label>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsMatrixModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleStartMatrix}
+                className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-600/25"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span>
+                  Start Matrix ({matrixForm.testcase_ids.length * matrixForm.browsers.length} runs, {matrixForm.concurrency} workers)
                 </span>
               </button>
             </div>

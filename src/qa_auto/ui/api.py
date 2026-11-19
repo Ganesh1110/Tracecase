@@ -42,6 +42,9 @@ from qa_auto.ui.db import (
     create_execution_batch,
     get_execution_batch,
     list_execution_batches,
+    create_execution_matrix,
+    get_execution_matrix,
+    list_execution_matrices,
     delete_project,
     delete_suite,
     get_ai_analyses_for_testcase,
@@ -146,6 +149,23 @@ class BatchExecutionRequest(BaseModel):
     suite_id: str | None = Field(default=None, description="Optional associated suite ID")
     concurrency: int = Field(default=2, ge=1, le=8, description="Number of parallel workers (1 to 8)")
     browser: str = Field(default="chromium", description="Browser engine")
+    headed: bool = Field(default=False, description="Display browser window during replay")
+    heal: bool = Field(default=True, description="Enable selector self-healing")
+    assertions: bool = Field(default=True, description="Evaluate assertions")
+    visual_diff: bool = Field(default=False, description="Perform screenshot visual comparison")
+    diff_threshold: float = Field(default=0.1, description="Visual diff tolerance percentage")
+
+
+class MatrixExecutionRequest(BaseModel):
+    testcase_ids: list[str] = Field(default_factory=list, description="List of testcase IDs or paths to execute")
+    browsers: list[str] = Field(
+        default=["chromium", "firefox", "webkit"],
+        description="Target browser engines (e.g. ['chromium', 'firefox', 'webkit'])",
+    )
+    concurrency: int = Field(default=2, ge=1, le=8, description="Number of parallel workers (1 to 8)")
+    project_id: str = Field(default="default_project", description="Target project ID")
+    suite_id: str | None = Field(default=None, description="Optional associated suite ID")
+    matrix_name: str | None = Field(default=None, description="Descriptive name for matrix execution")
     headed: bool = Field(default=False, description="Display browser window during replay")
     heal: bool = Field(default=True, description="Enable selector self-healing")
     assertions: bool = Field(default=True, description="Evaluate assertions")
@@ -435,6 +455,48 @@ async def run_suite(suite_id: str, req: ReplayRequest | None = None) -> list[dic
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
+@router.post("/suites/{suite_id}/run_matrix")
+async def run_suite_matrix(suite_id: str, req: MatrixExecutionRequest | None = None) -> dict[str, Any]:
+    """Run all test cases in a suite as a cross-browser execution matrix."""
+    suite = get_suite(suite_id)
+    if not suite:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Suite not found")
+
+    tc_ids = (req.testcase_ids if req and req.testcase_ids else suite.get("testcase_ids", []))
+    if not tc_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Suite has no test cases")
+
+    browsers = req.browsers if req and req.browsers else ["chromium", "firefox", "webkit"]
+    concurrency = req.concurrency if req else 2
+    matrix_name = req.matrix_name if req and req.matrix_name else f"Matrix Suite: {suite.get('name', suite_id)}"
+    headed = req.headed if req else False
+    heal = req.heal if req else True
+    assertions = req.assertions if req else True
+    visual_diff = req.visual_diff if req else False
+    diff_threshold = req.diff_threshold if req else 0.1
+
+    try:
+        matrix = await orchestrator.start_matrix_execution(
+            testcase_ids=tc_ids,
+            browsers=browsers,
+            concurrency=concurrency,
+            project_id=suite.get("project_id", "default_project"),
+            suite_id=suite_id,
+            matrix_name=matrix_name,
+            headed=headed,
+            heal=heal,
+            assertions=assertions,
+            visual_diff=visual_diff,
+            diff_threshold=diff_threshold,
+        )
+        return matrix
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Could not launch matrix for suite %s: %s", suite_id, exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # Test Cases & Operations
 # ---------------------------------------------------------------------------
@@ -586,6 +648,7 @@ async def get_executions(
     status: str | None = None,
     batch_id: str | None = None,
     worker_id: str | None = None,
+    matrix_id: str | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     return list_execution_runs(
@@ -595,6 +658,7 @@ async def get_executions(
         status=status,
         batch_id=batch_id,
         worker_id=worker_id,
+        matrix_id=matrix_id,
         limit=limit,
     )
 
@@ -656,6 +720,67 @@ async def get_execution_batch_endpoint(batch_id: str) -> dict[str, Any]:
 async def cancel_batch_execution_endpoint(batch_id: str) -> dict[str, bool]:
     """Cancel a running batch execution and its workers."""
     cancelled = await orchestrator.cancel_batch_execution(batch_id)
+    return {"cancelled": cancelled}
+
+
+@router.post("/executions/matrix")
+async def start_matrix_execution_endpoint(req: MatrixExecutionRequest) -> dict[str, Any]:
+    """Launch cross-browser matrix execution of test cases across configured browsers."""
+    try:
+        matrix = await orchestrator.start_matrix_execution(
+            testcase_ids=req.testcase_ids,
+            browsers=req.browsers,
+            concurrency=req.concurrency,
+            project_id=req.project_id,
+            suite_id=req.suite_id,
+            matrix_name=req.matrix_name,
+            headed=req.headed,
+            heal=req.heal,
+            assertions=req.assertions,
+            visual_diff=req.visual_diff,
+            diff_threshold=req.diff_threshold,
+        )
+        return matrix
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to start matrix execution: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
+@router.get("/executions/matrices")
+async def get_execution_matrices_endpoint(
+    project_id: str | None = None,
+    suite_id: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List cross-browser execution matrices."""
+    return list_execution_matrices(
+        project_id=project_id,
+        suite_id=suite_id,
+        status=status,
+        limit=limit,
+    )
+
+
+@router.get("/executions/matrices/{matrix_id}")
+async def get_execution_matrix_endpoint(matrix_id: str) -> dict[str, Any]:
+    """Fetch matrix execution status, consolidated test case grid, and divergence metrics."""
+    matrix = get_execution_matrix(matrix_id)
+    if not matrix:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Matrix execution not found")
+    return matrix
+
+
+@router.post("/executions/matrices/{matrix_id}/cancel")
+async def cancel_matrix_execution_endpoint(matrix_id: str) -> dict[str, bool]:
+    """Cancel a running matrix execution and terminate its workers."""
+    cancelled = await orchestrator.cancel_matrix_execution(matrix_id)
     return {"cancelled": cancelled}
 
 
@@ -1903,6 +2028,18 @@ async def exploration_websocket(websocket: WebSocket, exploration_id: str) -> No
 async def batch_websocket(websocket: WebSocket, batch_id: str) -> None:
     """Dedicated WebSocket stream for a batch execution run."""
     channel = f"batch:{batch_id}"
+    await manager.connect(websocket, channel=channel)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await manager.disconnect(websocket, channel=channel)
+
+
+@router.websocket("/ws/matrices/{matrix_id}")
+async def matrix_websocket(websocket: WebSocket, matrix_id: str) -> None:
+    """Dedicated WebSocket stream for a cross-browser matrix execution run."""
+    channel = f"matrix:{matrix_id}"
     await manager.connect(websocket, channel=channel)
     try:
         while True:

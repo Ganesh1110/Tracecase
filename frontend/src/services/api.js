@@ -64,6 +64,8 @@ export const api = {
   deleteSuite: (id) => request(`/suites/${id}`, { method: 'DELETE' }),
   runSuite: (id, options = {}) =>
     request(`/suites/${id}/run`, { method: 'POST', body: JSON.stringify(options) }),
+  runSuiteMatrix: (id, options = {}) =>
+    request(`/suites/${id}/run_matrix`, { method: 'POST', body: JSON.stringify(options) }),
   addCaseToSuite: (suiteId, testcaseId) =>
     request(`/suites/${suiteId}/testcases/${testcaseId}`, { method: 'POST' }),
   removeCaseFromSuite: (suiteId, testcaseId) =>
@@ -150,6 +152,22 @@ export const api = {
     request('/executions/batch', { method: 'POST', body: JSON.stringify(data) }),
   cancelBatchExecution: (batchId) =>
     request(`/executions/batches/${batchId}/cancel`, { method: 'POST' }),
+
+  // Cross-Browser Matrices
+  getMatrices: (filters = {}) => {
+    const params = new URLSearchParams();
+    if (filters.projectId) params.set('project_id', filters.projectId);
+    if (filters.suiteId) params.set('suite_id', filters.suiteId);
+    if (filters.status) params.set('status', filters.status);
+    if (filters.limit) params.set('limit', filters.limit);
+    const qs = params.toString();
+    return request(`/executions/matrices${qs ? `?${qs}` : ''}`);
+  },
+  getMatrix: (matrixId) => request(`/executions/matrices/${matrixId}`),
+  startMatrixExecution: (data) =>
+    request('/executions/matrix', { method: 'POST', body: JSON.stringify(data) }),
+  cancelMatrixExecution: (matrixId) =>
+    request(`/executions/matrices/${matrixId}/cancel`, { method: 'POST' }),
 
   // Recorder
   startRecording: (data) =>
