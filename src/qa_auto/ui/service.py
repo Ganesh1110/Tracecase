@@ -211,8 +211,23 @@ def find_testcase_files(search_paths: list[Path] | None = None) -> list[Path]:
     return found
 
 
-def list_testcases(search_paths: list[Path] | None = None) -> list[dict[str, Any]]:
+def list_testcases(
+    search_paths: list[Path] | None = None,
+    project_id: str | None = None,
+) -> list[dict[str, Any]]:
     """Scan and list all recorded test cases with summary metadata."""
+    from qa_auto.ui.db import get_connection
+    meta_map = {}
+    try:
+        conn = get_connection()
+        try:
+            rows = conn.execute("SELECT id, project_id FROM testcases_meta").fetchall()
+            meta_map = {r["id"]: r["project_id"] for r in rows}
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
     files = find_testcase_files(search_paths)
     cases: list[dict[str, Any]] = []
 
@@ -221,6 +236,10 @@ def list_testcases(search_paths: list[Path] | None = None) -> list[dict[str, Any
             content = f.read_text(encoding="utf-8")
             data = json.loads(content)
             case_id = data.get("id", f.parent.name)
+            tc_proj_id = meta_map.get(case_id, "default_project")
+            if project_id and tc_proj_id != project_id:
+                continue
+
             name = data.get("name", f.parent.name)
             created_at = data.get("created_at", "")
             start_url = data.get("start_url", "")
@@ -242,6 +261,7 @@ def list_testcases(search_paths: list[Path] | None = None) -> list[dict[str, Any
             cases.append(
                 {
                     "id": case_id,
+                    "project_id": tc_proj_id,
                     "name": name,
                     "created_at": created_at,
                     "start_url": start_url,

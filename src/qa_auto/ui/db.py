@@ -305,14 +305,40 @@ def update_project(
         conn.close()
 
 
-def delete_project(project_id: str, db_path: Path | str | None = None) -> bool:
-    """Delete a project workspace and related metadata (except default_project)."""
+def delete_project(
+    project_id: str,
+    force: bool = False,
+    db_path: Path | str | None = None,
+) -> bool:
+    """Delete a project workspace and related metadata (except default_project).
+
+    Raises ValueError if project contains test cases/suites and force is False.
+    """
     if project_id == "default_project":
         return False
     init_studio_db(db_path)
     conn = get_connection(db_path)
     try:
+        existing = conn.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not existing:
+            return False
+
+        tc_count = conn.execute(
+            "SELECT COUNT(*) FROM testcases_meta WHERE project_id = ?", (project_id,)
+        ).fetchone()[0]
+        suite_count = conn.execute(
+            "SELECT COUNT(*) FROM test_suites WHERE project_id = ?", (project_id,)
+        ).fetchone()[0]
+
+        if (tc_count > 0 or suite_count > 0) and not force:
+            raise ValueError(
+                f"Project contains {tc_count} test case(s) and {suite_count} suite(s). Pass force=true to confirm deletion."
+            )
+
         with conn:
+            conn.execute("DELETE FROM testcases_meta WHERE project_id = ?", (project_id,))
+            conn.execute("DELETE FROM test_suites WHERE project_id = ?", (project_id,))
+            conn.execute("DELETE FROM execution_runs WHERE project_id = ?", (project_id,))
             res = conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
             return res.rowcount > 0
     finally:
@@ -347,7 +373,7 @@ def list_suites(project_id: str | None = None, db_path: Path | str | None = None
 
 
 def get_suite(suite_id: str, db_path: Path | str | None = None) -> dict[str, Any] | None:
-    """Get single test suite by ID."""
+    """Get single test suite by ID, including aggregated execution metrics."""
     init_studio_db(db_path)
     conn = get_connection(db_path)
     try:
@@ -357,6 +383,24 @@ def get_suite(suite_id: str, db_path: Path | str | None = None) -> dict[str, Any
         d = dict(row)
         d["testcase_ids"] = json.loads(d.get("testcase_ids_json") or "[]")
         d["total_cases"] = len(d["testcase_ids"])
+
+        # Aggregated execution summary
+        exec_rows = conn.execute(
+            """
+            SELECT status, started_at FROM execution_runs
+            WHERE suite_id = ?
+            ORDER BY started_at DESC
+            """,
+            (suite_id,),
+        ).fetchall()
+        total_runs = len(exec_rows)
+        passed_runs = sum(1 for r in exec_rows if r["status"] == "passed")
+        failed_runs = sum(1 for r in exec_rows if r["status"] in ("failed", "error"))
+        d["total_runs"] = total_runs
+        d["passed_runs"] = passed_runs
+        d["failed_runs"] = failed_runs
+        d["last_run_at"] = exec_rows[0]["started_at"] if exec_rows else None
+        d["pass_rate"] = round((passed_runs / total_runs * 100), 1) if total_runs > 0 else None
         return d
     finally:
         conn.close()
@@ -369,12 +413,13 @@ def create_suite(
     testcase_ids: list[str] | None = None,
     db_path: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Create a new test suite."""
+    """Create a new test suite with deduplicated test case IDs."""
     init_studio_db(db_path)
     conn = get_connection(db_path)
     suite_id = f"suite_{uuid.uuid4().hex[:8]}"
     now = datetime.now().isoformat()
-    tc_ids = testcase_ids or []
+    # Deduplicate testcase_ids preserving insertion order
+    tc_ids = list(dict.fromkeys(testcase_ids or []))
     try:
         with conn:
             conn.execute(
@@ -405,7 +450,7 @@ def update_suite(
     testcase_ids: list[str] | None = None,
     db_path: Path | str | None = None,
 ) -> dict[str, Any] | None:
-    """Update test suite details or included test case IDs."""
+    """Update test suite details or included test case IDs with deduplication."""
     init_studio_db(db_path)
     conn = get_connection(db_path)
     now = datetime.now().isoformat()
@@ -415,11 +460,11 @@ def update_suite(
             return None
         new_name = name if name is not None else existing["name"]
         new_desc = description if description is not None else existing["description"]
-        new_tc_ids = (
-            json.dumps(testcase_ids)
-            if testcase_ids is not None
-            else existing["testcase_ids_json"]
-        )
+        if testcase_ids is not None:
+            deduped = list(dict.fromkeys(testcase_ids))
+            new_tc_ids = json.dumps(deduped)
+        else:
+            new_tc_ids = existing["testcase_ids_json"]
         with conn:
             conn.execute(
                 """
@@ -432,6 +477,35 @@ def update_suite(
         return get_suite(suite_id, db_path)
     finally:
         conn.close()
+
+
+def add_testcase_to_suite(
+    suite_id: str,
+    testcase_id: str,
+    db_path: Path | str | None = None,
+) -> dict[str, Any] | None:
+    """Add a testcase to a suite, preventing duplicates."""
+    suite = get_suite(suite_id, db_path)
+    if not suite:
+        return None
+    ids = suite.get("testcase_ids", [])
+    if testcase_id not in ids:
+        ids.append(testcase_id)
+        return update_suite(suite_id=suite_id, testcase_ids=ids, db_path=db_path)
+    return suite
+
+
+def remove_testcase_from_suite(
+    suite_id: str,
+    testcase_id: str,
+    db_path: Path | str | None = None,
+) -> dict[str, Any] | None:
+    """Remove a testcase from a suite."""
+    suite = get_suite(suite_id, db_path)
+    if not suite:
+        return None
+    ids = [i for i in suite.get("testcase_ids", []) if i != testcase_id]
+    return update_suite(suite_id=suite_id, testcase_ids=ids, db_path=db_path)
 
 
 def delete_suite(suite_id: str, db_path: Path | str | None = None) -> bool:
@@ -717,6 +791,7 @@ def get_execution_run(execution_id: str, db_path: Path | str | None = None) -> d
 def list_execution_runs(
     project_id: str | None = None,
     testcase_id: str | None = None,
+    suite_id: str | None = None,
     status: str | None = None,
     limit: int = 50,
     db_path: Path | str | None = None,
@@ -733,6 +808,9 @@ def list_execution_runs(
         if testcase_id:
             query += " AND testcase_id = ?"
             params.append(testcase_id)
+        if suite_id:
+            query += " AND suite_id = ?"
+            params.append(suite_id)
         if status:
             query += " AND status = ?"
             params.append(status)
@@ -757,6 +835,7 @@ def list_execution_runs(
 
 def get_dashboard_metrics(
     project_id: str | None = None,
+    days: int = 7,
     db_path: Path | str | None = None,
 ) -> dict[str, Any]:
     """Calculate real aggregated metrics for the overview dashboard."""
@@ -766,15 +845,21 @@ def get_dashboard_metrics(
 
     conn = get_connection(db_path)
     try:
-        # Total test cases count
+        total_projects = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
+
         if project_id:
+            suite_count = conn.execute(
+                "SELECT COUNT(*) FROM test_suites WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()[0]
             tc_count = conn.execute(
                 "SELECT COUNT(*) FROM testcases_meta WHERE project_id = ?",
                 (project_id,),
             ).fetchone()[0]
             exec_query = "FROM execution_runs WHERE project_id = ?"
-            exec_params = [project_id]
+            exec_params: list[Any] = [project_id]
         else:
+            suite_count = conn.execute("SELECT COUNT(*) FROM test_suites").fetchone()[0]
             tc_count = conn.execute("SELECT COUNT(*) FROM testcases_meta").fetchone()[0]
             exec_query = "FROM execution_runs WHERE 1=1"
             exec_params = []
@@ -792,51 +877,107 @@ def get_dashboard_metrics(
             exec_params,
         ).fetchone()[0]
 
-        # Calculate pass rate
         completed_runs = passed_runs + failed_runs
         pass_rate = round((passed_runs / completed_runs * 100), 1) if completed_runs > 0 else 100.0
+        fail_rate = round((failed_runs / completed_runs * 100), 1) if completed_runs > 0 else 0.0
 
-        # Average duration of completed runs (seconds)
         avg_dur_ms = conn.execute(
             f"SELECT AVG(duration_ms) {exec_query} AND status IN ('passed', 'failed', 'error') AND duration_ms > 0",
             exec_params,
         ).fetchone()[0] or 0.0
         avg_duration_sec = round(avg_dur_ms / 1000.0, 2)
 
-        # Recent executions
+        # Recent executions with project name
+        p_filter = "WHERE e.project_id = ?" if project_id else "WHERE 1=1"
         recent_rows = conn.execute(
             f"""
-            SELECT id, testcase_id, testcase_name, status, browser, started_at, duration_ms, passed_steps, total_steps
-            {exec_query}
-            ORDER BY started_at DESC LIMIT 8
+            SELECT e.id, e.project_id, COALESCE(p.name, 'Default Project') AS project_name,
+                   e.suite_id, e.testcase_id, e.testcase_name, e.status, e.browser,
+                   e.started_at, e.duration_ms, e.passed_steps, e.total_steps
+            FROM execution_runs e
+            LEFT JOIN projects p ON e.project_id = p.id
+            {p_filter}
+            ORDER BY e.started_at DESC LIMIT 8
             """,
             exec_params,
         ).fetchall()
         recent_executions = [dict(r) for r in recent_rows]
 
-        # Execution activity / trends by date (last 7 recorded dates)
+        # Failed tests list
+        failed_filter = f"{p_filter} AND (e.status = 'failed' OR e.status = 'error')"
+        failed_rows = conn.execute(
+            f"""
+            SELECT e.id, e.project_id, COALESCE(p.name, 'Default Project') AS project_name,
+                   e.testcase_id, e.testcase_name, e.status, e.error_message, e.started_at, e.duration_ms
+            FROM execution_runs e
+            LEFT JOIN projects p ON e.project_id = p.id
+            {failed_filter}
+            ORDER BY e.started_at DESC LIMIT 5
+            """,
+            exec_params,
+        ).fetchall()
+        failed_tests = [dict(r) for r in failed_rows]
+
+        # Recently modified test cases
+        tc_p_filter = "WHERE project_id = ?" if project_id else "WHERE 1=1"
+        recent_tc_rows = conn.execute(
+            f"""
+            SELECT id, project_id, name, description, start_url, browser, total_steps, updated_at
+            FROM testcases_meta
+            {tc_p_filter}
+            ORDER BY updated_at DESC LIMIT 5
+            """,
+            exec_params,
+        ).fetchall()
+        recent_testcases = [dict(r) for r in recent_tc_rows]
+
+        # Execution activity / trends by date over requested days
+        from datetime import date, timedelta
+        today = date.today()
+        date_map = {}
+        for i in range(days - 1, -1, -1):
+            d_str = (today - timedelta(days=i)).isoformat()
+            date_map[d_str] = {"exec_date": d_str, "passed": 0, "failed": 0, "total": 0}
+
+        min_date = (today - timedelta(days=days - 1)).isoformat()
+        trend_params = [min_date] + exec_params
         trend_rows = conn.execute(
             f"""
             SELECT SUBSTR(started_at, 1, 10) AS exec_date,
                    SUM(CASE WHEN status = 'passed' THEN 1 ELSE 0 END) AS passed,
                    SUM(CASE WHEN status IN ('failed', 'error') THEN 1 ELSE 0 END) AS failed
-            {exec_query}
+            FROM execution_runs
+            WHERE SUBSTR(started_at, 1, 10) >= ?
+            {"AND project_id = ?" if project_id else ""}
             GROUP BY exec_date
-            ORDER BY exec_date DESC LIMIT 7
+            ORDER BY exec_date ASC
             """,
-            exec_params,
+            trend_params,
         ).fetchall()
-        trends = [dict(r) for r in reversed(trend_rows)]
+
+        for r in trend_rows:
+            d_str = r["exec_date"]
+            if d_str in date_map:
+                date_map[d_str]["passed"] = r["passed"] or 0
+                date_map[d_str]["failed"] = r["failed"] or 0
+                date_map[d_str]["total"] = (r["passed"] or 0) + (r["failed"] or 0)
+
+        trends = list(date_map.values())
 
         return {
+            "total_projects": total_projects,
+            "total_suites": suite_count,
             "total_testcases": tc_count,
             "total_executions": total_runs,
             "passed_executions": passed_runs,
             "failed_executions": failed_runs,
             "running_executions": running_runs,
             "success_rate": pass_rate,
+            "failure_rate": fail_rate,
             "avg_duration_sec": avg_duration_sec,
             "recent_executions": recent_executions,
+            "failed_tests": failed_tests,
+            "recent_testcases": recent_testcases,
             "execution_trends": trends,
         }
     finally:

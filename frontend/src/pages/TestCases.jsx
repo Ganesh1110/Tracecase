@@ -15,8 +15,10 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useToast } from '../context/ToastContext';
+import { useProject } from '../context/ProjectContext';
 
 export function TestCases() {
+  const { currentProject } = useProject();
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -28,7 +30,7 @@ export function TestCases() {
   const loadCases = async () => {
     try {
       setLoading(true);
-      const data = await api.getTestCases();
+      const data = await api.getTestCases(currentProject?.id);
       setCases(data);
     } catch (err) {
       showToast('Failed to load test cases: ' + err.message, 'error');
@@ -51,7 +53,7 @@ export function TestCases() {
 
   useEffect(() => {
     loadCases();
-  }, []);
+  }, [currentProject?.id]);
 
   const handleQuickRun = async (e, caseId) => {
     e.stopPropagation();

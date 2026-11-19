@@ -36,8 +36,12 @@ async function request(endpoint, options = {}) {
 
 export const api = {
   // Dashboard Metrics
-  getMetrics: (projectId) =>
-    request(`/dashboard/metrics${projectId ? `?project_id=${projectId}` : ''}`),
+  getMetrics: (projectId, days = 7) => {
+    const params = new URLSearchParams();
+    if (projectId) params.set('project_id', projectId);
+    if (days) params.set('days', days);
+    return request(`/dashboard/metrics?${params.toString()}`);
+  },
 
   // Projects
   getProjects: () => request('/projects'),
@@ -46,7 +50,8 @@ export const api = {
     request('/projects', { method: 'POST', body: JSON.stringify(data) }),
   updateProject: (id, data) =>
     request(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteProject: (id) => request(`/projects/${id}`, { method: 'DELETE' }),
+  deleteProject: (id, force = false) =>
+    request(`/projects/${id}${force ? '?force=true' : ''}`, { method: 'DELETE' }),
 
   // Test Suites
   getSuites: (projectId) =>
@@ -59,9 +64,15 @@ export const api = {
   deleteSuite: (id) => request(`/suites/${id}`, { method: 'DELETE' }),
   runSuite: (id, options = {}) =>
     request(`/suites/${id}/run`, { method: 'POST', body: JSON.stringify(options) }),
+  addCaseToSuite: (suiteId, testcaseId) =>
+    request(`/suites/${suiteId}/testcases/${testcaseId}`, { method: 'POST' }),
+  removeCaseFromSuite: (suiteId, testcaseId) =>
+    request(`/suites/${suiteId}/testcases/${testcaseId}`, { method: 'DELETE' }),
+  getSuiteExecutions: (suiteId) => request(`/suites/${suiteId}/executions`),
 
   // Test Cases
-  getTestCases: () => request('/testcases'),
+  getTestCases: (projectId) =>
+    request(`/testcases${projectId ? `?project_id=${projectId}` : ''}`),
   getTestCase: (id) => request(`/testcases/${id}`),
   createTestCase: (data) =>
     request('/testcases', { method: 'POST', body: JSON.stringify(data) }),
@@ -103,6 +114,7 @@ export const api = {
     const params = new URLSearchParams();
     if (filters.projectId) params.set('project_id', filters.projectId);
     if (filters.testcaseId) params.set('testcase_id', filters.testcaseId);
+    if (filters.suiteId) params.set('suite_id', filters.suiteId);
     if (filters.status) params.set('status', filters.status);
     if (filters.limit) params.set('limit', filters.limit);
     const qs = params.toString();

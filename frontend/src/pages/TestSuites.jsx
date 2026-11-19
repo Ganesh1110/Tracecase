@@ -1,16 +1,41 @@
 import React, { useEffect, useState } from 'react';
-import { Layers, Plus, Play, Trash2, CheckCircle2, ChevronRight, FileCode2 } from 'lucide-react';
+import {
+  Layers,
+  Plus,
+  Play,
+  Trash2,
+  CheckCircle2,
+  ChevronRight,
+  FileCode2,
+  Edit3,
+  X,
+  History,
+  TrendingUp,
+  Clock,
+  AlertCircle,
+} from 'lucide-react';
 import { api } from '../services/api';
 import { useProject } from '../context/ProjectContext';
 import { useToast } from '../context/ToastContext';
+import { useNavigate } from 'react-router-dom';
 
 export function TestSuites() {
   const { currentProject } = useProject();
   const { showToast } = useToast();
+  const navigate = useNavigate();
+
   const [suites, setSuites] = useState([]);
   const [testcases, setTestCases] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Modal / drawer states
   const [isCreating, setIsCreating] = useState(false);
+  const [editingSuite, setEditingSuite] = useState(null);
+  const [viewingSuite, setViewingSuite] = useState(null);
+  const [suiteExecutions, setSuiteExecutions] = useState([]);
+  const [selectedCaseToAdd, setSelectedCaseToAdd] = useState('');
+
+  // Form states for creation
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [selectedCaseIds, setSelectedCaseIds] = useState([]);
@@ -20,10 +45,14 @@ export function TestSuites() {
       setLoading(true);
       const [suitesData, casesData] = await Promise.all([
         api.getSuites(currentProject?.id),
-        api.getTestCases(),
+        api.getTestCases(currentProject?.id),
       ]);
       setSuites(suitesData);
       setTestCases(casesData);
+      if (viewingSuite) {
+        const refreshed = suitesData.find((s) => s.id === viewingSuite.id);
+        if (refreshed) setViewingSuite(refreshed);
+      }
     } catch (err) {
       showToast('Failed to load suites: ' + err.message, 'error');
     } finally {
@@ -39,11 +68,13 @@ export function TestSuites() {
     e.preventDefault();
     if (!name.trim()) return;
     try {
+      // Deduplicate selected IDs
+      const deduped = Array.from(new Set(selectedCaseIds));
       await api.createSuite({
         name: name.trim(),
         project_id: currentProject?.id || 'default_project',
         description: description.trim(),
-        testcase_ids: selectedCaseIds,
+        testcase_ids: deduped,
       });
       showToast('Suite created successfully!', 'success');
       setName('');
@@ -56,11 +87,30 @@ export function TestSuites() {
     }
   };
 
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingSuite || !editingSuite.name.trim()) return;
+    try {
+      const deduped = Array.from(new Set(editingSuite.testcase_ids || []));
+      await api.updateSuite(editingSuite.id, {
+        name: editingSuite.name.trim(),
+        description: editingSuite.description?.trim() || '',
+        testcase_ids: deduped,
+      });
+      showToast('Suite updated successfully!', 'success');
+      setEditingSuite(null);
+      loadData();
+    } catch (err) {
+      showToast('Failed to update suite: ' + err.message, 'error');
+    }
+  };
+
   const handleRunSuite = async (suiteId) => {
     try {
       showToast('Launching suite execution...', 'info');
       const runs = await api.runSuite(suiteId);
       showToast(`Started ${runs.length} test executions!`, 'success');
+      loadData();
     } catch (err) {
       showToast('Failed to run suite: ' + err.message, 'error');
     }
@@ -71,9 +121,42 @@ export function TestSuites() {
     try {
       await api.deleteSuite(suiteId);
       showToast('Suite deleted.', 'info');
+      if (viewingSuite?.id === suiteId) setViewingSuite(null);
       loadData();
     } catch (err) {
       showToast('Failed to delete suite: ' + err.message, 'error');
+    }
+  };
+
+  const handleAddCaseToSuite = async (suiteId, caseId) => {
+    if (!caseId) return;
+    try {
+      await api.addCaseToSuite(suiteId, caseId);
+      showToast('Test case added to suite.', 'success');
+      setSelectedCaseToAdd('');
+      loadData();
+    } catch (err) {
+      showToast('Failed to add case: ' + err.message, 'error');
+    }
+  };
+
+  const handleRemoveCaseFromSuite = async (suiteId, caseId) => {
+    try {
+      await api.removeCaseFromSuite(suiteId, caseId);
+      showToast('Test case removed from suite.', 'info');
+      loadData();
+    } catch (err) {
+      showToast('Failed to remove case: ' + err.message, 'error');
+    }
+  };
+
+  const openSuiteDetails = async (suite) => {
+    setViewingSuite(suite);
+    try {
+      const execs = await api.getSuiteExecutions(suite.id);
+      setSuiteExecutions(execs);
+    } catch {
+      setSuiteExecutions([]);
     }
   };
 
@@ -81,6 +164,15 @@ export function TestSuites() {
     setSelectedCaseIds((prev) =>
       prev.includes(caseId) ? prev.filter((id) => id !== caseId) : [...prev, caseId]
     );
+  };
+
+  const toggleEditCaseSelect = (caseId) => {
+    if (!editingSuite) return;
+    const current = editingSuite.testcase_ids || [];
+    const updated = current.includes(caseId)
+      ? current.filter((id) => id !== caseId)
+      : [...current, caseId];
+    setEditingSuite({ ...editingSuite, testcase_ids: updated });
   };
 
   return (
@@ -95,7 +187,10 @@ export function TestSuites() {
           </p>
         </div>
         <button
-          onClick={() => setIsCreating(!isCreating)}
+          onClick={() => {
+            setIsCreating(!isCreating);
+            setEditingSuite(null);
+          }}
           className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-md shadow-brand-500/20 transition-all"
         >
           <Plus className="w-4 h-4" />
@@ -103,6 +198,7 @@ export function TestSuites() {
         </button>
       </div>
 
+      {/* Creation Form */}
       {isCreating && (
         <form
           onSubmit={handleCreate}
@@ -169,11 +265,272 @@ export function TestSuites() {
         </form>
       )}
 
+      {/* Edit Suite Modal */}
+      {editingSuite && (
+        <form
+          onSubmit={handleEditSubmit}
+          className="p-5 rounded-2xl border border-indigo-500/30 bg-indigo-50/20 dark:bg-indigo-950/20 space-y-4"
+        >
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+              Edit Test Suite
+            </h3>
+            <button
+              type="button"
+              onClick={() => setEditingSuite(null)}
+              className="text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <input
+              type="text"
+              value={editingSuite.name}
+              onChange={(e) => setEditingSuite({ ...editingSuite, name: e.target.value })}
+              className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              autoFocus
+            />
+            <input
+              type="text"
+              value={editingSuite.description || ''}
+              onChange={(e) => setEditingSuite({ ...editingSuite, description: e.target.value })}
+              placeholder="Description"
+              className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2">
+              Select Included Test Cases:
+            </label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+              {testcases.map((tc) => (
+                <label
+                  key={tc.id}
+                  className="flex items-center gap-2.5 p-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer text-xs"
+                >
+                  <input
+                    type="checkbox"
+                    checked={(editingSuite.testcase_ids || []).includes(tc.id)}
+                    onChange={() => toggleEditCaseSelect(tc.id)}
+                    className="rounded text-brand-600 focus:ring-brand-500"
+                  />
+                  <span className="font-medium text-slate-800 dark:text-slate-200 truncate">
+                    {tc.name}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setEditingSuite(null)}
+              className="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-500"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white"
+            >
+              Update Suite
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Viewing Suite Detail Drawer / Modal */}
+      {viewingSuite && (
+        <div className="p-6 rounded-2xl border border-slate-200 dark:border-surface-borderDark bg-white dark:bg-surface-cardDark space-y-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-500">
+                <Layers className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                  {viewingSuite.name}
+                </h2>
+                <p className="text-xs text-slate-500">
+                  {viewingSuite.description || 'No description provided.'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleRunSuite(viewingSuite.id)}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>Run Suite Now</span>
+              </button>
+              <button
+                onClick={() => setViewingSuite(null)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Aggregated Suite Stats */}
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 p-4 rounded-xl bg-slate-50/70 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-800/60">
+            <div>
+              <span className="text-[11px] font-semibold text-slate-400 uppercase">Test Cases</span>
+              <div className="text-lg font-bold text-slate-900 dark:text-white mt-0.5">
+                {viewingSuite.testcase_ids?.length || 0}
+              </div>
+            </div>
+            <div>
+              <span className="text-[11px] font-semibold text-slate-400 uppercase">Total Runs</span>
+              <div className="text-lg font-bold text-slate-900 dark:text-white mt-0.5">
+                {viewingSuite.total_runs || 0}
+              </div>
+            </div>
+            <div>
+              <span className="text-[11px] font-semibold text-slate-400 uppercase">Pass Rate</span>
+              <div className="text-lg font-bold text-emerald-500 mt-0.5">
+                {viewingSuite.pass_rate !== null && viewingSuite.pass_rate !== undefined
+                  ? `${viewingSuite.pass_rate}%`
+                  : 'N/A'}
+              </div>
+            </div>
+            <div>
+              <span className="text-[11px] font-semibold text-slate-400 uppercase">Last Execution</span>
+              <div className="text-xs font-mono text-slate-600 dark:text-slate-400 mt-1">
+                {viewingSuite.last_run_at
+                  ? new Date(viewingSuite.last_run_at).toLocaleString()
+                  : 'Never'}
+              </div>
+            </div>
+          </div>
+
+          {/* Test Cases in Suite */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                Included Test Cases
+              </h3>
+
+              {/* Add case to suite dropdown */}
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedCaseToAdd}
+                  onChange={(e) => setSelectedCaseToAdd(e.target.value)}
+                  className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200"
+                >
+                  <option value="">-- Add Test Case --</option>
+                  {testcases
+                    .filter((tc) => !(viewingSuite.testcase_ids || []).includes(tc.id))
+                    .map((tc) => (
+                      <option key={tc.id} value={tc.id}>
+                        {tc.name}
+                      </option>
+                    ))}
+                </select>
+                <button
+                  onClick={() => handleAddCaseToSuite(viewingSuite.id, selectedCaseToAdd)}
+                  disabled={!selectedCaseToAdd}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+            {viewingSuite.testcase_ids?.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">
+                No test cases included in this suite yet.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                {viewingSuite.testcase_ids?.map((cid) => {
+                  const tc = testcases.find((c) => c.id === cid) || { id: cid, name: cid };
+                  return (
+                    <div
+                      key={cid}
+                      className="p-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <FileCode2 className="w-4 h-4 text-slate-400" />
+                        <div>
+                          <div className="text-xs font-bold text-slate-900 dark:text-white">
+                            {tc.name}
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-mono">{cid}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => navigate(`/testcases/${cid}`)}
+                          className="px-2 py-1 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:underline"
+                        >
+                          View Details
+                        </button>
+                        <button
+                          onClick={() => handleRemoveCaseFromSuite(viewingSuite.id, cid)}
+                          className="p-1 rounded text-slate-400 hover:text-rose-500"
+                          title="Remove from suite"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Recent Runs for this Suite */}
+          {suiteExecutions.length > 0 && (
+            <div className="space-y-2 pt-2">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                Recent Suite Executions
+              </h3>
+              <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden text-xs">
+                {suiteExecutions.slice(0, 5).map((run) => (
+                  <div
+                    key={run.id}
+                    onClick={() => navigate(`/executions?id=${run.id}`)}
+                    className="p-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          run.status === 'passed' ? 'bg-emerald-500' : 'bg-rose-500'
+                        }`}
+                      />
+                      <span className="font-semibold text-slate-800 dark:text-slate-200">
+                        {run.testcase_name}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-slate-400 font-mono text-[11px]">
+                      <span>{run.duration_ms ? `${(run.duration_ms / 1000).toFixed(1)}s` : '-'}</span>
+                      <span>{new Date(run.started_at).toLocaleTimeString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Suites Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         {suites.length === 0 ? (
-          <div className="col-span-full p-12 text-center text-slate-500">
-            No test suites created yet. Create a suite to execute collections of tests together.
+          <div className="col-span-full p-12 text-center text-slate-500 bg-white dark:bg-surface-cardDark rounded-2xl border border-slate-200 dark:border-surface-borderDark">
+            <Layers className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+            <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">
+              No test suites created yet
+            </h3>
+            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+              Create a test suite to group test cases into smoke or regression batches.
+            </p>
           </div>
         ) : (
           suites.map((suite) => (
@@ -196,22 +553,47 @@ export function TestSuites() {
                       </span>
                     </div>
                   </div>
-                  <button
-                    onClick={() => handleDelete(suite.id)}
-                    className="p-1 rounded text-slate-400 hover:text-rose-500"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setEditingSuite(suite)}
+                      className="p-1 rounded text-slate-400 hover:text-indigo-500"
+                      title="Edit suite"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(suite.id)}
+                      className="p-1 rounded text-slate-400 hover:text-rose-500"
+                      title="Delete suite"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
+
                 <p className="text-xs text-slate-500 mt-3 line-clamp-2">
                   {suite.description || 'No description provided.'}
                 </p>
+
+                {/* Quick metrics pill */}
+                {suite.pass_rate !== null && suite.pass_rate !== undefined && (
+                  <div className="mt-3 flex items-center gap-2 text-[11px]">
+                    <span className="font-semibold text-emerald-500">
+                      {suite.pass_rate}% pass rate
+                    </span>
+                    <span className="text-slate-400">({suite.total_runs} runs)</span>
+                  </div>
+                )}
               </div>
 
               <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                <span className="text-xs text-slate-400">
-                  {new Date(suite.created_at).toLocaleDateString()}
-                </span>
+                <button
+                  onClick={() => openSuiteDetails(suite)}
+                  className="text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-brand-500 flex items-center gap-1"
+                >
+                  <span>Manage</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
                 <button
                   onClick={() => handleRunSuite(suite.id)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm"

@@ -26,6 +26,7 @@ from qa_auto.replay.har import build_har
 from qa_auto.replay.visual import compare_images
 from qa_auto.ui.broadcaster import manager
 from qa_auto.ui.db import (
+    add_testcase_to_suite,
     create_project,
     create_suite,
     delete_project,
@@ -39,6 +40,7 @@ from qa_auto.ui.db import (
     list_execution_runs,
     list_projects,
     list_suites,
+    remove_testcase_from_suite,
     save_ai_analysis,
     sync_all_testcases_from_disk,
     update_project,
@@ -215,9 +217,13 @@ async def health_check() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 @router.get("/dashboard/metrics")
-async def get_metrics(project_id: str | None = None) -> dict[str, Any]:
+@router.get("/metrics")
+async def get_metrics(
+    project_id: str | None = None,
+    days: int = 7,
+) -> dict[str, Any]:
     """Return aggregated live metrics for overview dashboard."""
-    return get_dashboard_metrics(project_id=project_id)
+    return get_dashboard_metrics(project_id=project_id, days=days)
 
 
 # ---------------------------------------------------------------------------
@@ -256,11 +262,17 @@ async def edit_project(project_id: str, req: ProjectUpdateRequest) -> dict[str, 
 
 
 @router.delete("/projects/{project_id}")
-async def remove_project(project_id: str) -> dict[str, bool]:
-    success = delete_project(project_id)
-    if not success:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete project")
-    return {"success": True}
+async def remove_project(project_id: str, force: bool = False) -> dict[str, Any]:
+    try:
+        success = delete_project(project_id, force=force)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found or cannot be deleted",
+            )
+        return {"success": True, "message": "Project deleted successfully"}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +323,27 @@ async def remove_suite(suite_id: str) -> dict[str, bool]:
     return {"success": True}
 
 
+@router.post("/suites/{suite_id}/testcases/{testcase_id}")
+async def add_case_to_suite(suite_id: str, testcase_id: str) -> dict[str, Any]:
+    suite = add_testcase_to_suite(suite_id, testcase_id)
+    if not suite:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Suite not found")
+    return suite
+
+
+@router.delete("/suites/{suite_id}/testcases/{testcase_id}")
+async def remove_case_from_suite(suite_id: str, testcase_id: str) -> dict[str, Any]:
+    suite = remove_testcase_from_suite(suite_id, testcase_id)
+    if not suite:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Suite not found")
+    return suite
+
+
+@router.get("/suites/{suite_id}/executions")
+async def get_suite_executions(suite_id: str) -> list[dict[str, Any]]:
+    return list_execution_runs(suite_id=suite_id)
+
+
 @router.post("/suites/{suite_id}/run")
 async def run_suite(suite_id: str, req: ReplayRequest | None = None) -> list[dict[str, Any]]:
     """Run all test cases in a suite asynchronously."""
@@ -351,8 +384,8 @@ async def run_suite(suite_id: str, req: ReplayRequest | None = None) -> list[dic
 # ---------------------------------------------------------------------------
 
 @router.get("/testcases")
-async def get_testcases() -> list[dict[str, Any]]:
-    return list_testcases()
+async def get_testcases(project_id: str | None = None) -> list[dict[str, Any]]:
+    return list_testcases(project_id=project_id)
 
 
 @router.post("/testcases")
@@ -462,12 +495,14 @@ async def get_testcase_har(identifier: str) -> dict[str, Any]:
 async def get_executions(
     project_id: str | None = None,
     testcase_id: str | None = None,
+    suite_id: str | None = None,
     status: str | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     return list_execution_runs(
         project_id=project_id,
         testcase_id=testcase_id,
+        suite_id=suite_id,
         status=status,
         limit=limit,
     )
