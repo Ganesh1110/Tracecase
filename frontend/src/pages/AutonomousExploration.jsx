@@ -733,7 +733,7 @@ export function AutonomousExploration() {
                   Requirements-Driven Test Planner
                 </h3>
                 <p className="text-xs text-gray-500 mt-1">
-                  Enter natural language user stories or requirements. QA Auto maps intent to discovered navigation graph nodes, identifies coverage gaps, and generates verified test drafts.
+                  Enter natural language user stories or requirements. Tracecase maps intent to discovered navigation graph nodes, identifies coverage gaps, and generates verified test drafts.
                 </p>
               </div>
 
@@ -1110,7 +1110,7 @@ export function AutonomousExploration() {
                   Intelligent Regression Test Selection
                 </h3>
                 <p className="text-xs text-gray-500 mt-1">
-                  Specify changed page routes and modified DOM selectors. QA Auto analyzes step interactions and recent failure history to prioritize the most critical regression tests.
+                  Specify changed page routes and modified DOM selectors. Tracecase analyzes step interactions and recent failure history to prioritize the most critical regression tests.
                 </p>
               </div>
 

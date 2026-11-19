@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from qa_auto.models import ElementInfo, Step, TestCase
-from qa_auto.replay.engine import ReplayEngine
+from tracecase.models import ElementInfo, Step, TestCase
+from tracecase.replay.engine import ReplayEngine
 
 
 def _element(selector: str, tag: str = "button", text: str = "Open") -> ElementInfo:

@@ -11,60 +11,50 @@ Validates the full lifecycle with real Chromium browser execution against a loca
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import threading
-import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
-import pytest
-from playwright.async_api import async_playwright
 
-from qa_auto.ai.assertion_generator import suggest_assertions
-from qa_auto.ai.coverage_analyst import analyze_corpus_coverage
-from qa_auto.ai.failure_analyst import (
-    analyze_execution_failure,
+import pytest
+
+from tracecase.ai.assertion_generator import suggest_assertions
+from tracecase.ai.failure_analyst import (
     analyze_failure_heuristics,
 )
-from qa_auto.ai.provider import NullProvider
-from qa_auto.ai.selectors import (
-    audit_testcase_selectors,
-    evaluate_selector,
+from tracecase.ai.provider import NullProvider
+from tracecase.ai.selectors import (
     verify_locator_in_live_dom,
 )
-from qa_auto.ai.variations import (
+from tracecase.ai.variations import (
     generate_heuristic_variations,
-    generate_smart_variations,
     is_safe_test_environment,
 )
-from qa_auto.models import ElementInfo, Step, TestCase
-from qa_auto.recorder import Recorder
-from qa_auto.replay.engine import ReplayEngine
-from qa_auto.ui.db import (
+from tracecase.models import Step, TestCase
+from tracecase.recorder import Recorder
+from tracecase.replay.engine import ReplayEngine
+from tracecase.ui.db import (
     create_execution_run,
     get_execution_run,
     init_studio_db,
     update_execution_run_status,
 )
-from qa_auto.ui.service import (
-    add_custom_assertion,
+from tracecase.ui.service import (
     persist_generated_testcase,
     resolve_testcase_file,
-    update_testcase_step,
 )
 
-logger = logging.getLogger("qa_auto.test_real_ai_validation_e2e")
+logger = logging.getLogger("tracecase.test_real_ai_validation_e2e")
 
 TEST_HTML = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>QA Auto AI Test Bench</title>
+  <title>Tracecase AI Test Bench</title>
 </head>
 <body style="font-family: sans-serif; padding: 20px;">
-  <h1 id="main-heading">QA Auto Test Bench</h1>
+  <h1 id="main-heading">Tracecase Test Bench</h1>
 
   <div style="margin-bottom: 15px;">
     <button type="button" id="toggle-status-btn" style="padding: 8px 16px;" onclick="document.getElementById('status-message').style.display='block';">Toggle Status</button>
@@ -385,7 +375,7 @@ def test_security_variations_safety_isolation():
         start_url="http://127.0.0.1:8080/form",
         browser="chromium",
         viewport={"width": 1280, "height": 720},
-        user_agent="QA Auto",
+        user_agent="Tracecase",
         steps=[
             Step(
                 number=1,
@@ -416,7 +406,7 @@ def test_security_variations_safety_isolation():
         start_url="https://production-banking-app.com/login",
         browser="chromium",
         viewport={"width": 1280, "height": 720},
-        user_agent="QA Auto",
+        user_agent="Tracecase",
         steps=[
             Step(
                 number=1,
@@ -458,7 +448,7 @@ def test_persistence_contracts_across_restart(tmp_path: Path):
         start_url="http://127.0.0.1:8000/app",
         browser="chromium",
         viewport={"width": 1280, "height": 720},
-        user_agent="QA Auto",
+        user_agent="Tracecase",
         steps=[
             Step(
                 number=1,

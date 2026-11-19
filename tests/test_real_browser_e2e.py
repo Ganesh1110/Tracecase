@@ -1,4 +1,4 @@
-"""Real Browser End-to-End Validation Suite for QA Auto Studio (Phase 4.1).
+"""Real Browser End-to-End Validation Suite for Tracecase Studio (Phase 4.1).
 
 Validates:
 Test 1: Recording (Chromium, pause/resume, clicks, inputs, navigation, form submit, verification of persisted artifacts)
@@ -13,9 +13,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
-import shutil
-import tempfile
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,41 +20,35 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from playwright.async_api import async_playwright
 
-from qa_auto.models import ElementInfo, Step, TestCase
-from qa_auto.recorder import Recorder
-from qa_auto.replay.engine import ReplayEngine
-from qa_auto.ui.db import (
+from tracecase.models import ElementInfo, Step, TestCase
+from tracecase.recorder import Recorder
+from tracecase.replay.engine import ReplayEngine
+from tracecase.ui.db import (
     create_execution_run,
     create_project,
     get_execution_run,
     init_studio_db,
-    list_execution_runs,
     log_execution_step,
     update_execution_run_status,
 )
-from qa_auto.ui.executor import orchestrator
-from qa_auto.ui.service import (
+from tracecase.ui.executor import orchestrator
+from tracecase.ui.service import (
     add_custom_assertion,
-    create_manual_testcase,
-    recording_manager,
     resolve_testcase_file,
-    update_custom_assertion,
-    update_testcase_metadata,
     update_testcase_step,
 )
 
-logger = logging.getLogger("qa_auto.test_real_browser_e2e")
+logger = logging.getLogger("tracecase.test_real_browser_e2e")
 
 INDEX_HTML = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>QA Auto Test Bench</title>
+  <title>Tracecase Test Bench</title>
 </head>
 <body style="font-family: sans-serif; padding: 20px;">
-  <h1 id="page-title">QA Auto Interactive Test Bench</h1>
+  <h1 id="page-title">Tracecase Interactive Test Bench</h1>
   
   <form id="test-form" onsubmit="event.preventDefault(); document.getElementById('form-status').textContent = 'Submitted: ' + document.getElementById('name-input').value;">
     <label for="name-input">User Name:</label>
@@ -73,7 +64,7 @@ INDEX_HTML = """<!doctype html>
 
   <hr style="margin: 20px 0;" />
 
-  <button id="error-btn" onclick="console.error('Deliberate QA Auto Test Error');">Trigger Console Error</button>
+  <button id="error-btn" onclick="console.error('Deliberate Tracecase Test Error');">Trigger Console Error</button>
 
   <hr style="margin: 20px 0;" />
 
@@ -86,11 +77,11 @@ ABOUT_HTML = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>About QA Auto Test Bench</title>
+  <title>About Tracecase Test Bench</title>
 </head>
 <body style="font-family: sans-serif; padding: 20px;">
   <h1 id="about-title">About Page Loaded Successfully</h1>
-  <p id="about-desc">This is the secondary navigation destination for QA Auto verification.</p>
+  <p id="about-desc">This is the secondary navigation destination for Tracecase verification.</p>
   <a id="back-link" href="/">Back to Home</a>
 </body>
 </html>
@@ -138,7 +129,7 @@ def local_web_server():
 def studio_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Hermetic SQLite and recordings directory."""
     db_file = tmp_path / "studio.db"
-    monkeypatch.setattr("qa_auto.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
+    monkeypatch.setattr("tracecase.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
     init_studio_db(db_file)
     create_project("p_e2e", "E2E Test Project", "Project for real browser validation", db_path=db_file)
     return tmp_path, db_file
@@ -177,7 +168,7 @@ async def test_1_real_browser_recording_pause_resume_stop(local_web_server: str,
     page = recorder._pages[0]
 
     # 1. Fill input & submit form
-    await page.fill("#name-input", "QA Automation Engineer")
+    await page.fill("#name-input", "Tracecasemation Engineer")
     await page.click("#submit-btn")
     await asyncio.sleep(0.5)
 
@@ -286,7 +277,7 @@ async def test_2_editing_and_real_browser_replay(local_web_server: str, studio_e
         start_url=local_web_server,
         browser="chromium",
         viewport={"width": 1280, "height": 720},
-        user_agent="QA Auto Studio",
+        user_agent="Tracecase Studio",
         steps=[step1, step2, step3],
         custom_assertions=[],
         total_duration=1.5,
@@ -318,7 +309,7 @@ async def test_2_editing_and_real_browser_replay(local_web_server: str, studio_e
         assertion_data={
             "kind": "text",
             "target": "#page-title",
-            "expected": "QA Auto Interactive Test Bench",
+            "expected": "Tracecase Interactive Test Bench",
             "step_number": 1,
             "enforced": True,
         },
@@ -369,7 +360,7 @@ async def test_3_failure_diagnostics_and_report(local_web_server: str, studio_en
         start_url=local_web_server,
         browser="chromium",
         viewport={"width": 1280, "height": 720},
-        user_agent="QA Auto Studio",
+        user_agent="Tracecase Studio",
         steps=[step1],
         custom_assertions=[
             {
@@ -509,7 +500,7 @@ async def test_5_cross_browser_compatibility(local_web_server: str, studio_env: 
         start_url=local_web_server,
         browser="chromium",
         viewport={"width": 1280, "height": 720},
-        user_agent="QA Auto Studio",
+        user_agent="Tracecase Studio",
         steps=[step1],
         custom_assertions=[
             {

@@ -13,36 +13,31 @@ Validates:
 from __future__ import annotations
 
 import asyncio
-import json
 import socket
 import threading
+import uuid
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, patch
-import uuid
 
 import pytest
 from fastapi.testclient import TestClient
 
-from qa_auto.models import ElementInfo, Step, TestCase
-from qa_auto.replay.models import ReplayResult, StepResult
-from qa_auto.ui.db import (
+from tracecase.models import ElementInfo, Step, TestCase
+from tracecase.replay.models import ReplayResult, StepResult
+from tracecase.ui.db import (
     create_execution_batch,
     create_execution_run,
     create_project,
     create_suite,
     get_connection,
     get_execution_batch,
-    get_execution_run,
     init_studio_db,
-    list_execution_batches,
-    list_execution_runs,
     sync_testcase_meta,
 )
-from qa_auto.ui.executor import ExecutionOrchestrator, orchestrator
-from qa_auto.ui.server import create_app
+from tracecase.ui.executor import ExecutionOrchestrator
+from tracecase.ui.server import create_app
 
 
 def find_free_port() -> int:
@@ -134,7 +129,7 @@ def _make_testcase(id: str, name: str, start_url: str, steps: list[Step]) -> Tes
         start_url=start_url,
         browser="chromium",
         viewport={"width": 1280, "height": 720},
-        user_agent="Mozilla/5.0 QA Auto",
+        user_agent="Mozilla/5.0 Tracecase",
         steps=steps,
         total_duration=1.0,
         total_steps=len(steps),
@@ -314,7 +309,7 @@ async def test_worker_context_and_directory_isolation(testcases_dir: Path, monke
                 ],
             )
 
-    monkeypatch.setattr("qa_auto.ui.executor.ReplayEngine", MockReplayEngine)
+    monkeypatch.setattr("tracecase.ui.executor.ReplayEngine", MockReplayEngine)
 
     batch = await orch.start_batch_execution(
         testcase_ids=["tc_alpha", "tc_beta", "tc_gamma"],
@@ -366,7 +361,7 @@ async def test_worker_exception_isolation(testcases_dir: Path, monkeypatch: pyte
                 steps=[StepResult(number=1, status="passed", duration_ms=5.0)],
             )
 
-    monkeypatch.setattr("qa_auto.ui.executor.ReplayEngine", FaultyReplayEngine)
+    monkeypatch.setattr("tracecase.ui.executor.ReplayEngine", FaultyReplayEngine)
 
     batch = await orch.start_batch_execution(
         testcase_ids=["tc_alpha", "tc_beta", "tc_gamma"],
@@ -418,7 +413,7 @@ async def test_batch_cancellation(testcases_dir: Path, monkeypatch: pytest.Monke
                 steps=[],
             )
 
-    monkeypatch.setattr("qa_auto.ui.executor.ReplayEngine", SlowReplayEngine)
+    monkeypatch.setattr("tracecase.ui.executor.ReplayEngine", SlowReplayEngine)
 
     batch = await orch.start_batch_execution(
         testcase_ids=["tc_alpha", "tc_beta", "tc_gamma"],
@@ -465,7 +460,7 @@ def test_batch_execution_api_endpoints(testcases_dir: Path, monkeypatch: pytest.
                 steps=[],
             )
 
-    monkeypatch.setattr("qa_auto.ui.executor.ReplayEngine", SlowReplayEngine)
+    monkeypatch.setattr("tracecase.ui.executor.ReplayEngine", SlowReplayEngine)
 
     client = TestClient(create_app())
 

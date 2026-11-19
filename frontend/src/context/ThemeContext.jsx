@@ -7,7 +7,7 @@ const ThemeContext = createContext({
 
 export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState(() => {
-    const saved = localStorage.getItem('qa_auto_theme');
+    const saved = localStorage.getItem('tracecase_theme');
     if (saved) return saved;
     return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
   });
@@ -21,7 +21,7 @@ export function ThemeProvider({ children }) {
       root.classList.add('light');
       root.classList.remove('dark');
     }
-    localStorage.setItem('qa_auto_theme', theme);
+    localStorage.setItem('tracecase_theme', theme);
   }, [theme]);
 
   const toggleTheme = () => {

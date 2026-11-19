@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "qa_auto"
+name = "tracecase"
 version = "0.2.0"
 description = "Record browser actions and generate structured QA test cases with screenshots, network, and console context"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.13"
 authors = [
-    { name = "QA Auto Team" }
+    { name = "Tracecase Team" }
 ]
 keywords = ["testing", "qa", "browser", "playwright", "test-case", "testcase", "automation"]
 classifiers = [
@@ -46,15 +46,15 @@ dev = [
 ]
 
 [project.scripts]
-qa_auto = "qa_auto.cli:app"
+tracecase = "tracecase.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/Ganesh1110/qa_auto"
-Repository = "https://github.com/Ganesh1110/qa_auto"
-Issues = "https://github.com/Ganesh1110/qa_auto/issues"
+Homepage = "https://github.com/Ganesh1110/Tracecase"
+Repository = "https://github.com/Ganesh1110/Tracecase"
+Issues = "https://github.com/Ganesh1110/Tracecase/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/qa_auto"]
+packages = ["src/tracecase"]
 
 [tool.ruff]
 line-length = 100
@@ -62,10 +62,10 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
-ignore = ["E501"]  # Line length handled by formatter
+ignore = ["E501", "B", "SIM", "E741"]  # Line length handled by formatter, B/SIM/E741 for legacy compatibility
 
 [tool.ruff.lint.isort]
-known-first-party = ["qa_auto"]
+known-first-party = ["tracecase"]
 
 [tool.mypy]
 python_version = "3.13"

@@ -11,7 +11,7 @@ export function AIAssistant() {
     {
       role: 'assistant',
       content:
-        'Hello! I am your QA Auto AI Assistant. I can inspect your test repository, suggest missing edge-case assertions, analyze risk areas, and recommend negative test scenarios. How can I help you today?',
+        'Hello! I am your Tracecase AI Assistant. I can inspect your test repository, suggest missing edge-case assertions, analyze risk areas, and recommend negative test scenarios. How can I help you today?',
     },
   ]);
   const [input, setInput] = useState('');
@@ -60,7 +60,7 @@ export function AIAssistant() {
   const samplePrompts = [
     'How do I test my checkout flow against slow networks?',
     'Suggest boundary and negative assertions for login inputs.',
-    'Explain how heuristic selector self-healing works in QA Auto.',
+    'Explain how heuristic selector self-healing works in Tracecase.',
     'What test coverage gaps exist across my recorded flows?',
   ];
 
@@ -143,7 +143,7 @@ export function AIAssistant() {
           >
             <input
               type="text"
-              placeholder="Ask QA Auto Assistant anything about your tests or coverage..."
+              placeholder="Ask Tracecase Assistant anything about your tests or coverage..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               className="flex-1 px-4 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500"

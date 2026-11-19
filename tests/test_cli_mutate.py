@@ -5,8 +5,8 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from qa_auto.cli import app
-from qa_auto.models import ElementInfo, Step, TestCase
+from tracecase.cli import app
+from tracecase.models import ElementInfo, Step, TestCase
 
 runner = CliRunner()
 

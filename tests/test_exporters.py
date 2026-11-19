@@ -3,8 +3,8 @@
 import json
 from pathlib import Path
 
-from qa_auto.exporters import HTMLExporter, JSONExporter, MarkdownExporter
-from qa_auto.models import TestCase
+from tracecase.exporters import HTMLExporter, JSONExporter, MarkdownExporter
+from tracecase.models import TestCase
 
 
 class TestJSONExporter:
@@ -171,7 +171,7 @@ class TestHTMLExporter:
         output_path = exporter.export(sample_testcase, temp_dir)
 
         content = output_path.read_text(encoding="utf-8")
-        assert "<title>User Login Flow — QA Auto</title>" in content
+        assert "<title>User Login Flow — Tracecase</title>" in content
 
     def test_export_contains_metadata(self, sample_testcase: TestCase, temp_dir: Path) -> None:
         """Test that exported HTML contains metadata."""

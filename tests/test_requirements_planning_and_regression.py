@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from qa_auto.exploration.models import (
+from tracecase.exploration.models import (
     AppNavigationGraph,
     FormField,
     FormSchema,
@@ -17,16 +15,14 @@ from qa_auto.exploration.models import (
     PageNode,
     PageTransition,
 )
-from qa_auto.exploration.planner import plan_requirement_against_graph
-from qa_auto.exploration.regression import select_intelligent_regression_suite
-from qa_auto.models import ElementInfo, Step, TestCase
-from qa_auto.ui.db import (
+from tracecase.exploration.planner import plan_requirement_against_graph
+from tracecase.exploration.regression import select_intelligent_regression_suite
+from tracecase.models import ElementInfo, Step, TestCase
+from tracecase.ui.db import (
     approve_synthesized_draft,
     create_execution_run,
     create_exploration_run,
-    get_connection,
     get_synthesized_draft,
-    get_testcase_meta,
     init_studio_db,
     save_exploration_page,
     save_exploration_transition,
@@ -35,7 +31,7 @@ from qa_auto.ui.db import (
     update_execution_run_status,
     update_synthesized_draft,
 )
-from qa_auto.ui.server import create_app
+from tracecase.ui.server import create_app
 
 
 @pytest.fixture
@@ -178,7 +174,7 @@ def test_post_approval_mutation_invalidates_status(tmp_path: Path, monkeypatch: 
     """
     db_file = tmp_path / "test_sec_guard.db"
     init_studio_db(db_file)
-    monkeypatch.setattr("qa_auto.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
+    monkeypatch.setattr("tracecase.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
 
     create_exploration_run("exp_sec", "default_project", "http://127.0.0.1:8000", {}, db_path=db_file)
 
@@ -245,7 +241,7 @@ def test_intelligent_regression_selection(tmp_path: Path, monkeypatch: pytest.Mo
     """
     db_file = tmp_path / "test_regress.db"
     init_studio_db(db_file)
-    monkeypatch.setattr("qa_auto.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
+    monkeypatch.setattr("tracecase.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
 
     recs_dir = tmp_path / "recordings"
 
@@ -257,7 +253,7 @@ def test_intelligent_regression_selection(tmp_path: Path, monkeypatch: pytest.Mo
         start_url="http://127.0.0.1:8000/settings",
         browser="chromium",
         viewport={"width": 1280, "height": 800},
-        user_agent="QA Auto",
+        user_agent="Tracecase",
         steps=[
             Step(
                 number=1,
@@ -293,7 +289,7 @@ def test_intelligent_regression_selection(tmp_path: Path, monkeypatch: pytest.Mo
         start_url="http://127.0.0.1:8000/dashboard",
         browser="chromium",
         viewport={"width": 1280, "height": 800},
-        user_agent="QA Auto",
+        user_agent="Tracecase",
         steps=[
             Step(
                 number=1,
@@ -325,7 +321,7 @@ def test_intelligent_regression_selection(tmp_path: Path, monkeypatch: pytest.Mo
         start_url="http://127.0.0.1:8000/about",
         browser="chromium",
         viewport={"width": 1280, "height": 800},
-        user_agent="QA Auto",
+        user_agent="Tracecase",
         steps=[],
         total_duration=1.0,
         total_steps=0,
@@ -374,7 +370,7 @@ def test_requirements_and_regression_api(
     """Test REST API endpoints for requirements planning and regression selection."""
     db_file = tmp_path / "test_api_p63.db"
     init_studio_db(db_file)
-    monkeypatch.setattr("qa_auto.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
+    monkeypatch.setattr("tracecase.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
 
     create_exploration_run("exp_p63", "default_project", "http://127.0.0.1:8000", {}, db_path=db_file)
     for node in mock_app_graph.nodes.values():

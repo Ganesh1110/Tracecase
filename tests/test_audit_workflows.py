@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import time
 from fastapi.testclient import TestClient
 
-from qa_auto.ui.server import create_app
+from tracecase.ui.server import create_app
 
 app = create_app()
 client = TestClient(app)

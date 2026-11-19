@@ -1,35 +1,32 @@
-"""Comprehensive tests for QA Auto Phase 3: Dashboard & Project Management."""
+"""Comprehensive tests for Tracecase Phase 3: Dashboard & Project Management."""
 
 from __future__ import annotations
 
 import tempfile
 import uuid
 from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
-from qa_auto.models import TestCase, Step, ElementInfo
-from qa_auto.ui.server import create_app
-from qa_auto.ui.db import (
-    init_studio_db,
-    create_project,
-    get_project,
-    list_projects,
-    update_project,
-    delete_project,
-    create_suite,
-    get_suite,
-    list_suites,
-    update_suite,
-    delete_suite,
+from tracecase.models import TestCase
+from tracecase.ui.db import (
     add_testcase_to_suite,
-    remove_testcase_from_suite,
     create_execution_run,
-    update_execution_run_status,
-    list_execution_runs,
+    create_project,
+    create_suite,
+    delete_project,
+    delete_suite,
     get_dashboard_metrics,
+    get_project,
+    get_suite,
+    init_studio_db,
+    remove_testcase_from_suite,
     sync_testcase_meta,
+    update_execution_run_status,
+    update_project,
 )
+from tracecase.ui.server import create_app
 
 app = create_app()
 client = TestClient(app)
@@ -84,7 +81,7 @@ def test_project_crud_and_safety_checks(temp_db):
         name="Cart Flow",
         start_url="https://example.com",
         browser="chromium",
-        user_agent="QA Auto Studio",
+        user_agent="Tracecase Studio",
         viewport={"width": 1280, "height": 720},
         steps=[],
         created_at=datetime.now(),

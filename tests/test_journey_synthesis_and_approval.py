@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from qa_auto.exploration.models import (
+from tracecase.exploration.models import (
     AppNavigationGraph,
     FormField,
     FormSchema,
@@ -17,27 +15,25 @@ from qa_auto.exploration.models import (
     PageNode,
     PageTransition,
 )
-from qa_auto.exploration.synthesizer import synthesize_test_journeys
-from qa_auto.models import TestCase
-from qa_auto.ui.db import (
+from tracecase.exploration.synthesizer import synthesize_test_journeys
+from tracecase.models import TestCase
+from tracecase.ui.db import (
     add_testcase_to_suite,
     approve_synthesized_draft,
     create_exploration_run,
     create_project,
     create_suite,
-    get_connection,
     get_synthesized_draft,
     get_testcase_meta,
     init_studio_db,
-    list_synthesized_drafts,
     reject_synthesized_draft,
     save_exploration_page,
     save_exploration_transition,
     save_synthesized_draft,
     sync_testcase_meta,
 )
-from qa_auto.ui.executor import orchestrator
-from qa_auto.ui.server import create_app
+from tracecase.ui.executor import orchestrator
+from tracecase.ui.server import create_app
 
 
 @pytest.fixture
@@ -210,7 +206,7 @@ def test_backend_gatekeeper_blocks_draft_execution(tmp_path: Path, monkeypatch: 
     """
     db_file = tmp_path / "test_gatekeeper.db"
     init_studio_db(db_file)
-    monkeypatch.setattr("qa_auto.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
+    monkeypatch.setattr("tracecase.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
 
     proj = create_project("Test Workspace", "Desc", db_path=db_file)
     suite = create_suite("Smoke Suite", project_id=proj["id"], db_path=db_file)
@@ -226,7 +222,7 @@ def test_backend_gatekeeper_blocks_draft_execution(tmp_path: Path, monkeypatch: 
         start_url="http://127.0.0.1:8000",
         browser="chromium",
         viewport={"width": 1280, "height": 800},
-        user_agent="QA Auto",
+        user_agent="Tracecase",
         steps=[],
         total_duration=1.0,
         total_steps=0,
@@ -251,7 +247,7 @@ def test_backend_gatekeeper_blocks_draft_execution(tmp_path: Path, monkeypatch: 
         add_testcase_to_suite(suite["id"], "tc_draft_1", db_path=db_file)
 
     # 3. Gatekeeper 2: Attempting to execute unapproved draft MUST FAIL
-    monkeypatch.setattr("qa_auto.ui.service.find_testcase_files", lambda paths=None: [tc_file])
+    monkeypatch.setattr("tracecase.ui.service.find_testcase_files", lambda paths=None: [tc_file])
     with pytest.raises(ValueError, match="draft"):
         import asyncio
         asyncio.run(
@@ -269,7 +265,7 @@ def test_draft_approval_and_rejection_lifecycle(tmp_path: Path, monkeypatch: pyt
     """
     db_file = tmp_path / "test_lifecycle.db"
     init_studio_db(db_file)
-    monkeypatch.setattr("qa_auto.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
+    monkeypatch.setattr("tracecase.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
 
     create_exploration_run(
         exploration_id="exp_100",
@@ -360,7 +356,7 @@ def test_autonomous_synthesis_and_approval_api(
     """Test full REST API journey: Synthesize -> List Drafts -> Approve -> Verify."""
     db_file = tmp_path / "test_api_drafts.db"
     init_studio_db(db_file)
-    monkeypatch.setattr("qa_auto.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
+    monkeypatch.setattr("tracecase.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
 
     # Seed exploration run and pages in database
     create_exploration_run(

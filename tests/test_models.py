@@ -5,7 +5,7 @@ from datetime import datetime
 import pytest
 from pydantic import ValidationError
 
-from qa_auto.models import (
+from tracecase.models import (
     ConsoleLog,
     ElementInfo,
     NetworkRequest,

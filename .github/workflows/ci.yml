@@ -34,7 +34,7 @@ jobs:
         run: ruff format --check src/
 
       - name: Run MyPy
-        run: mypy src/qa_auto --ignore-missing-imports
+        run: mypy src/tracecase --ignore-missing-imports
 
   test:
     name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
@@ -68,7 +68,7 @@ jobs:
       - name: Run tests with coverage
         if: matrix.os == 'ubuntu-latest'
         run: |
-          pytest tests/ --cov=qa_auto --cov-report=xml --cov-report=html -m "not slow"
+          pytest tests/ --cov=tracecase --cov-report=xml --cov-report=html -m "not slow"
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest'

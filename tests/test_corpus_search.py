@@ -4,9 +4,9 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from qa_auto.index.search import get_coverage_report, search_testcases
-from qa_auto.index.store import index_testcase
-from qa_auto.models import ElementInfo, NetworkRequest, Step, TestCase
+from tracecase.index.search import get_coverage_report, search_testcases
+from tracecase.index.store import index_testcase
+from tracecase.models import ElementInfo, NetworkRequest, Step, TestCase
 
 
 def _testcase(tc_id: str, name: str, url: str, selector: str = "#cart") -> TestCase:

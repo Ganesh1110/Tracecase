@@ -7,8 +7,8 @@ export function MCPIntegrations() {
 
   const mcpConfig = {
     mcpServers: {
-      qa_auto: {
-        command: "qa_auto",
+      tracecase: {
+        command: "tracecase",
         args: ["mcp"],
       },
     },
@@ -46,7 +46,7 @@ export function MCPIntegrations() {
           <span>Model Context Protocol (MCP) Integrations</span>
         </h1>
         <p className="text-sm text-slate-500 mt-1">
-          Connect external AI agents (Claude Code, Cursor, Antigravity) directly to your QA Auto test repository.
+          Connect external AI agents (Claude Code, Cursor, Antigravity) directly to your Tracecase test repository.
         </p>
       </div>
 

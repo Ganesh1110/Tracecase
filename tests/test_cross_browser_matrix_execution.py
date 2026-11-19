@@ -30,38 +30,32 @@ Validates:
 from __future__ import annotations
 
 import asyncio
-import json
 import socket
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, patch
-import uuid
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from qa_auto.models import ElementInfo, Step, TestCase
-from qa_auto.replay.models import ReplayResult, StepResult
-from qa_auto.ui.db import (
+from tracecase.models import ElementInfo, Step, TestCase
+from tracecase.replay.models import ReplayResult, StepResult
+from tracecase.ui.db import (
     create_execution_matrix,
     create_execution_run,
-    create_project,
     create_suite,
-    get_connection,
     get_execution_matrix,
-    get_execution_run,
     init_studio_db,
     list_execution_matrices,
-    list_execution_runs,
     sync_testcase_meta,
     update_execution_matrix,
     update_execution_run_status,
 )
-from qa_auto.ui.executor import ExecutionOrchestrator, orchestrator
-from qa_auto.ui.server import create_app
+from tracecase.ui.executor import ExecutionOrchestrator
+from tracecase.ui.server import create_app
 
 
 def find_free_port() -> int:
@@ -148,7 +142,7 @@ def _make_testcase(id: str, name: str, start_url: str, steps: list[Step]) -> Tes
         start_url=start_url,
         browser="chromium",
         viewport={"width": 1280, "height": 720},
-        user_agent="Mozilla/5.0 QA Auto",
+        user_agent="Mozilla/5.0 Tracecase",
         steps=steps,
         total_duration=1.0,
         total_steps=len(steps),
@@ -374,7 +368,7 @@ async def test_matrix_cross_product_queue_and_concurrency(matrix_testcases: tupl
     orch = ExecutionOrchestrator()
 
     # Launch matrix with 2 testcases x 3 browsers = 6 runs, with concurrency requested as 10 (clamped to 8)
-    with patch("qa_auto.ui.executor.ReplayEngine", side_effect=lambda **kw: MockMatrixReplayEngine(**kw)):
+    with patch("tracecase.ui.executor.ReplayEngine", side_effect=lambda **kw: MockMatrixReplayEngine(**kw)):
         matrix_info = await orch.start_matrix_execution(
             testcase_ids=[tcs[0].id, tcs[1].id],
             browsers=["chromium", "firefox", "webkit"],
@@ -425,7 +419,7 @@ async def test_cross_browser_divergence_detection(matrix_testcases: tuple[Path, 
     orch = ExecutionOrchestrator()
 
     with patch(
-        "qa_auto.ui.executor.ReplayEngine",
+        "tracecase.ui.executor.ReplayEngine",
         side_effect=lambda **kw: MockMatrixReplayEngine(fail_browsers=["firefox"], **kw),
     ):
         matrix_res = await orch.start_matrix_execution(
@@ -458,7 +452,7 @@ async def test_browser_environment_error_distinction(matrix_testcases: tuple[Pat
     orch = ExecutionOrchestrator()
 
     with patch(
-        "qa_auto.ui.executor.ReplayEngine",
+        "tracecase.ui.executor.ReplayEngine",
         side_effect=lambda **kw: MockMatrixReplayEngine(error_browsers=["webkit"], **kw),
     ):
         matrix_res = await orch.start_matrix_execution(
@@ -493,7 +487,7 @@ async def test_matrix_cancellation(matrix_testcases: tuple[Path, list[TestCase]]
             now = datetime.now()
             return ReplayResult(testcase_id="tc_mat_1", started_at=now, finished_at=now, status="passed", exit_code=0, steps=[])
 
-    with patch("qa_auto.ui.executor.ReplayEngine", side_effect=lambda **kw: SlowReplayEngine(**kw)):
+    with patch("tracecase.ui.executor.ReplayEngine", side_effect=lambda **kw: SlowReplayEngine(**kw)):
         matrix_res = await orch.start_matrix_execution(
             testcase_ids=[tcs[0].id],
             browsers=["chromium", "firefox", "webkit"],
@@ -518,7 +512,7 @@ def test_matrix_api_endpoints(matrix_testcases: tuple[Path, list[TestCase]]):
     client = TestClient(app)
 
     # 1. Launch matrix execution via POST /api/executions/matrix
-    with patch("qa_auto.ui.executor.ReplayEngine", side_effect=lambda **kw: MockMatrixReplayEngine(**kw)):
+    with patch("tracecase.ui.executor.ReplayEngine", side_effect=lambda **kw: MockMatrixReplayEngine(**kw)):
         resp = client.post(
             "/api/executions/matrix",
             json={

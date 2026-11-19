@@ -4,8 +4,8 @@ from datetime import datetime
 
 import pytest
 
-from qa_auto.browser import BrowserManager
-from qa_auto.models import Step
+from tracecase.browser import BrowserManager
+from tracecase.models import Step
 
 
 def test_step_model_supports_page_id() -> None:

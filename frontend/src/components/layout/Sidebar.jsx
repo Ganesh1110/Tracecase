@@ -90,7 +90,7 @@ export function Sidebar() {
           {!collapsed && (
             <div className="flex flex-col min-w-0">
               <span className="text-base font-bold tracking-tight text-slate-900 dark:text-white truncate">
-                QA Auto
+                Tracecase
               </span>
               <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-widest truncate">
                 Studio Platform

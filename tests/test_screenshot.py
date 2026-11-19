@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from qa_auto.screenshot import generate_screenshot_filename, take_screenshot
+from tracecase.screenshot import generate_screenshot_filename, take_screenshot
 
 
 class TestGenerateScreenshotFilename:

@@ -2,10 +2,10 @@
 
 from datetime import datetime
 
-from qa_auto.models import ElementInfo, NetworkRequest, Step, TestCase
-from qa_auto.mutation.actions import mutate_actions
-from qa_auto.mutation.models import MutatedTestCase
-from qa_auto.mutation.network import mutate_network_faults
+from tracecase.models import ElementInfo, NetworkRequest, Step, TestCase
+from tracecase.mutation.actions import mutate_actions
+from tracecase.mutation.models import MutatedTestCase
+from tracecase.mutation.network import mutate_network_faults
 
 
 def _element(selector: str, tag: str = "button", text: str = "Submit") -> ElementInfo:

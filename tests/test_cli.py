@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from typer.testing import CliRunner
 
-from qa_auto.cli import app
+from tracecase.cli import app
 
 runner = CliRunner()
 
@@ -18,10 +18,10 @@ class TestVersionCommand:
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
 
-    def test_version_shows_qa_auto(self) -> None:
-        """Test that version shows QA Auto version."""
+    def test_version_shows_tracecase(self) -> None:
+        """Test that version shows Tracecase version."""
         result = runner.invoke(app, ["version"])
-        assert "QA Auto" in result.stdout or "qa_auto" in result.stdout.lower()
+        assert "Tracecase" in result.stdout or "tracecase" in result.stdout.lower()
 
     def test_version_shows_python(self) -> None:
         """Test that version shows Python version."""
@@ -63,7 +63,7 @@ class TestRecordCommand:
 
     def test_record_url_validation(self, temp_dir: Path) -> None:
         """Test URL validation - adds https if missing."""
-        with patch("qa_auto.recorder.Recorder") as mock_recorder_class:
+        with patch("tracecase.recorder.Recorder") as mock_recorder_class:
             mock_instance = MagicMock()
             mock_instance.run = AsyncMock()
             mock_recorder_class.return_value = mock_instance
@@ -78,7 +78,7 @@ class TestRecordCommand:
 
     def test_record_with_output_dir(self, temp_dir: Path) -> None:
         """Test record with custom output directory."""
-        with patch("qa_auto.recorder.Recorder") as mock_recorder_class:
+        with patch("tracecase.recorder.Recorder") as mock_recorder_class:
             mock_instance = MagicMock()
             mock_instance.run = AsyncMock()
             mock_recorder_class.return_value = mock_instance
@@ -91,7 +91,7 @@ class TestRecordCommand:
 
     def test_record_with_browser_option(self, temp_dir: Path) -> None:
         """Test record with browser option."""
-        with patch("qa_auto.recorder.Recorder") as mock_recorder_class:
+        with patch("tracecase.recorder.Recorder") as mock_recorder_class:
             mock_instance = MagicMock()
             mock_instance.run = AsyncMock()
             mock_recorder_class.return_value = mock_instance
@@ -118,7 +118,7 @@ class TestCLIOutput:
 
     def test_cli_handles_keyboard_interrupt(self, temp_dir: Path) -> None:
         """Test that CLI handles Ctrl+C gracefully."""
-        with patch("qa_auto.recorder.Recorder") as mock_recorder_class:
+        with patch("tracecase.recorder.Recorder") as mock_recorder_class:
             mock_instance = MagicMock()
             mock_instance.run = AsyncMock(side_effect=KeyboardInterrupt)
             mock_recorder_class.return_value = mock_instance

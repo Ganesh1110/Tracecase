@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from qa_auto.recorder import Recorder
+from tracecase.recorder import Recorder
 
 
 def test_recorder_tracks_multiple_pages(temp_dir: Path) -> None:

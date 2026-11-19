@@ -1,4 +1,4 @@
-"""Pytest configuration and fixtures for QA Auto tests."""
+"""Pytest configuration and fixtures for Tracecase tests."""
 
 import tempfile
 from collections.abc import Generator
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from qa_auto.models import (
+from tracecase.models import (
     ConsoleLog,
     ElementInfo,
     NetworkRequest,

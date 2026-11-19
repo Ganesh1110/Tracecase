@@ -48,17 +48,17 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact_name: qa_auto-linux-amd64
-            asset_name: qa_auto-linux-amd64
+            artifact_name: tracecase-linux-amd64
+            asset_name: tracecase-linux-amd64
           - os: macos-latest
-            artifact_name: qa_auto-macos-amd64
-            asset_name: qa_auto-macos-amd64
+            artifact_name: tracecase-macos-amd64
+            asset_name: tracecase-macos-amd64
           - os: macos-14
-            artifact_name: qa_auto-macos-arm64
-            asset_name: qa_auto-macos-arm64
+            artifact_name: tracecase-macos-arm64
+            asset_name: tracecase-macos-arm64
           - os: windows-latest
-            artifact_name: qa_auto-windows-amd64.exe
-            asset_name: qa_auto-windows-amd64
+            artifact_name: tracecase-windows-amd64.exe
+            asset_name: tracecase-windows-amd64
 
     steps:
       - uses: actions/checkout@v6
@@ -76,15 +76,15 @@ jobs:
 
       - name: Build binary with PyInstaller
         run: |
-          pyinstaller --onefile --name qa_auto --collect-all playwright src/qa_auto/cli.py
+          pyinstaller --onefile --name tracecase --collect-all playwright src/tracecase/cli.py
 
       - name: Rename binary (Unix)
         if: runner.os != 'Windows'
-        run: mv dist/qa_auto dist/${{ matrix.artifact_name }}
+        run: mv dist/tracecase dist/${{ matrix.artifact_name }}
 
       - name: Rename binary (Windows)
         if: runner.os == 'Windows'
-        run: mv dist/qa_auto.exe dist/${{ matrix.artifact_name }}
+        run: mv dist/tracecase.exe dist/${{ matrix.artifact_name }}
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4

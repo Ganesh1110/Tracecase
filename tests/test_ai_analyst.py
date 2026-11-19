@@ -7,10 +7,10 @@ from typing import Any
 
 import pytest
 
-from qa_auto.ai.analyst import analyze_testcase, write_analysis_result
-from qa_auto.ai.models import Message
-from qa_auto.ai.provider import NullProvider
-from qa_auto.models import ElementInfo, PageError, Step, TestCase
+from tracecase.ai.analyst import analyze_testcase, write_analysis_result
+from tracecase.ai.models import Message
+from tracecase.ai.provider import NullProvider
+from tracecase.models import ElementInfo, PageError, Step, TestCase
 
 
 def _step(number: int, action: str = "click", value: str | None = None) -> Step:

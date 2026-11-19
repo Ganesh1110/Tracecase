@@ -1,4 +1,4 @@
-"""Unit and integration tests for QA Auto Studio Phase 4.
+"""Unit and integration tests for Tracecase Studio Phase 4.
 
 Verifies:
 1. Recorder Session Manager pause/resume/step capture & API endpoints
@@ -17,24 +17,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from qa_auto.models import Step, TestCase
-from qa_auto.replay.models import Assertion, AssertionResult, StepResult
-from qa_auto.ui.api import router
-from qa_auto.ui.db import (
+from tracecase.models import Step
+from tracecase.ui.db import (
     create_execution_run,
-    create_project,
     get_execution_run,
     init_studio_db,
     log_execution_step,
 )
-from qa_auto.ui.server import create_app
-from qa_auto.ui.service import (
-    add_custom_assertion,
+from tracecase.ui.server import create_app
+from tracecase.ui.service import (
     create_manual_testcase,
     recording_manager,
-    resolve_testcase_file,
-    update_custom_assertion,
-    update_testcase_metadata,
 )
 
 
@@ -48,7 +41,7 @@ def client():
 def temp_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Hermetic temp DB."""
     db_file = tmp_path / "studio.db"
-    monkeypatch.setattr("qa_auto.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
+    monkeypatch.setattr("tracecase.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
     init_studio_db(db_file)
     return tmp_path, db_file
 
@@ -79,7 +72,7 @@ async def test_recorder_pause_resume_and_step_callback(temp_env):
     mock_rec.page_errors = []
     mock_rec.network_requests = []
 
-    with patch("qa_auto.ui.service.Recorder", return_value=mock_rec):
+    with patch("tracecase.ui.service.Recorder", return_value=mock_rec):
         session = await recording_manager.start(
             url="https://example.com",
             name="Streaming Record Test",
@@ -221,7 +214,7 @@ def test_testcase_metadata_and_assertion_api(client, temp_env):
         assert del_resp.status_code == 200
         assert len(del_resp.json()["custom_assertions"]) == 0
     finally:
-        from qa_auto.ui.service import delete_testcase
+        from tracecase.ui.service import delete_testcase
         try:
             delete_testcase(tc_id)
         except Exception:
@@ -383,7 +376,7 @@ async def test_end_to_end_replay_and_report_retrieval(client, temp_env):
         assert data["step_logs"][0]["assertions"][0]["kind"] == "status"
         assert data["step_logs"][0]["assertions"][0]["passed"] is True
     finally:
-        from qa_auto.ui.service import delete_testcase
+        from tracecase.ui.service import delete_testcase
         try:
             delete_testcase(tc_id)
         except Exception:

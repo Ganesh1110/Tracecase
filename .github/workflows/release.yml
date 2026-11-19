@@ -19,7 +19,7 @@ jobs:
     needs: build
     environment:
       name: pypi
-      url: https://pypi.org/project/qa_auto/
+      url: https://pypi.org/project/tracecase/
     permissions:
       id-token: write
 
@@ -41,7 +41,7 @@ jobs:
     needs: build
     environment:
       name: testpypi
-      url: https://test.pypi.org/project/qa_auto/
+      url: https://test.pypi.org/project/tracecase/
     permissions:
       id-token: write
 
@@ -78,10 +78,10 @@ jobs:
           cp artifacts/python-wheel/*.whl release-assets/
           
           # Copy binaries
-          cp artifacts/qa_auto-linux-amd64/qa_auto-linux-amd64 release-assets/ || true
-          cp artifacts/qa_auto-macos-amd64/qa_auto-macos-amd64 release-assets/ || true
-          cp artifacts/qa_auto-macos-arm64/qa_auto-macos-arm64 release-assets/ || true
-          cp artifacts/qa_auto-windows-amd64/qa_auto-windows-amd64.exe release-assets/ || true
+          cp artifacts/tracecase-linux-amd64/tracecase-linux-amd64 release-assets/ || true
+          cp artifacts/tracecase-macos-amd64/tracecase-macos-amd64 release-assets/ || true
+          cp artifacts/tracecase-macos-arm64/tracecase-macos-arm64 release-assets/ || true
+          cp artifacts/tracecase-windows-amd64/tracecase-windows-amd64.exe release-assets/ || true
           
           # Copy checksums
           cp artifacts/checksums/SHA256SUMS.txt release-assets/
@@ -96,28 +96,28 @@ jobs:
         id: notes
         run: |
           cat << 'EOF' > release-notes.md
-          ## QA Auto ${{ steps.version.outputs.version }}
+          ## Tracecase ${{ steps.version.outputs.version }}
           
           ### Installation
           
           **Via pip (recommended):**
           ```bash
-          pip install qa_auto==${{ steps.version.outputs.version }}
+          pip install tracecase==${{ steps.version.outputs.version }}
           ```
           
           **Via pipx:**
           ```bash
-          pipx install qa_auto==${{ steps.version.outputs.version }}
+          pipx install tracecase==${{ steps.version.outputs.version }}
           ```
           
           ### Download binaries
           
           | Platform | Architecture | Download |
           |----------|--------------|----------|
-          | Linux | x64 | `qa_auto-linux-amd64` |
-          | macOS | x64 (Intel) | `qa_auto-macos-amd64` |
-          | macOS | ARM64 (Apple Silicon) | `qa_auto-macos-arm64` |
-          | Windows | x64 | `qa_auto-windows-amd64.exe` |
+          | Linux | x64 | `tracecase-linux-amd64` |
+          | macOS | x64 (Intel) | `tracecase-macos-amd64` |
+          | macOS | ARM64 (Apple Silicon) | `tracecase-macos-arm64` |
+          | Windows | x64 | `tracecase-windows-amd64.exe` |
           
           ### Quick Start
           
@@ -126,7 +126,7 @@ jobs:
           playwright install chromium
           
           # Record a test case
-          qa_auto record https://example.com -o ./my-testcase
+          tracecase record https://example.com -o ./my-testcase
           ```
           
           ### Checksums
@@ -137,7 +137,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: QA Auto ${{ steps.version.outputs.version }}
+          name: Tracecase ${{ steps.version.outputs.version }}
           body_path: release-notes.md
           files: release-assets/*
           draft: false

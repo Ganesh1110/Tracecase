@@ -89,7 +89,7 @@ recordings/
 *.har
 diff_result.png
 tests/test_orangehrm_*.py
-.qa_auto/
+.tracecase/
 
 # Frontend (Node / React / Vite)
 node_modules/

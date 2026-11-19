@@ -19,13 +19,13 @@ export function ProjectProvider({ children }) {
       const data = await api.getProjects();
       setProjects(data);
       if (data.length > 0) {
-        const savedId = localStorage.getItem('qa_auto_active_project');
+        const savedId = localStorage.getItem('tracecase_active_project');
         const matched = data.find((p) => p.id === savedId);
         if (matched) {
           setCurrentProject(matched);
         } else {
           setCurrentProject(data[0]);
-          localStorage.setItem('qa_auto_active_project', data[0].id);
+          localStorage.setItem('tracecase_active_project', data[0].id);
         }
       }
     } catch (err) {
@@ -42,7 +42,7 @@ export function ProjectProvider({ children }) {
   const handleSetCurrentProject = (project) => {
     setCurrentProject(project);
     if (project?.id) {
-      localStorage.setItem('qa_auto_active_project', project.id);
+      localStorage.setItem('tracecase_active_project', project.id);
     }
   };
 

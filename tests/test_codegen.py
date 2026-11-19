@@ -3,8 +3,8 @@
 from datetime import datetime
 from pathlib import Path
 
-from qa_auto.codegen.pytest_exporter import PytestExporter, generate_pytest_code
-from qa_auto.models import ElementInfo, Step, TestCase
+from tracecase.codegen.pytest_exporter import PytestExporter, generate_pytest_code
+from tracecase.models import ElementInfo, Step, TestCase
 
 
 def _element(selector: str, tag: str = "button", text: str = "Submit") -> ElementInfo:

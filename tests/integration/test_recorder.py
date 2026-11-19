@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from qa_auto.models import TestCase
-from qa_auto.recorder import Recorder
+from tracecase.models import TestCase
+from tracecase.recorder import Recorder
 
 
 @pytest.mark.integration
@@ -190,7 +190,7 @@ class TestRecorderExport:
 
     def test_export_all_formats(self, temp_dir: Path) -> None:
         """Test that exporters create all output formats."""
-        from qa_auto.exporters import HTMLExporter, JSONExporter, MarkdownExporter
+        from tracecase.exporters import HTMLExporter, JSONExporter, MarkdownExporter
 
         # Create output directory
         temp_dir.mkdir(parents=True, exist_ok=True)

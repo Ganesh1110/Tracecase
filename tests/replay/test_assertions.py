@@ -2,9 +2,9 @@
 
 from datetime import datetime
 
-from qa_auto.models import ElementInfo, NetworkRequest, Step, TestCase
-from qa_auto.replay.assertions import derive_assertions, evaluate_assertions
-from qa_auto.replay.models import Assertion
+from tracecase.models import ElementInfo, NetworkRequest, Step, TestCase
+from tracecase.replay.assertions import derive_assertions, evaluate_assertions
+from tracecase.replay.models import Assertion
 
 
 def _element(selector: str = "#load", tag: str = "button") -> ElementInfo:

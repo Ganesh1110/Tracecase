@@ -4,8 +4,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from qa_auto.models import ElementInfo, NetworkRequest, Step, TestCase
-from qa_auto.mutation.engine import MutationEngine
+from tracecase.models import ElementInfo, NetworkRequest, Step, TestCase
+from tracecase.mutation.engine import MutationEngine
 
 
 def _element(selector: str, tag: str = "button", text: str = "Submit") -> ElementInfo:

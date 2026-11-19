@@ -11,40 +11,36 @@ Validates:
 8. UI REST API Endpoints for all AI Intelligence features
 """
 
-import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+
 import pytest
 from fastapi.testclient import TestClient
 
-from qa_auto.ai.assertion_generator import (
+from tracecase.ai.assertion_generator import (
     generate_heuristic_assertions,
     suggest_assertions,
 )
-from qa_auto.ai.coverage_analyst import analyze_corpus_coverage
-from qa_auto.ai.failure_analyst import (
-    FailureCategory,
-    analyze_execution_failure,
+from tracecase.ai.coverage_analyst import analyze_corpus_coverage
+from tracecase.ai.failure_analyst import (
     analyze_failure_heuristics,
 )
-from qa_auto.ai.provider import NullProvider
-from qa_auto.ai.selectors import (
+from tracecase.ai.provider import NullProvider
+from tracecase.ai.selectors import (
     audit_testcase_selectors,
     evaluate_selector,
 )
-from qa_auto.ai.variations import (
+from tracecase.ai.variations import (
     generate_heuristic_variations,
-    generate_smart_variations,
 )
-from qa_auto.models import ElementInfo, NetworkRequest, Step, TestCase
-from qa_auto.ui.db import (
+from tracecase.models import ElementInfo, NetworkRequest, Step, TestCase
+from tracecase.ui.db import (
     create_execution_run,
     init_studio_db,
     update_execution_run_status,
 )
-from qa_auto.ui.server import create_app
-from qa_auto.ui.service import create_manual_testcase, persist_generated_testcase
+from tracecase.ui.server import create_app
+from tracecase.ui.service import persist_generated_testcase
 
 
 @pytest.fixture
@@ -122,7 +118,7 @@ def sample_testcase() -> TestCase:
         start_url="https://example.com/login",
         browser="chromium",
         viewport={"width": 1280, "height": 720},
-        user_agent="QA Auto Studio",
+        user_agent="Tracecase Studio",
         steps=steps,
         custom_assertions=[],
         created_at=datetime.now(),
@@ -138,7 +134,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     recordings_dir = tmp_path / "recordings"
     recordings_dir.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setenv("QA_AUTO_STUDIO_DB", str(db_file))
+    monkeypatch.setenv("TRACECASE_STUDIO_DB", str(db_file))
     monkeypatch.chdir(tmp_path)
     init_studio_db(str(db_file))
 

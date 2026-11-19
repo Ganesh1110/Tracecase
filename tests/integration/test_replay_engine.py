@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from qa_auto.models import ElementInfo, NetworkRequest, Step, TestCase
-from qa_auto.replay.engine import ReplayEngine, write_replay_result
+from tracecase.models import ElementInfo, NetworkRequest, Step, TestCase
+from tracecase.replay.engine import ReplayEngine, write_replay_result
 
 
 def _element(selector: str, text: str = "Load") -> ElementInfo:

@@ -1,6 +1,6 @@
-# QA Auto — Comprehensive User Guide
+# Tracecase — Comprehensive User Guide
 
-Welcome to the **QA Auto** user guide! This manual provides an end-to-end walkthrough of how to record, replay, heal, test, mutate, and manage browser test cases with QA Auto.
+Welcome to the **Tracecase** user guide! This manual provides an end-to-end walkthrough of how to record, replay, heal, test, mutate, and manage browser test cases with Tracecase.
 
 ---
 
@@ -25,24 +25,24 @@ Welcome to the **QA Auto** user guide! This manual provides an end-to-end walkth
 
 ## 1. Overview & Core Architecture
 
-QA Auto turns real human or automated browser interactions into structured, maintainable QA assets.
+Tracecase turns real human or automated browser interactions into structured, maintainable QA assets.
 
-### The QA Auto Workflow
+### The Tracecase Workflow
 
 ```
 [ Browser Interaction ]
          │
          ▼
-  qa_auto record          ──► Generates testcase.json, markdown, HTML, screenshots
+  tracecase record          ──► Generates testcase.json, markdown, HTML, screenshots
          │
-         ├──► qa_auto replay      ──► Replays actions, verifies assertions & heals selectors
-         ├──► qa_auto diff        ──► Detects pixel-level visual UI regressions
-         ├──► qa_auto codegen     ──► Exports to zero-dependency pytest-playwright scripts
-         ├──► qa_auto mutate      ──► Synthesizes edge-case and negative security tests
-         ├──► qa_auto analyze     ──► Evaluates flow risks via heuristics and local LLMs
-         └──► qa_auto index       ──► Indexes sessions into FTS5 SQLite database
+         ├──► tracecase replay      ──► Replays actions, verifies assertions & heals selectors
+         ├──► tracecase diff        ──► Detects pixel-level visual UI regressions
+         ├──► tracecase codegen     ──► Exports to zero-dependency pytest-playwright scripts
+         ├──► tracecase mutate      ──► Synthesizes edge-case and negative security tests
+         ├──► tracecase analyze     ──► Evaluates flow risks via heuristics and local LLMs
+         └──► tracecase index       ──► Indexes sessions into FTS5 SQLite database
                    │
-                   └──► qa_auto mcp ──► Serves test corpus to AI agents (Cursor, Claude)
+                   └──► tracecase mcp ──► Serves test corpus to AI agents (Cursor, Claude)
 ```
 
 ---
@@ -60,8 +60,8 @@ QA Auto turns real human or automated browser interactions into structured, main
 python3 -m venv .venv
 source .venv/bin/activate    # On Windows: .venv\Scripts\activate
 
-# 2. Install QA Auto
-pip install qa_auto
+# 2. Install Tracecase
+pip install tracecase
 
 # 3. Install browser binaries
 playwright install chromium
@@ -70,8 +70,8 @@ playwright install chromium
 ### Installing from Source
 
 ```bash
-git clone https://github.com/Ganesh1110/qa_auto.git
-cd qa_auto
+git clone https://github.com/Ganesh1110/Tracecase.git
+cd Tracecase
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
@@ -81,8 +81,8 @@ playwright install chromium
 ### Verifying the Setup
 
 ```bash
-qa_auto check
-qa_auto version
+tracecase check
+tracecase version
 ```
 
 ---
@@ -92,16 +92,16 @@ qa_auto version
 To record a user flow on any website or local web app:
 
 ```bash
-qa_auto record https://example.com -o ./recordings/example_flow -n "Example Homepage Flow"
+tracecase record https://example.com -o ./recordings/example_flow -n "Example Homepage Flow"
 ```
 
 ### During the Recording:
 1. A Chromium browser window will open displaying the target URL.
-2. Look at the **top-right corner** of the browser window: you will see the floating **QA Auto Control Panel**.
+2. Look at the **top-right corner** of the browser window: you will see the floating **Tracecase Control Panel**.
 3. Click **Start** in the panel to begin capturing actions.
 4. Interact naturally with the page: click buttons, enter form inputs, navigate menus, or open new tabs.
 5. When finished, click **Stop** in the control panel.
-6. QA Auto will compile the recorded steps, capture network context, save screenshots, and generate documentation.
+6. Tracecase will compile the recorded steps, capture network context, save screenshots, and generate documentation.
 
 ---
 
@@ -131,21 +131,21 @@ recordings/example_flow/
 
 ## 5. Replaying Test Cases & Self-Healing
 
-QA Auto can deterministically execute previously recorded sessions against the same or an updated environment:
+Tracecase can deterministically execute previously recorded sessions against the same or an updated environment:
 
 ```bash
 # Basic headless replay
-qa_auto replay ./recordings/example_flow/testcase.json
+tracecase replay ./recordings/example_flow/testcase.json
 
 # Headed replay with selector healing enabled
-qa_auto replay ./recordings/example_flow/testcase.json --headed --heal
+tracecase replay ./recordings/example_flow/testcase.json --headed --heal
 
 # Save execution results to a custom directory
-qa_auto replay ./recordings/example_flow/testcase.json -o ./runs/run_01
+tracecase replay ./recordings/example_flow/testcase.json -o ./runs/run_01
 ```
 
 ### Self-Healing Locators (`--heal`)
-If your frontend team changes class names, renames CSS selectors, or refactors the DOM structure, standard automated tests break. With `--heal`, QA Auto activates an intelligent fallback resolution engine:
+If your frontend team changes class names, renames CSS selectors, or refactors the DOM structure, standard automated tests break. With `--heal`, Tracecase activates an intelligent fallback resolution engine:
 1. **Target ID**: Checks if the original `id` attribute exists.
 2. **Name Attribute**: Searches for matching input or field names.
 3. **Primary CSS Selector**: Attempts the recorded CSS path.
@@ -158,26 +158,26 @@ If the element is successfully resolved via any fallback tier, the step passes a
 
 ## 6. Visual Regression Testing & Screenshot Diffing
 
-QA Auto includes built-in pixel-accurate and perceptual image comparison to catch unintended styling bugs.
+Tracecase includes built-in pixel-accurate and perceptual image comparison to catch unintended styling bugs.
 
-### Standalone Image Comparison (`qa_auto diff`)
+### Standalone Image Comparison (`tracecase diff`)
 
 Compare any two screenshots and generate a highlighted diff heatmap:
 
 ```bash
-qa_auto diff baseline.png candidate.png -o diff_output.png --threshold 0.1
+tracecase diff baseline.png candidate.png -o diff_output.png --threshold 0.1
 ```
 
 - **Exit code `0`**: Images match within tolerance.
 - **Exit code `1`**: Mismatch exceeds threshold.
 - The output image highlights pixel differences in bright magenta.
 
-### Replay with Visual Regression (`qa_auto replay --diff`)
+### Replay with Visual Regression (`tracecase replay --diff`)
 
 To verify that your UI looks identical to the original recording:
 
 ```bash
-qa_auto replay ./recordings/example_flow/testcase.json \
+tracecase replay ./recordings/example_flow/testcase.json \
   --diff \
   --diff-threshold 0.5 \
   --diff-fail
@@ -196,13 +196,13 @@ When testing against staging or offline environments where backend APIs may be u
 ### 1. Export HAR from Recorded Test Case
 
 ```bash
-qa_auto export-har ./recordings/example_flow/testcase.json -o ./recordings/example_flow/network.har
+tracecase export-har ./recordings/example_flow/testcase.json -o ./recordings/example_flow/network.har
 ```
 
 ### 2. Replay with Network Mocking
 
 ```bash
-qa_auto replay ./recordings/example_flow/testcase.json --from-har ./recordings/example_flow/network.har
+tracecase replay ./recordings/example_flow/testcase.json --from-har ./recordings/example_flow/network.har
 ```
 
 Playwright intercepts matching outgoing requests and returns the recorded HTTP headers, status codes, and response payloads directly from the HAR archive, allowing 100% offline replay.
@@ -215,10 +215,10 @@ Convert your recorded sessions into clean, maintainable `pytest-playwright` test
 
 ```bash
 # Generate test file in the recording directory
-qa_auto codegen ./recordings/example_flow/testcase.json
+tracecase codegen ./recordings/example_flow/testcase.json
 
 # Specify a custom destination path and attach HAR mocking
-qa_auto codegen ./recordings/example_flow/testcase.json \
+tracecase codegen ./recordings/example_flow/testcase.json \
   -o ./tests/test_checkout_flow.py \
   --har ./recordings/example_flow/network.har
 ```
@@ -239,12 +239,12 @@ The generated code features:
 
 ## 9. Flow Analysis & Local AI Enrichment
 
-QA Auto can analyze recorded journeys to uncover QA risks, missing assertions, and form validation gaps.
+Tracecase can analyze recorded journeys to uncover QA risks, missing assertions, and form validation gaps.
 
 ### Deterministic Heuristics (100% Offline)
 
 ```bash
-qa_auto analyze ./recordings/example_flow/testcase.json
+tracecase analyze ./recordings/example_flow/testcase.json
 ```
 
 Heuristics inspect:
@@ -259,13 +259,13 @@ Enrich findings with an autonomous QA engineer analysis powered by your own loca
 
 ```bash
 # Using Ollama (default: http://127.0.0.1:11434, llama3)
-qa_auto analyze ./recordings/example_flow/testcase.json --ai
+tracecase analyze ./recordings/example_flow/testcase.json --ai
 
 # Using custom Ollama model
-qa_auto analyze ./recordings/example_flow/testcase.json --ai --model mistral
+tracecase analyze ./recordings/example_flow/testcase.json --ai --model mistral
 
 # Using local OpenAI-compatible server (LM Studio, vLLM, LocalAI)
-qa_auto analyze ./recordings/example_flow/testcase.json \
+tracecase analyze ./recordings/example_flow/testcase.json \
   --ai \
   --provider openai \
   --base-url http://127.0.0.1:8000/v1 \
@@ -282,14 +282,14 @@ The output `analysis.json` contains:
 
 ## 10. Automated Negative Flow Generator (Mutations)
 
-Rather than manually scripting dozens of negative scenarios, QA Auto synthesizes realistic failure and edge-case test cases from your golden recording:
+Rather than manually scripting dozens of negative scenarios, Tracecase synthesizes realistic failure and edge-case test cases from your golden recording:
 
 ```bash
 # Generate negative test cases
-qa_auto mutate ./recordings/example_flow/testcase.json -o ./mutations/
+tracecase mutate ./recordings/example_flow/testcase.json -o ./mutations/
 
 # Filter by strategy
-qa_auto mutate ./recordings/example_flow/testcase.json --strategy inputs --limit 10
+tracecase mutate ./recordings/example_flow/testcase.json --strategy inputs --limit 10
 ```
 
 ### Mutation Strategies:
@@ -300,23 +300,23 @@ qa_auto mutate ./recordings/example_flow/testcase.json --strategy inputs --limit
 Each mutated test case is saved as a runnable `testcase.json` that you can directly replay:
 
 ```bash
-qa_auto replay ./mutations/tc_example_mut_1_empty/testcase.json
+tracecase replay ./mutations/tc_example_mut_1_empty/testcase.json
 ```
 
 ---
 
 ## 11. Corpus Search, Indexing & Coverage Analytics
 
-When maintaining dozens or hundreds of test cases, QA Auto provides a centralized search and analytics engine powered by SQLite FTS5.
+When maintaining dozens or hundreds of test cases, Tracecase provides a centralized search and analytics engine powered by SQLite FTS5.
 
 ### Indexing Recordings
 
 ```bash
 # Index a single directory of recordings
-qa_auto index ./recordings/
+tracecase index ./recordings/
 
 # Index multiple projects into a centralized database
-qa_auto index ./tests/e2e/ --db ~/.qa_auto/corpus.db
+tracecase index ./tests/e2e/ --db ~/.tracecase/corpus.db
 ```
 
 ### Full-Text Search (BM25)
@@ -324,8 +324,8 @@ qa_auto index ./tests/e2e/ --db ~/.qa_auto/corpus.db
 Search across all recorded steps, input values, button labels, selectors, and URLs:
 
 ```bash
-qa_auto search "submit payment"
-qa_auto search "input[name='email']" --limit 5
+tracecase search "submit payment"
+tracecase search "input[name='email']" --limit 5
 ```
 
 ### Coverage Analytics
@@ -333,7 +333,7 @@ qa_auto search "input[name='email']" --limit 5
 Audit which URLs, domains, and interactive elements have test coverage:
 
 ```bash
-qa_auto coverage
+tracecase coverage
 ```
 
 Displays:
@@ -341,33 +341,33 @@ Displays:
 - Breakdown of actions per domain.
 - Warnings for identical duplicate test flows.
 
-### Wiping Local Corpus & Recordings (`qa_auto clean`)
+### Wiping Local Corpus & Recordings (`tracecase clean`)
 
 Recordings and databases run strictly locally and are excluded from git. When you want to reset your environment or wipe test artifacts:
 
 ```bash
-# Wipe the local SQLite corpus database (~/.qa_auto/corpus.db)
-qa_auto clean --db
+# Wipe the local SQLite corpus database (~/.tracecase/corpus.db)
+tracecase clean --db
 
 # Wipe both the corpus database AND all local ./recordings
-qa_auto clean --all
+tracecase clean --all
 
 # Reset database before a fresh indexing run
-qa_auto index ./recordings/ --clear
+tracecase index ./recordings/ --clear
 ```
 
 ---
 
 ## 12. Model Context Protocol (MCP) Server for AI Assistants
 
-QA Auto includes a native Model Context Protocol (MCP) server operating over `stdio`. This allows AI coding tools like **Cursor**, **Claude Desktop**, and **Antigravity** to search, read, and reason over your QA test suite.
+Tracecase includes a native Model Context Protocol (MCP) server operating over `stdio`. This allows AI coding tools like **Cursor**, **Claude Desktop**, and **Antigravity** to search, read, and reason over your QA test suite.
 
 ### Running the Server
 
 ```bash
-qa_auto mcp
+tracecase mcp
 # Or with a custom corpus database:
-qa_auto mcp --db ~/.qa_auto/corpus.db
+tracecase mcp --db ~/.tracecase/corpus.db
 ```
 
 ### Claude Desktop Configuration Example
@@ -377,9 +377,9 @@ Add the following to your `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "qa-auto": {
-      "command": "/path/to/.venv/bin/qa_auto",
-      "args": ["mcp", "--db", "/path/to/.qa_auto/corpus.db"]
+    "tracecase": {
+      "command": "/path/to/.venv/bin/tracecase",
+      "args": ["mcp", "--db", "/path/to/.tracecase/corpus.db"]
     }
   }
 }
@@ -388,9 +388,9 @@ Add the following to your `claude_desktop_config.json`:
 ### Cursor IDE Configuration Example
 
 In Cursor settings under **Features > MCP Servers**:
-- **Name**: `qa-auto`
+- **Name**: `tracecase`
 - **Type**: `command`
-- **Command**: `/path/to/.venv/bin/qa_auto mcp`
+- **Command**: `/path/to/.venv/bin/tracecase mcp`
 
 ### Available MCP Tools:
 - `search_testcases`: Search the indexed corpus by keyword or selector.
@@ -401,9 +401,9 @@ In Cursor settings under **Features > MCP Servers**:
 
 ## 13. Multi-Tab & Pop-up Handling
 
-QA Auto automatically tracks multiple browser tabs and popup windows.
+Tracecase automatically tracks multiple browser tabs and popup windows.
 
-- **During Recording**: When a link opens a new tab (`target="_blank"`) or JavaScript triggers `window.open()`, QA Auto attaches listeners to the newly created page. All interactions on that page are tagged with their corresponding `page_id`.
+- **During Recording**: When a link opens a new tab (`target="_blank"`) or JavaScript triggers `window.open()`, Tracecase attaches listeners to the newly created page. All interactions on that page are tagged with their corresponding `page_id`.
 - **During Replay**: The replay engine synchronizes popup creation (`expect_popup()`) and automatically switches execution context to the active tab.
 - **Backwards Compatibility**: Existing single-page test cases without `page_id` continue to function seamlessly.
 
@@ -417,13 +417,13 @@ QA Auto automatically tracks multiple browser tabs and popup windows.
 ### Q: Replay fails because a dynamic element takes too long to render.
 **A**: Increase the action timeout using `--timeout`:
 ```bash
-qa_auto replay ./recordings/example_flow/testcase.json -t 60000
+tracecase replay ./recordings/example_flow/testcase.json -t 60000
 ```
 
-### Q: Why does `qa_auto analyze --ai` fail to connect?
+### Q: Why does `tracecase analyze --ai` fail to connect?
 **A**: Ensure your local LLM server is running:
 - For Ollama: Run `ollama serve` and check `curl http://127.0.0.1:11434/api/tags`.
 - For OpenAI-compatible servers: Check that the `--base-url` includes `/v1` (e.g., `http://127.0.0.1:8000/v1`).
 
 ### Q: Are my credentials or sensitive data sent to the cloud?
-**A**: No. QA Auto is completely local and private by default. Screenshots, HAR files, database records, and AI analyses remain on your machine unless you explicitly point `--base-url` to an external host.
+**A**: No. Tracecase is completely local and private by default. Screenshots, HAR files, database records, and AI analyses remain on your machine unless you explicitly point `--base-url` to an external host.

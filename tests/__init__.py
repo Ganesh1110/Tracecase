@@ -1,1 +1,1 @@
-"""QA Auto test suite."""
+"""Tracecase test suite."""

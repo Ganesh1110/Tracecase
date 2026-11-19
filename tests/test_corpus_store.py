@@ -3,8 +3,8 @@
 from datetime import datetime
 from pathlib import Path
 
-from qa_auto.index.store import index_directory, index_testcase, init_db
-from qa_auto.models import ElementInfo, NetworkRequest, Step, TestCase
+from tracecase.index.store import index_directory, index_testcase, init_db
+from tracecase.models import ElementInfo, NetworkRequest, Step, TestCase
 
 
 def _testcase(tc_id: str, name: str, url: str) -> TestCase:

@@ -5,8 +5,8 @@ from datetime import datetime
 import pytest
 from playwright.async_api import async_playwright
 
-from qa_auto.models import ElementInfo, Step
-from qa_auto.replay.healing import resolve_element
+from tracecase.models import ElementInfo, Step
+from tracecase.replay.healing import resolve_element
 
 
 def _step(

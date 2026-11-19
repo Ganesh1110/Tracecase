@@ -6,23 +6,20 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from qa_auto.models import TestCase
-from qa_auto.ui.db import (
+from tracecase.models import TestCase
+from tracecase.ui.db import (
     create_project,
     create_suite,
     delete_project,
-    get_dashboard_metrics,
     get_project,
-    get_settings,
     get_suite,
     init_studio_db,
     list_projects,
     list_suites,
     update_project,
-    update_settings,
     update_suite,
 )
-from qa_auto.ui.server import create_app
+from tracecase.ui.server import create_app
 
 
 @pytest.fixture
@@ -43,8 +40,8 @@ def sample_testcase_dir(temp_dir: Path, sample_testcase: TestCase) -> Path:
 
 @pytest.fixture
 def client(test_db_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setattr("qa_auto.ui.db.DEFAULT_STUDIO_DB_PATH", test_db_path)
-    monkeypatch.setattr("qa_auto.ui.api.sync_all_testcases_from_disk", lambda **kwargs: 0)
+    monkeypatch.setattr("tracecase.ui.db.DEFAULT_STUDIO_DB_PATH", test_db_path)
+    monkeypatch.setattr("tracecase.ui.api.sync_all_testcases_from_disk", lambda **kwargs: 0)
     app = create_app()
     return TestClient(app)
 
@@ -203,7 +200,7 @@ def test_api_mutations_generate(
     case_id = data["id"]
 
     monkeypatch.setattr(
-        "qa_auto.ui.service.find_testcase_files",
+        "tracecase.ui.service.find_testcase_files",
         lambda search_paths=None: [tc_file],
     )
 

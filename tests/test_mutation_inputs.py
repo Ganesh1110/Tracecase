@@ -2,9 +2,9 @@
 
 from datetime import datetime
 
-from qa_auto.models import ElementInfo, Step, TestCase
-from qa_auto.mutation.inputs import mutate_inputs
-from qa_auto.mutation.models import MutatedTestCase
+from tracecase.models import ElementInfo, Step, TestCase
+from tracecase.mutation.inputs import mutate_inputs
+from tracecase.mutation.models import MutatedTestCase
 
 
 def _element(selector: str, tag: str = "input", text: str = "") -> ElementInfo:

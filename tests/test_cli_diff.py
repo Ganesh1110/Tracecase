@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image
 from typer.testing import CliRunner
 
-from qa_auto.cli import app
+from tracecase.cli import app
 
 runner = CliRunner()
 

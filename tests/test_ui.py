@@ -1,4 +1,4 @@
-"""Tests for QA Auto Web Studio (FastAPI server & service layer)."""
+"""Tests for Tracecase Web Studio (FastAPI server & service layer)."""
 
 import json
 from pathlib import Path
@@ -7,8 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from qa_auto.models import TestCase
-from qa_auto.ui.server import create_app
+from tracecase.models import TestCase
+from tracecase.ui.server import create_app
 
 runner = CliRunner()
 
@@ -46,14 +46,14 @@ def test_health_check(client: TestClient) -> None:
     """Test health endpoint."""
     res = client.get("/api/health")
     assert res.status_code == 200
-    assert res.json() == {"status": "ok", "service": "qa_auto_studio"}
+    assert res.json() == {"status": "ok", "service": "tracecase_studio"}
 
 
 def test_index_page(client: TestClient) -> None:
     """Test root HTML endpoint."""
     res = client.get("/")
     assert res.status_code == 200
-    assert "QA AUTO" in res.text
+    assert "TRACECASE" in res.text
 
 
 def test_list_testcases(
@@ -61,7 +61,7 @@ def test_list_testcases(
 ) -> None:
     """Test listing testcases from search paths."""
     monkeypatch.setattr(
-        "qa_auto.ui.service.find_testcase_files",
+        "tracecase.ui.service.find_testcase_files",
         lambda search_paths=None: [sample_testcase_dir / "testcase.json"],
     )
 
@@ -79,7 +79,7 @@ def test_get_testcase_details(
     """Test retrieving full testcase details."""
     tc_file = sample_testcase_dir / "testcase.json"
     monkeypatch.setattr(
-        "qa_auto.ui.service.find_testcase_files",
+        "tracecase.ui.service.find_testcase_files",
         lambda search_paths=None: [tc_file],
     )
 
@@ -106,7 +106,7 @@ def test_get_screenshot(
     """Test retrieving step screenshot."""
     tc_file = sample_testcase_dir / "testcase.json"
     monkeypatch.setattr(
-        "qa_auto.ui.service.find_testcase_files",
+        "tracecase.ui.service.find_testcase_files",
         lambda search_paths=None: [tc_file],
     )
 
@@ -124,7 +124,7 @@ def test_codegen_endpoint(
     """Test generating pytest script."""
     tc_file = sample_testcase_dir / "testcase.json"
     monkeypatch.setattr(
-        "qa_auto.ui.service.find_testcase_files",
+        "tracecase.ui.service.find_testcase_files",
         lambda search_paths=None: [tc_file],
     )
 
@@ -146,12 +146,12 @@ def test_record_status_idle(client: TestClient) -> None:
 
 
 def test_ui_cli_command() -> None:
-    """Test that qa_auto ui is invokable with --help."""
-    from qa_auto.cli import app
+    """Test that tracecase ui is invokable with --help."""
+    from tracecase.cli import app
 
     result = runner.invoke(app, ["ui", "--help"])
     assert result.exit_code == 0
-    assert "Launch the QA Auto Studio" in result.stdout
+    assert "Launch the Tracecase Studio" in result.stdout
 
 
 def test_update_step(
@@ -160,7 +160,7 @@ def test_update_step(
     """Test updating step fields via API."""
     tc_file = sample_testcase_dir / "testcase.json"
     monkeypatch.setattr(
-        "qa_auto.ui.service.find_testcase_files",
+        "tracecase.ui.service.find_testcase_files",
         lambda search_paths=None: [tc_file],
     )
     case_id = json.loads(tc_file.read_text())["id"]
@@ -188,7 +188,7 @@ def test_reorder_step(
     """Test reordering steps up and down."""
     tc_file = sample_testcase_dir / "testcase.json"
     monkeypatch.setattr(
-        "qa_auto.ui.service.find_testcase_files",
+        "tracecase.ui.service.find_testcase_files",
         lambda search_paths=None: [tc_file],
     )
     case_id = json.loads(tc_file.read_text())["id"]
@@ -210,7 +210,7 @@ def test_add_and_delete_step(
     """Test adding a new step and deleting it."""
     tc_file = sample_testcase_dir / "testcase.json"
     monkeypatch.setattr(
-        "qa_auto.ui.service.find_testcase_files",
+        "tracecase.ui.service.find_testcase_files",
         lambda search_paths=None: [tc_file],
     )
     case_id = json.loads(tc_file.read_text())["id"]
@@ -241,7 +241,7 @@ def test_add_and_delete_assertion(
     """Test attaching a custom assertion and deleting it."""
     tc_file = sample_testcase_dir / "testcase.json"
     monkeypatch.setattr(
-        "qa_auto.ui.service.find_testcase_files",
+        "tracecase.ui.service.find_testcase_files",
         lambda search_paths=None: [tc_file],
     )
     case_id = json.loads(tc_file.read_text())["id"]
@@ -274,7 +274,7 @@ def test_step_visual_diff(
     """Test step visual diff execution."""
     tc_file = sample_testcase_dir / "testcase.json"
     monkeypatch.setattr(
-        "qa_auto.ui.service.find_testcase_files",
+        "tracecase.ui.service.find_testcase_files",
         lambda search_paths=None: [tc_file],
     )
     case_id = json.loads(tc_file.read_text())["id"]

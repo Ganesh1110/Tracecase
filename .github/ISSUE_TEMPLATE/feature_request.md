@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest an idea for QA Auto
+about: Suggest an idea for Tracecase
 title: "[FEATURE] "
 labels: enhancement
 assignees: ''

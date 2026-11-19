@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,25 +12,17 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from qa_auto.exploration.controller import exploration_controller
-from qa_auto.exploration.extractor import is_destructive_element
-from qa_auto.exploration.models import (
-    AppNavigationGraph,
+from tracecase.exploration.controller import exploration_controller
+from tracecase.exploration.extractor import is_destructive_element
+from tracecase.exploration.models import (
     ExplorationConfig,
-    PageNode,
-    PageTransition,
     compute_state_fingerprint,
     normalize_url,
 )
-from qa_auto.ui.server import create_app
-from qa_auto.ui.db import (
-    delete_exploration_run,
-    get_connection,
-    get_exploration_graph,
-    get_exploration_run,
+from tracecase.ui.db import (
     init_studio_db,
-    list_exploration_runs,
 )
+from tracecase.ui.server import create_app
 
 
 def find_free_port() -> int:
@@ -175,7 +166,7 @@ def test_state_fingerprint_computation() -> None:
 def test_autonomous_exploration_api_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db_file = tmp_path / "test_api_studio.db"
     init_studio_db(db_file)
-    monkeypatch.setattr("qa_auto.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
+    monkeypatch.setattr("tracecase.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
 
     client = TestClient(create_app())
 
@@ -241,7 +232,7 @@ async def test_real_browser_autonomous_exploration_e2e(tmp_path: Path, monkeypat
     """
     db_file = tmp_path / "test_e2e_studio.db"
     init_studio_db(db_file)
-    monkeypatch.setattr("qa_auto.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
+    monkeypatch.setattr("tracecase.ui.db.DEFAULT_STUDIO_DB_PATH", db_file)
 
     port = find_free_port()
     server = ThreadingHTTPServer(("127.0.0.1", port), MultiRouteTestAppHandler)

@@ -21,7 +21,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: path.resolve(__dirname, '../src/qa_auto/ui/static'),
+    outDir: path.resolve(__dirname, '../src/tracecase/ui/static'),
     emptyOutDir: true,
   },
 });

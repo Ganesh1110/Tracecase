@@ -1,5 +1,5 @@
 /**
- * QA Auto Studio - REST API Client
+ * Tracecase Studio - REST API Client
  */
 
 const BASE_URL = '/api';

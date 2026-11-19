@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from qa_auto.ai.models import Message
-from qa_auto.ai.provider import (
+from tracecase.ai.models import Message
+from tracecase.ai.provider import (
     NullProvider,
     OllamaProvider,
     OpenAICompatProvider,

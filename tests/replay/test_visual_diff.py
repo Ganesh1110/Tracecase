@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from qa_auto.replay.visual import VisualDiffResult, compare_images
+from tracecase.replay.visual import VisualDiffResult, compare_images
 
 
 def _create_image(

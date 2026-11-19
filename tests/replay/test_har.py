@@ -4,8 +4,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from qa_auto.models import NetworkRequest, TestCase
-from qa_auto.replay.har import build_har, export_har
+from tracecase.models import NetworkRequest, TestCase
+from tracecase.replay.har import build_har, export_har
 
 
 def _testcase(requests: list[NetworkRequest]) -> TestCase:
@@ -45,7 +45,7 @@ def test_build_har_has_log_and_entry() -> None:
     har = build_har(_testcase([_request()]))
 
     assert har["log"]["version"] == "1.2"
-    assert har["log"]["creator"]["name"] == "qa_auto"
+    assert har["log"]["creator"]["name"] == "tracecase"
     assert len(har["log"]["entries"]) == 1
 
     entry = har["log"]["entries"][0]

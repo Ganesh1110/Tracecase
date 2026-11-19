@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from qa_auto.index.store import index_testcase
-from qa_auto.mcp.server import MCPServer
-from qa_auto.models import TestCase
+from tracecase.index.store import index_testcase
+from tracecase.mcp.server import MCPServer
+from tracecase.models import TestCase
 
 
 def _testcase(tc_id: str, name: str) -> TestCase:
@@ -40,7 +40,7 @@ async def test_mcp_initialize() -> None:
     }
     resp = await server.handle_request(req)
     assert resp["id"] == 1
-    assert resp["result"]["serverInfo"]["name"] == "qa_auto_mcp"
+    assert resp["result"]["serverInfo"]["name"] == "tracecase_mcp"
 
 
 @pytest.mark.asyncio

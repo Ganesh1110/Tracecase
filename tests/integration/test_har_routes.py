@@ -3,7 +3,7 @@
 import pytest
 from playwright.async_api import async_playwright
 
-from qa_auto.replay.har import install_har_routes
+from tracecase.replay.har import install_har_routes
 
 
 @pytest.mark.integration
