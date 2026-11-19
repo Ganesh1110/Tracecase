@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from qa_auto.replay.visual import VisualDiffResult
 
 AssertionKind = Literal["status", "no_page_error", "url", "text", "visible", "custom"]
-AssertionSource = Literal["derived", "ai", "manual"]
+AssertionSource = Literal["derived", "ai", "manual", "heuristic"]
 StepStatus = Literal["passed", "failed", "healed", "skipped", "error"]
 ReplayStatus = Literal["passed", "failed", "error"]
 

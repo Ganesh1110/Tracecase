@@ -151,7 +151,7 @@ Record browser actions and generate a test case.
 
 ### `qa_auto ui`
 
-Launch the QA Auto Studio interactive web application (Kane AI-inspired web UI).
+Launch the QA Auto Studio interactive web application.
 
 ```bash
 qa_auto ui

@@ -110,6 +110,7 @@ class TestCase(BaseModel):
     # Metadata
     id: str = Field(description="Unique test case ID")
     name: str = Field(description="Test case name")
+    description: str = Field(default="", description="Optional description of the test case")
     created_at: datetime = Field(description="Creation timestamp")
 
     # Environment

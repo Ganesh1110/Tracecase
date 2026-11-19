@@ -16,8 +16,15 @@ from pydantic import BaseModel, Field
 
 from qa_auto import __version__
 from qa_auto.ai.analyst import analyze_testcase
+from qa_auto.ai.assertion_generator import suggest_assertions
+from qa_auto.ai.coverage_analyst import analyze_corpus_coverage
+from qa_auto.ai.failure_analyst import analyze_execution_failure
 from qa_auto.ai.models import Message
 from qa_auto.ai.provider import get_provider
+from qa_auto.ai.selectors import audit_testcase_selectors
+from qa_auto.ai.variations import generate_smart_variations
+from qa_auto.exploration.controller import exploration_controller
+from qa_auto.exploration.models import ExplorationConfig
 from qa_auto.exporters.html_exporter import HTMLExporter
 from qa_auto.index.search import get_coverage_report, search_testcases
 from qa_auto.index.store import index_testcase
@@ -60,10 +67,13 @@ from qa_auto.ui.service import (
     find_testcase_files,
     get_screenshot_file,
     list_testcases,
+    persist_generated_testcase,
     recording_manager,
     reorder_testcase_step,
     resolve_testcase_file,
     run_visual_diff_for_step,
+    update_custom_assertion,
+    update_testcase_metadata,
     update_testcase_step,
 )
 
@@ -81,6 +91,21 @@ class RecordRequest(BaseModel):
     browser: str = Field(default="chromium", description="Browser type: chromium, firefox, webkit")
     headless: bool = Field(default=False, description="Run browser headless")
     timeout: int = Field(default=30000, description="Action timeout in milliseconds")
+    project_id: str = Field(default="default_project", description="Target project ID")
+
+
+class TestCaseUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    start_url: str | None = None
+
+
+class AssertionUpdateRequest(BaseModel):
+    kind: str | None = None
+    target: str | None = None
+    expected: Any = None
+    step_number: int | None = None
+    enforced: bool | None = None
 
 
 class TestCaseCreateRequest(BaseModel):
@@ -439,6 +464,29 @@ async def get_testcase_details(identifier: str) -> dict[str, Any]:
         ) from exc
 
 
+@router.put("/testcases/{identifier}")
+async def edit_testcase(identifier: str, req: TestCaseUpdateRequest) -> dict[str, Any]:
+    try:
+        updated_tc = update_testcase_metadata(
+            identifier=identifier,
+            name=req.name,
+            description=req.description,
+            start_url=req.start_url,
+        )
+        data = updated_tc.model_dump(mode="json")
+        tc_file, _ = resolve_testcase_file(identifier)
+        data["_folder"] = str(tc_file.parent)
+        data["_file_path"] = str(tc_file)
+        return data
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to update testcase %s: %s", identifier, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
 @router.get("/testcases/{identifier}/screenshots/{filename:path}")
 async def get_testcase_screenshot(identifier: str, filename: str) -> FileResponse:
     try:
@@ -582,6 +630,7 @@ async def start_recording(req: RecordRequest) -> dict[str, Any]:
             browser_type=req.browser,
             headless=req.headless,
             timeout=req.timeout,
+            project_id=req.project_id,
         )
         return session
     except RuntimeError as exc:
@@ -596,6 +645,30 @@ async def start_recording(req: RecordRequest) -> dict[str, Any]:
 @router.get("/record/status")
 async def get_recording_status() -> dict[str, Any]:
     return recording_manager.get_status()
+
+
+@router.post("/record/pause")
+async def pause_recording() -> dict[str, Any]:
+    """Pause active recording session."""
+    try:
+        return await recording_manager.pause()
+    except Exception as exc:
+        logger.exception("Failed to pause recording: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
+@router.post("/record/resume")
+async def resume_recording() -> dict[str, Any]:
+    """Resume active recording session."""
+    try:
+        return await recording_manager.resume()
+    except Exception as exc:
+        logger.exception("Failed to resume recording: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
 
 
 @router.post("/record/stop")
@@ -765,6 +838,26 @@ async def remove_assertion(identifier: str, index: int) -> dict[str, Any]:
         ) from exc
 
 
+@router.put("/testcases/{identifier}/assertions/{index}")
+async def edit_assertion(
+    identifier: str, index: int, req: AssertionUpdateRequest
+) -> dict[str, Any]:
+    try:
+        updated_tc = update_custom_assertion(
+            identifier=identifier,
+            index=index,
+            assertion_data=req.model_dump(exclude_unset=True),
+        )
+        return updated_tc.model_dump(mode="json")
+    except (FileNotFoundError, IndexError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to update assertion %d in %s: %s", index, identifier, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
 # ---------------------------------------------------------------------------
 # AI Intelligence & Assistant
 # ---------------------------------------------------------------------------
@@ -894,6 +987,295 @@ async def ai_chat(req: AIChatRequest) -> dict[str, Any]:
         "context_matches": corpus_matches,
         "model": provider.model or provider.name,
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: AI-Powered QA Intelligence
+# ---------------------------------------------------------------------------
+
+class SuggestAssertionsRequest(BaseModel):
+    testcase_id: str
+
+
+class ApplyAssertionsRequest(BaseModel):
+    suggestions: list[dict[str, Any]]
+
+
+class ApplySelectorFixRequest(BaseModel):
+    step_number: int
+    selector: str
+    require_verification: bool = False
+    target_url: str | None = None
+
+
+class VerifySelectorRequest(BaseModel):
+    step_number: int
+    selector: str
+    target_url: str | None = None
+
+
+class FailureAnalysisRequest(BaseModel):
+    execution_id: str
+
+
+class GenerateVariationsRequest(BaseModel):
+    testcase_id: str
+    strategies: list[str] | None = None
+    allow_security_probes: bool = False
+    auto_save: bool = False
+
+
+@router.post("/ai/suggest-assertions")
+async def api_suggest_assertions(req: SuggestAssertionsRequest) -> dict[str, Any]:
+    """Generate intelligent assertion recommendations for a test case."""
+    try:
+        _, testcase = resolve_testcase_file(req.testcase_id)
+        settings = get_settings()
+        provider = get_provider(
+            name=settings.get("ai_provider", "ollama"),
+            base_url=settings.get("ai_api_base"),
+            model=settings.get("ai_model"),
+            api_key=settings.get("ai_api_key"),
+        )
+        res = await suggest_assertions(testcase, provider)
+        return res.model_dump(mode="json")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Suggest assertions failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
+@router.post("/testcases/{identifier}/assertions/apply-suggestions")
+async def api_apply_suggested_assertions(
+    identifier: str, req: ApplyAssertionsRequest
+) -> dict[str, Any]:
+    """Batch attach AI suggested assertions to a testcase."""
+    try:
+        updated_tc = None
+        for suggestion in req.suggestions:
+            updated_tc = add_custom_assertion(identifier, suggestion)
+        if updated_tc is None:
+            _, updated_tc = resolve_testcase_file(identifier)
+        return updated_tc.model_dump(mode="json")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Apply suggested assertions failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
+@router.get("/testcases/{identifier}/selectors/audit")
+async def api_audit_selectors(identifier: str) -> dict[str, Any]:
+    """Audit all selectors in a testcase for fragility, dynamic IDs, and locators."""
+    try:
+        _, testcase = resolve_testcase_file(identifier)
+        report = audit_testcase_selectors(testcase)
+        return report.model_dump(mode="json")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Selector audit failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
+@router.post("/testcases/{identifier}/selectors/verify-live")
+async def api_verify_selector_live(
+    identifier: str, req: VerifySelectorRequest
+) -> dict[str, Any]:
+    """Probe candidate locator against live DOM, verifying it uniquely resolves to intended element."""
+    try:
+        _, testcase = resolve_testcase_file(identifier)
+        target_step = next((s for s in testcase.steps if s.number == req.step_number), None)
+        if target_step is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Step #{req.step_number} not found in testcase {identifier}",
+            )
+
+        target_url = req.target_url or target_step.url or testcase.start_url
+        if not target_url:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="No target URL found for DOM verification",
+            )
+
+        # Enforce allowed hosts (loopback + testcase start_url host)
+        allowed_hosts = ["localhost", "127.0.0.1", "::1", "0.0.0.0"]
+        if testcase.start_url:
+            parsed = urlparse(testcase.start_url)
+            if parsed.hostname:
+                allowed_hosts.append(parsed.hostname)
+
+        expected_tag = target_step.element.tag_name if target_step.element else None
+        expected_text = (target_step.element.text if target_step.element else None) or (
+            target_step.element.placeholder if target_step.element else None
+        )
+
+        from qa_auto.ai.selectors import verify_locator_in_live_dom
+
+        result = await verify_locator_in_live_dom(
+            target_url=target_url,
+            candidate_selector=req.selector,
+            step_number=req.step_number,
+            expected_tag=expected_tag,
+            expected_text=expected_text,
+            allowed_hosts=allowed_hosts,
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Live selector verification failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
+@router.post("/testcases/{identifier}/selectors/apply-fix")
+async def api_apply_selector_fix(
+    identifier: str, req: ApplySelectorFixRequest
+) -> dict[str, Any]:
+    """Update a step's selector to a resilient locator with optional live DOM verification."""
+    try:
+        _, testcase = resolve_testcase_file(identifier)
+
+        if req.require_verification:
+            target_step = next((s for s in testcase.steps if s.number == req.step_number), None)
+            if target_step is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Step #{req.step_number} not found",
+                )
+            target_url = req.target_url or target_step.url or testcase.start_url
+            allowed_hosts = ["localhost", "127.0.0.1", "::1", "0.0.0.0"]
+            if testcase.start_url:
+                parsed = urlparse(testcase.start_url)
+                if parsed.hostname:
+                    allowed_hosts.append(parsed.hostname)
+
+            from qa_auto.ai.selectors import verify_locator_in_live_dom
+
+            v_res = await verify_locator_in_live_dom(
+                target_url=target_url,
+                candidate_selector=req.selector,
+                step_number=req.step_number,
+                expected_tag=target_step.element.tag_name if target_step.element else None,
+                expected_text=target_step.element.text if target_step.element else None,
+                allowed_hosts=allowed_hosts,
+            )
+            if not v_res.get("verified"):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Live DOM verification failed: {v_res.get('reason')}",
+                )
+
+        updated_tc = update_testcase_step(
+            identifier,
+            req.step_number,
+            {"element": {"selector": req.selector}},
+        )
+        return updated_tc.model_dump(mode="json")
+    except HTTPException:
+        raise
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Apply selector fix failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
+@router.post("/ai/failure-analysis")
+async def api_failure_analysis(req: FailureAnalysisRequest) -> dict[str, Any]:
+    """Analyze a failed execution run for root cause, category, and remediation."""
+    run = get_execution_run(req.execution_id)
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Execution run {req.execution_id} not found",
+        )
+    try:
+        settings = get_settings()
+        provider = get_provider(
+            name=settings.get("ai_provider", "ollama"),
+            base_url=settings.get("ai_api_base"),
+            model=settings.get("ai_model"),
+            api_key=settings.get("ai_api_key"),
+        )
+        result = await analyze_execution_failure(run, provider)
+        return result.model_dump(mode="json")
+    except Exception as exc:
+        logger.exception("Failure analysis failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
+@router.post("/ai/generate-variations")
+async def api_generate_variations(req: GenerateVariationsRequest) -> list[dict[str, Any]]:
+    """Synthesize boundary, security, and format test variations."""
+    try:
+        _, testcase = resolve_testcase_file(req.testcase_id)
+        settings = get_settings()
+        provider = get_provider(
+            name=settings.get("ai_provider", "ollama"),
+            base_url=settings.get("ai_api_base"),
+            model=settings.get("ai_model"),
+            api_key=settings.get("ai_api_key"),
+        )
+        variations = await generate_smart_variations(
+            testcase,
+            strategies=req.strategies,  # type: ignore
+            provider=provider,
+            allow_security_probes=req.allow_security_probes,
+        )
+
+        if req.auto_save:
+            for v in variations:
+                persist_generated_testcase(v.test_case)
+
+        return [v.model_dump(mode="json") for v in variations]
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Generate variations failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
+@router.get("/ai/coverage-insights")
+async def api_coverage_insights(
+    project_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """Compute corpus coverage intelligence, untested routes, and test gaps."""
+    try:
+        testcase_summaries = list_testcases(project_id=project_id)
+        testcases: list[TestCase] = []
+        for s in testcase_summaries:
+            try:
+                _, tc = resolve_testcase_file(s["id"])
+                testcases.append(tc)
+            except Exception:
+                continue
+
+        result = analyze_corpus_coverage(testcases)
+        return result.model_dump(mode="json")
+    except Exception as exc:
+        logger.exception("Coverage insights failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1054,6 +1436,74 @@ async def update_app_settings(req: SettingsUpdateRequest) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Autonomous Exploration Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/autonomous/explore")
+async def start_autonomous_exploration(config: ExplorationConfig) -> dict[str, Any]:
+    """Start a new background autonomous exploration run."""
+    try:
+        run_record = await exploration_controller.start_exploration(config)
+        return run_record
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start exploration: {exc}",
+        )
+
+
+@router.get("/autonomous/runs")
+async def list_exploration_runs_endpoint(
+    project_id: str | None = Query(None, description="Optional project filter")
+) -> list[dict[str, Any]]:
+    """List historical and active autonomous exploration runs."""
+    return exploration_controller.list_runs(project_id=project_id)
+
+
+@router.get("/autonomous/runs/{exploration_id}")
+async def get_exploration_run_endpoint(exploration_id: str) -> dict[str, Any]:
+    """Get metadata and status of an exploration run."""
+    run = exploration_controller.get_run(exploration_id)
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Exploration run '{exploration_id}' not found",
+        )
+    return run
+
+
+@router.get("/autonomous/runs/{exploration_id}/graph")
+async def get_exploration_graph_endpoint(exploration_id: str) -> dict[str, Any]:
+    """Get full navigation graph (pages, transitions, forms) of an exploration run."""
+    run = exploration_controller.get_run(exploration_id)
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Exploration run '{exploration_id}' not found",
+        )
+    return exploration_controller.get_graph(exploration_id)
+
+
+@router.post("/autonomous/runs/{exploration_id}/cancel")
+async def cancel_exploration_run_endpoint(exploration_id: str) -> dict[str, Any]:
+    """Cancel a running autonomous exploration job."""
+    success = await exploration_controller.cancel_exploration(exploration_id)
+    return {"exploration_id": exploration_id, "cancelled": success}
+
+
+@router.delete("/autonomous/runs/{exploration_id}")
+async def delete_exploration_run_endpoint(exploration_id: str) -> dict[str, Any]:
+    """Delete an exploration run and its persisted graph."""
+    success = exploration_controller.delete_run(exploration_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Exploration run '{exploration_id}' not found",
+        )
+    return {"exploration_id": exploration_id, "deleted": True}
+
+
+# ---------------------------------------------------------------------------
 # WebSockets Real-Time Stream
 # ---------------------------------------------------------------------------
 
@@ -1087,6 +1537,18 @@ async def execution_websocket(websocket: WebSocket, execution_id: str) -> None:
     try:
         while True:
             # Keep-alive loop
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await manager.disconnect(websocket, channel=channel)
+
+
+@router.websocket("/ws/explorations/{exploration_id}")
+async def exploration_websocket(websocket: WebSocket, exploration_id: str) -> None:
+    """Dedicated WebSocket stream for an autonomous exploration run."""
+    channel = f"exploration:{exploration_id}"
+    await manager.connect(websocket, channel=channel)
+    try:
+        while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
         await manager.disconnect(websocket, channel=channel)

@@ -131,10 +131,19 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
                 error TEXT,
                 screenshot_path TEXT,
                 visual_diff_json TEXT,
+                assertions_json TEXT DEFAULT '[]',
                 FOREIGN KEY (execution_id) REFERENCES execution_runs(id) ON DELETE CASCADE
             )
             """
         )
+
+        try:
+            cursor = conn.execute("PRAGMA table_info(execution_step_logs)")
+            cols = [row["name"] for row in cursor.fetchall()]
+            if "assertions_json" not in cols:
+                conn.execute("ALTER TABLE execution_step_logs ADD COLUMN assertions_json TEXT DEFAULT '[]'")
+        except Exception:
+            pass
 
         conn.execute(
             """
@@ -155,6 +164,69 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             CREATE TABLE IF NOT EXISTS app_settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS exploration_runs (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                start_url TEXT NOT NULL,
+                allowed_origins_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL DEFAULT 'running',
+                max_depth INTEGER NOT NULL DEFAULT 3,
+                max_pages INTEGER NOT NULL DEFAULT 20,
+                max_interactions INTEGER NOT NULL DEFAULT 50,
+                execution_timeout REAL NOT NULL DEFAULT 120.0,
+                created_at TEXT NOT NULL,
+                finished_at TEXT,
+                pages_discovered INTEGER NOT NULL DEFAULT 0,
+                transitions_discovered INTEGER NOT NULL DEFAULT 0,
+                forms_discovered INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                config_json TEXT DEFAULT '{}',
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS exploration_pages (
+                id TEXT PRIMARY KEY,
+                exploration_id TEXT NOT NULL,
+                url TEXT NOT NULL,
+                normalized_url TEXT NOT NULL,
+                title TEXT,
+                depth INTEGER NOT NULL DEFAULT 0,
+                state_fingerprint TEXT NOT NULL,
+                status_code INTEGER DEFAULT 200,
+                forms_json TEXT DEFAULT '[]',
+                interactive_elements_json TEXT DEFAULT '[]',
+                links_json TEXT DEFAULT '[]',
+                screenshot_path TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (exploration_id) REFERENCES exploration_runs(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS exploration_transitions (
+                id TEXT PRIMARY KEY,
+                exploration_id TEXT NOT NULL,
+                source_url TEXT NOT NULL,
+                target_url TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                selector TEXT,
+                element_text TEXT,
+                is_safe INTEGER NOT NULL DEFAULT 1,
+                duration_ms REAL DEFAULT 0.0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (exploration_id) REFERENCES exploration_runs(id) ON DELETE CASCADE
             )
             """
         )
@@ -725,21 +797,24 @@ def log_execution_step(
     error: str | None = None,
     screenshot_path: str | None = None,
     visual_diff: dict[str, Any] | None = None,
+    assertions: list[dict[str, Any]] | None = None,
     db_path: Path | str | None = None,
 ) -> None:
     """Log individual step result into execution_step_logs."""
     init_studio_db(db_path)
     conn = get_connection(db_path)
     vdiff_json = json.dumps(visual_diff) if visual_diff else None
+    asserts_json = json.dumps(assertions or [])
     try:
         with conn:
             conn.execute(
                 """
                 INSERT INTO execution_step_logs (
                     execution_id, step_number, action_type, status, duration_ms,
-                    selector_used, healed_from, error, screenshot_path, visual_diff_json
+                    selector_used, healed_from, error, screenshot_path, visual_diff_json,
+                    assertions_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     execution_id,
@@ -752,6 +827,7 @@ def log_execution_step(
                     error,
                     screenshot_path,
                     vdiff_json,
+                    asserts_json,
                 ),
             )
     finally:
@@ -781,6 +857,7 @@ def get_execution_run(execution_id: str, db_path: Path | str | None = None) -> d
         for sr in step_rows:
             sd = dict(sr)
             sd["visual_diff"] = json.loads(sd.get("visual_diff_json") or "null")
+            sd["assertions"] = json.loads(sd.get("assertions_json") or "[]")
             steps.append(sd)
         d["step_logs"] = steps
         return d
@@ -1079,5 +1156,284 @@ def get_ai_analyses_for_testcase(
             d["raw_analysis"] = json.loads(d.get("raw_analysis_json") or "{}")
             result.append(d)
         return result
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Autonomous Exploration Operations
+# ---------------------------------------------------------------------------
+
+def create_exploration_run(
+    exploration_id: str,
+    project_id: str,
+    start_url: str,
+    config: dict[str, Any],
+    db_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Create a new exploration run record in the database."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    now = datetime.now().isoformat()
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO exploration_runs (
+                    id, project_id, start_url, allowed_origins_json, status,
+                    max_depth, max_pages, max_interactions, execution_timeout,
+                    created_at, config_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    exploration_id,
+                    project_id,
+                    start_url,
+                    json.dumps(config.get("allowed_origins", [])),
+                    "running",
+                    config.get("max_depth", 3),
+                    config.get("max_pages", 20),
+                    config.get("max_interactions", 50),
+                    config.get("execution_timeout", 120.0),
+                    now,
+                    json.dumps(config),
+                ),
+            )
+        return {
+            "id": exploration_id,
+            "project_id": project_id,
+            "start_url": start_url,
+            "status": "running",
+            "created_at": now,
+            "config": config,
+            "pages_discovered": 0,
+            "transitions_discovered": 0,
+            "forms_discovered": 0,
+        }
+    finally:
+        conn.close()
+
+
+def update_exploration_run_status(
+    exploration_id: str,
+    status: str,
+    pages_discovered: int | None = None,
+    transitions_discovered: int | None = None,
+    forms_discovered: int | None = None,
+    finished_at: str | None = None,
+    error_message: str | None = None,
+    db_path: Path | str | None = None,
+) -> None:
+    """Update execution progress and completion status of an exploration run."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        updates = ["status = ?"]
+        params: list[Any] = [status]
+
+        if pages_discovered is not None:
+            updates.append("pages_discovered = ?")
+            params.append(pages_discovered)
+        if transitions_discovered is not None:
+            updates.append("transitions_discovered = ?")
+            params.append(transitions_discovered)
+        if forms_discovered is not None:
+            updates.append("forms_discovered = ?")
+            params.append(forms_discovered)
+        if finished_at is not None:
+            updates.append("finished_at = ?")
+            params.append(finished_at)
+        if error_message is not None:
+            updates.append("error_message = ?")
+            params.append(error_message)
+
+        params.append(exploration_id)
+        sql = f"UPDATE exploration_runs SET {', '.join(updates)} WHERE id = ?"
+
+        with conn:
+            conn.execute(sql, tuple(params))
+    finally:
+        conn.close()
+
+
+def save_exploration_page(
+    exploration_id: str,
+    page_data: dict[str, Any],
+    db_path: Path | str | None = None,
+) -> None:
+    """Save or update a discovered page node in the exploration database."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    node_id = page_data.get("id") or f"node_{uuid.uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO exploration_pages (
+                    id, exploration_id, url, normalized_url, title, depth,
+                    state_fingerprint, status_code, forms_json,
+                    interactive_elements_json, links_json, screenshot_path, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    node_id,
+                    exploration_id,
+                    page_data.get("url", ""),
+                    page_data.get("normalized_url", ""),
+                    page_data.get("title", ""),
+                    page_data.get("depth", 0),
+                    page_data.get("state_fingerprint", ""),
+                    page_data.get("status_code", 200),
+                    json.dumps(page_data.get("forms", [])),
+                    json.dumps(page_data.get("interactive_elements", [])),
+                    json.dumps(page_data.get("links", [])),
+                    page_data.get("screenshot_path"),
+                    now,
+                ),
+            )
+    finally:
+        conn.close()
+
+
+def save_exploration_transition(
+    exploration_id: str,
+    trans_data: dict[str, Any],
+    db_path: Path | str | None = None,
+) -> None:
+    """Save a transition edge between exploration states."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    trans_id = trans_data.get("id") or f"trans_{uuid.uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO exploration_transitions (
+                    id, exploration_id, source_url, target_url, action_type,
+                    selector, element_text, is_safe, duration_ms, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    trans_id,
+                    exploration_id,
+                    trans_data.get("source_url", ""),
+                    trans_data.get("target_url", ""),
+                    trans_data.get("action_type", "navigate"),
+                    trans_data.get("selector"),
+                    trans_data.get("element_text"),
+                    1 if trans_data.get("is_safe", True) else 0,
+                    trans_data.get("duration_ms", 0.0),
+                    now,
+                ),
+            )
+    finally:
+        conn.close()
+
+
+def get_exploration_run(
+    exploration_id: str, db_path: Path | str | None = None
+) -> dict[str, Any] | None:
+    """Get metadata and summary of a specific exploration run."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM exploration_runs WHERE id = ?", (exploration_id,)
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["allowed_origins"] = json.loads(d.get("allowed_origins_json") or "[]")
+        d["config"] = json.loads(d.get("config_json") or "{}")
+        return d
+    finally:
+        conn.close()
+
+
+def list_exploration_runs(
+    project_id: str | None = None, db_path: Path | str | None = None
+) -> list[dict[str, Any]]:
+    """List exploration runs, optionally scoped to a project."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        if project_id:
+            rows = conn.execute(
+                "SELECT * FROM exploration_runs WHERE project_id = ? ORDER BY created_at DESC",
+                (project_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM exploration_runs ORDER BY created_at DESC"
+            ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["allowed_origins"] = json.loads(d.get("allowed_origins_json") or "[]")
+            d["config"] = json.loads(d.get("config_json") or "{}")
+            result.append(d)
+        return result
+    finally:
+        conn.close()
+
+
+def get_exploration_graph(
+    exploration_id: str, db_path: Path | str | None = None
+) -> dict[str, Any]:
+    """Retrieve full navigation graph (nodes, transitions, forms) for an exploration run."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        run = conn.execute(
+            "SELECT * FROM exploration_runs WHERE id = ?", (exploration_id,)
+        ).fetchone()
+        if not run:
+            return {"nodes": {}, "transitions": []}
+
+        page_rows = conn.execute(
+            "SELECT * FROM exploration_pages WHERE exploration_id = ? ORDER BY depth ASC, created_at ASC",
+            (exploration_id,),
+        ).fetchall()
+        nodes = {}
+        for pr in page_rows:
+            pd = dict(pr)
+            pd["forms"] = json.loads(pd.get("forms_json") or "[]")
+            pd["interactive_elements"] = json.loads(pd.get("interactive_elements_json") or "[]")
+            pd["links"] = json.loads(pd.get("links_json") or "[]")
+            nodes[pd["normalized_url"]] = pd
+
+        trans_rows = conn.execute(
+            "SELECT * FROM exploration_transitions WHERE exploration_id = ? ORDER BY created_at ASC",
+            (exploration_id,),
+        ).fetchall()
+        transitions = [dict(tr) for tr in trans_rows]
+
+        return {
+            "exploration_id": exploration_id,
+            "start_url": run["start_url"],
+            "status": run["status"],
+            "nodes": nodes,
+            "transitions": transitions,
+            "total_pages": len(nodes),
+            "total_transitions": len(transitions),
+        }
+    finally:
+        conn.close()
+
+
+def delete_exploration_run(
+    exploration_id: str, db_path: Path | str | None = None
+) -> bool:
+    """Delete an exploration run and cascade delete its pages and transitions."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        with conn:
+            cursor = conn.execute(
+                "DELETE FROM exploration_runs WHERE id = ?", (exploration_id,)
+            )
+            return cursor.rowcount > 0
     finally:
         conn.close()

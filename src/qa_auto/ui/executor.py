@@ -118,8 +118,25 @@ class ExecutionOrchestrator:
             curr_step = next((s for s in testcase.steps if s.number == step_num), None)
             action_type = curr_step.action_type if curr_step else None
             screenshot = (
-                str(step_res.screenshot_path) if getattr(step_res, "screenshot_path", None) else None
+                str(step_res.screenshot)
+                if getattr(step_res, "screenshot", None)
+                else (str(step_res.screenshot_path) if getattr(step_res, "screenshot_path", None) else None)
             )
+
+            assertions_data = []
+            for a in getattr(step_res, "assertions", []):
+                assertions_data.append(
+                    {
+                        "kind": getattr(getattr(a, "assertion", None), "kind", ""),
+                        "target": getattr(getattr(a, "assertion", None), "target", None),
+                        "expected": str(a.assertion.expected)
+                        if getattr(getattr(a, "assertion", None), "expected", None) is not None
+                        else None,
+                        "passed": bool(getattr(a, "passed", False)),
+                        "actual": str(a.actual) if getattr(a, "actual", None) is not None else None,
+                        "message": getattr(a, "message", ""),
+                    }
+                )
 
             # Log to SQLite
             log_execution_step(
@@ -135,6 +152,7 @@ class ExecutionOrchestrator:
                 visual_diff=step_res.visual_diff.model_dump(mode="json")
                 if step_res.visual_diff
                 else None,
+                assertions=assertions_data,
             )
 
             log_entry = f"Step {step_num}/{total_steps} [{action_type}]: {step_res.status.upper()} ({step_res.duration_ms:.1f}ms)"
@@ -142,6 +160,9 @@ class ExecutionOrchestrator:
                 log_entry += f" [HEALED from '{step_res.healed_from}']"
             if step_res.error:
                 log_entry += f" - Error: {step_res.error}"
+            for ad in assertions_data:
+                ast_status = "PASS" if ad["passed"] else "FAIL"
+                log_entry += f" | Assert [{ad['kind']}]: {ast_status}"
             logs.append(log_entry)
 
             # Broadcast real-time step progress
@@ -157,6 +178,8 @@ class ExecutionOrchestrator:
                     "selector_used": step_res.selector_used,
                     "healed_from": step_res.healed_from,
                     "error": step_res.error,
+                    "screenshot_path": screenshot,
+                    "assertions": assertions_data,
                     "log": log_entry,
                 },
             )

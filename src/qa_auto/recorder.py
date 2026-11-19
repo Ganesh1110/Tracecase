@@ -55,6 +55,7 @@ class Recorder:
         headless: bool = False,
         viewport: tuple[int, int] = (1280, 720),
         timeout: int = 30000,
+        auto_start: bool = False,
     ) -> None:
         """
         Initialize the recorder.
@@ -67,6 +68,7 @@ class Recorder:
             headless: Run browser without GUI
             viewport: Browser window size (width, height)
             timeout: Default timeout for operations in ms
+            auto_start: Automatically begin recording actions once navigated
         """
         self.output_dir = Path(output_dir).resolve()
         self.start_url = start_url
@@ -75,9 +77,12 @@ class Recorder:
         self.headless = headless
         self.viewport = viewport
         self.timeout = timeout
+        self.auto_start = auto_start
 
         # Recording state
         self.is_recording = False
+        self.is_paused = False
+        self.step_callback: Any = None
         self.steps: list[Step] = []
         self.start_time: datetime | None = None
         self.end_time: datetime | None = None
@@ -149,6 +154,9 @@ class Recorder:
             if page_title:
                 console.print(f"[green]✓[/green] Page loaded: {page_title}")
 
+            if self.auto_start:
+                await self.start_recording()
+
             console.print("\n[bold]Ready to record![/bold]")
             console.print("[dim]Click '▶ Start' in the browser to begin recording.[/dim]")
             console.print("[dim]Press Ctrl+C to cancel.[/dim]\n")
@@ -194,7 +202,7 @@ class Recorder:
 
     def _on_console_message(self, message: ConsoleMessage) -> None:
         """Handle console message event."""
-        if not self.is_recording:
+        if not self.is_recording or self.is_paused:
             return
 
         # Map playwright message types to our levels
@@ -228,7 +236,7 @@ class Recorder:
 
     def _on_page_error(self, error: Exception) -> None:
         """Handle page JavaScript error."""
-        if not self.is_recording:
+        if not self.is_recording or self.is_paused:
             return
 
         page_error = PageError(
@@ -242,7 +250,7 @@ class Recorder:
 
     def _on_request(self, request: Request) -> None:
         """Handle network request start."""
-        if not self.is_recording:
+        if not self.is_recording or self.is_paused:
             return
 
         # Skip data URLs and internal requests
@@ -271,7 +279,7 @@ class Recorder:
 
     def _on_response(self, response: Response) -> None:
         """Handle network response."""
-        if not self.is_recording:
+        if not self.is_recording or self.is_paused:
             return
 
         url = response.url
@@ -334,7 +342,7 @@ class Recorder:
 
     def _on_request_failed(self, request: Request) -> None:
         """Handle failed network request."""
-        if not self.is_recording:
+        if not self.is_recording or self.is_paused:
             return
 
         url = request.url
@@ -385,6 +393,7 @@ class Recorder:
             return
 
         self.is_recording = True
+        self.is_paused = False
         self.start_time = datetime.now()
         self.steps = []
         self.console_logs = []
@@ -402,6 +411,36 @@ class Recorder:
                 is_recording=True,
                 steps_count=0,
             )
+
+    async def pause_recording(self) -> None:
+        """Pause recording user actions."""
+        if not self.is_recording or self.is_paused:
+            return
+        self.is_paused = True
+        console.print("[yellow]❚❚ Recording paused[/yellow]")
+        if self._browser_manager and self._browser_manager._page:
+            with contextlib.suppress(Exception):
+                await update_panel_ui(
+                    self._browser_manager._page,
+                    is_recording=True,
+                    steps_count=len(self.steps),
+                    message="Paused",
+                )
+
+    async def resume_recording(self) -> None:
+        """Resume recording user actions."""
+        if not self.is_recording or not self.is_paused:
+            return
+        self.is_paused = False
+        console.print("[green]▶ Recording resumed[/green]")
+        if self._browser_manager and self._browser_manager._page:
+            with contextlib.suppress(Exception):
+                await update_panel_ui(
+                    self._browser_manager._page,
+                    is_recording=True,
+                    steps_count=len(self.steps),
+                    message="Recording...",
+                )
 
     async def stop_recording(self) -> None:
         """
@@ -463,7 +502,7 @@ class Recorder:
             data: Action data from JavaScript
             page_id: 0-based index of the tab/page
         """
-        if not self.is_recording:
+        if not self.is_recording or self.is_paused:
             return
 
         event_type = data.get("eventType", "")
@@ -559,6 +598,14 @@ class Recorder:
         )
 
         self.steps.append(step)
+
+        if self.step_callback:
+            try:
+                cb_res = self.step_callback(step)
+                if asyncio.iscoroutine(cb_res):
+                    asyncio.create_task(cb_res)
+            except Exception:
+                pass
 
         # Log the action
         console.print(f"  [dim]{step_number}.[/dim] {description_short}")

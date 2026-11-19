@@ -12,6 +12,7 @@ import { History } from './pages/History';
 import { Reports } from './pages/Reports';
 import { VisualRegression } from './pages/VisualRegression';
 import { AIAssistant } from './pages/AIAssistant';
+import { AutonomousExploration } from './pages/AutonomousExploration';
 import { TestAnalysis } from './pages/TestAnalysis';
 import { Mutations } from './pages/Mutations';
 import { TestRepository } from './pages/TestRepository';
@@ -40,6 +41,7 @@ export function App() {
         <Route path="visual-diff" element={<VisualRegression />} />
 
         {/* Intelligence */}
+        <Route path="explore" element={<AutonomousExploration />} />
         <Route path="ai-assistant" element={<AIAssistant />} />
         <Route path="test-analysis" element={<TestAnalysis />} />
         <Route path="mutations" element={<Mutations />} />

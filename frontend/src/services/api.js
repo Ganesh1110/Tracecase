@@ -76,6 +76,8 @@ export const api = {
   getTestCase: (id) => request(`/testcases/${id}`),
   createTestCase: (data) =>
     request('/testcases', { method: 'POST', body: JSON.stringify(data) }),
+  updateTestCase: (id, data) =>
+    request(`/testcases/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteTestCase: (id) => request(`/testcases/${id}`, { method: 'DELETE' }),
   getTestCaseHtml: (id) => request(`/testcases/${id}/html`),
   getCodegen: (id) => request(`/testcases/${id}/codegen`, { method: 'POST' }),
@@ -106,6 +108,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  updateAssertion: (testcaseId, index, data) =>
+    request(`/testcases/${testcaseId}/assertions/${index}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
   deleteAssertion: (testcaseId, index) =>
     request(`/testcases/${testcaseId}/assertions/${index}`, { method: 'DELETE' }),
 
@@ -129,6 +136,8 @@ export const api = {
   // Recorder
   startRecording: (data) =>
     request('/record/start', { method: 'POST', body: JSON.stringify(data) }),
+  pauseRecording: () => request('/record/pause', { method: 'POST' }),
+  resumeRecording: () => request('/record/resume', { method: 'POST' }),
   stopRecording: () => request('/record/stop', { method: 'POST' }),
   getRecordingStatus: () => request('/record/status'),
 
@@ -149,6 +158,44 @@ export const api = {
   getAIAnalyses: (testcaseId) => request(`/ai/analyses/${testcaseId}`),
   sendAIChat: (data) =>
     request('/ai/chat', { method: 'POST', body: JSON.stringify(data) }),
+  suggestAssertions: (testcaseId) =>
+    request('/ai/suggest-assertions', {
+      method: 'POST',
+      body: JSON.stringify({ testcase_id: testcaseId }),
+    }),
+  applySuggestedAssertions: (testcaseId, suggestions) =>
+    request(`/testcases/${testcaseId}/assertions/apply-suggestions`, {
+      method: 'POST',
+      body: JSON.stringify({ suggestions }),
+    }),
+  auditSelectors: (testcaseId) =>
+    request(`/testcases/${testcaseId}/selectors/audit`),
+  verifySelectorLive: (testcaseId, data) =>
+    request(`/testcases/${testcaseId}/selectors/verify-live`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  applySelectorFix: (testcaseId, stepNumber, selector, requireVerification = false) =>
+    request(`/testcases/${testcaseId}/selectors/apply-fix`, {
+      method: 'POST',
+      body: JSON.stringify({
+        step_number: stepNumber,
+        selector,
+        require_verification: requireVerification,
+      }),
+    }),
+  analyzeFailure: (executionId) =>
+    request('/ai/failure-analysis', {
+      method: 'POST',
+      body: JSON.stringify({ execution_id: executionId }),
+    }),
+  generateVariations: (data) =>
+    request('/ai/generate-variations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getCoverageInsights: (projectId) =>
+    request(`/ai/coverage-insights${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`),
 
   // Mutations
   generateMutations: (data) =>
@@ -159,6 +206,21 @@ export const api = {
     request(`/repository/search?query=${encodeURIComponent(query)}&limit=${limit}`),
   getCoverage: () => request('/repository/coverage'),
   reindexRepository: () => request('/repository/reindex', { method: 'POST' }),
+
+  // Autonomous Exploration
+  startExploration: (config) =>
+    request('/autonomous/explore', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+  listExplorationRuns: (projectId) =>
+    request(`/autonomous/runs${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`),
+  getExplorationRun: (id) => request(`/autonomous/runs/${id}`),
+  getExplorationGraph: (id) => request(`/autonomous/runs/${id}/graph`),
+  cancelExploration: (id) =>
+    request(`/autonomous/runs/${id}/cancel`, { method: 'POST' }),
+  deleteExplorationRun: (id) =>
+    request(`/autonomous/runs/${id}`, { method: 'DELETE' }),
 
   // Storage Management
   getStorageStats: () => request('/storage/stats'),

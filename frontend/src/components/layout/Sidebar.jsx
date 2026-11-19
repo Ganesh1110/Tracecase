@@ -11,6 +11,7 @@ import {
   FileSpreadsheet,
   Images,
   Sparkles,
+  Compass,
   BarChart3,
   Dna,
   Database,
@@ -47,6 +48,7 @@ const navSections = [
   {
     title: 'Intelligence',
     items: [
+      { name: 'Autonomous Exploration', to: '/explore', icon: Compass, badge: 'New' },
       { name: 'AI Test Assistant', to: '/ai-assistant', icon: Sparkles, badge: 'AI' },
       { name: 'Test Analysis', to: '/test-analysis', icon: BarChart3 },
       { name: 'Negative Test Generation', to: '/mutations', icon: Dna },

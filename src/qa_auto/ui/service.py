@@ -39,10 +39,11 @@ class RecordingSessionManager:
         browser_type: str = "chromium",
         headless: bool = False,
         timeout: int = 30000,
+        project_id: str = "default_project",
     ) -> dict[str, Any]:
         """Start a new recording session."""
         async with self._lock:
-            if self.current_session and self.current_session.get("status") == "recording":
+            if self.current_session and self.current_session.get("status") in ("recording", "paused"):
                 raise RuntimeError("A recording session is already active.")
 
             session_id = f"rec_{uuid.uuid4().hex[:8]}"
@@ -66,14 +67,20 @@ class RecordingSessionManager:
 
             self.current_session = {
                 "session_id": session_id,
+                "project_id": project_id,
                 "name": safe_name,
                 "url": url,
+                "browser": browser_type,
                 "status": "recording",
+                "is_paused": False,
                 "output_dir": str(target_dir),
                 "started_at": datetime.now().isoformat(),
                 "completed_at": None,
                 "error": None,
                 "testcase_id": None,
+                "steps": [],
+                "console_errors_count": 0,
+                "network_requests_count": 0,
             }
 
             # Spawn recording task
@@ -86,6 +93,7 @@ class RecordingSessionManager:
                     browser_type=browser_type,
                     headless=headless,
                     timeout=timeout,
+                    project_id=project_id,
                 )
             )
 
@@ -100,6 +108,7 @@ class RecordingSessionManager:
         browser_type: str,
         headless: bool,
         timeout: int,
+        project_id: str = "default_project",
     ) -> None:
         try:
             recorder = Recorder(
@@ -110,7 +119,36 @@ class RecordingSessionManager:
                 headless=headless,
                 viewport=(1280, 720),
                 timeout=timeout,
+                auto_start=True,
             )
+
+            def on_step_recorded(step: Step) -> None:
+                if (
+                    not self.current_session
+                    or self.current_session.get("session_id") != session_id
+                    or self.current_session.get("is_paused")
+                ):
+                    return
+                step_dict = step.model_dump(mode="json")
+                self.current_session["steps"].append(step_dict)
+                self.current_session["console_errors_count"] = len(recorder.page_errors)
+                self.current_session["network_requests_count"] = len(recorder.network_requests)
+                from qa_auto.ui.broadcaster import broadcast_recording_event
+
+                asyncio.create_task(
+                    broadcast_recording_event(
+                        session_id=session_id,
+                        event_type="recording_step",
+                        data={
+                            "step": step_dict,
+                            "total_steps": len(self.current_session["steps"]),
+                            "console_errors_count": len(recorder.page_errors),
+                            "network_requests_count": len(recorder.network_requests),
+                        },
+                    )
+                )
+
+            recorder.step_callback = on_step_recorded
             self._recorder = recorder
             await recorder.run()
 
@@ -125,7 +163,7 @@ class RecordingSessionManager:
                     from qa_auto.index.store import index_testcase
                     from qa_auto.ui.db import sync_testcase_meta
 
-                    sync_testcase_meta(tc, tc_file)
+                    sync_testcase_meta(tc, tc_file, project_id=project_id)
                     index_testcase(tc, tc_file)
                 except Exception as exc:
                     logger.warning("Could not sync recorded test case to index: %s", exc)
@@ -159,10 +197,46 @@ class RecordingSessionManager:
         finally:
             self._recorder = None
 
+    async def pause(self) -> dict[str, Any]:
+        """Pause active recording."""
+        async with self._lock:
+            if not self.current_session or self.current_session.get("status") != "recording":
+                return self.get_status()
+            if self._recorder:
+                await self._recorder.pause_recording()
+            self.current_session["status"] = "paused"
+            self.current_session["is_paused"] = True
+            from qa_auto.ui.broadcaster import broadcast_recording_event
+
+            await broadcast_recording_event(
+                session_id=self.current_session["session_id"],
+                event_type="recording_paused",
+                data={"status": "paused"},
+            )
+            return self.get_status()
+
+    async def resume(self) -> dict[str, Any]:
+        """Resume paused recording."""
+        async with self._lock:
+            if not self.current_session or self.current_session.get("status") != "paused":
+                return self.get_status()
+            if self._recorder:
+                await self._recorder.resume_recording()
+            self.current_session["status"] = "recording"
+            self.current_session["is_paused"] = False
+            from qa_auto.ui.broadcaster import broadcast_recording_event
+
+            await broadcast_recording_event(
+                session_id=self.current_session["session_id"],
+                event_type="recording_resumed",
+                data={"status": "recording"},
+            )
+            return self.get_status()
+
     async def stop(self) -> dict[str, Any]:
         """Stop an active recording session and finalize test case generation."""
         async with self._lock:
-            if not self.current_session or self.current_session.get("status") != "recording":
+            if not self.current_session or self.current_session.get("status") not in ("recording", "paused"):
                 return self.get_status()
 
             if self._recorder:
@@ -180,10 +254,23 @@ class RecordingSessionManager:
             return self.get_status()
 
     def get_status(self) -> dict[str, Any]:
-        """Return the current recorder session status."""
+        """Return the current recorder session status with elapsed time."""
         if not self.current_session:
             return {"status": "idle"}
-        return dict(self.current_session)
+        res = dict(self.current_session)
+        if res.get("started_at"):
+            try:
+                start_dt = datetime.fromisoformat(res["started_at"])
+                end_dt = (
+                    datetime.fromisoformat(res["completed_at"])
+                    if res.get("completed_at")
+                    else datetime.now()
+                )
+                res["elapsed_seconds"] = max(0, int((end_dt - start_dt).total_seconds()))
+            except Exception:
+                res["elapsed_seconds"] = 0
+        res["steps_count"] = len(res.get("steps") or [])
+        return res
 
 
 # Singleton recording manager
@@ -562,6 +649,54 @@ def delete_custom_assertion(identifier: str, index: int) -> TestCase:
     return testcase
 
 
+def update_custom_assertion(
+    identifier: str, index: int, assertion_data: dict[str, Any]
+) -> TestCase:
+    """Update an existing custom assertion by index."""
+    tc_file, testcase = resolve_testcase_file(identifier)
+    if not hasattr(testcase, "custom_assertions") or not testcase.custom_assertions:
+        raise IndexError("No custom assertions found")
+    if 0 <= index < len(testcase.custom_assertions):
+        existing = testcase.custom_assertions[index]
+        if "kind" in assertion_data and assertion_data["kind"]:
+            existing["kind"] = assertion_data["kind"]
+        if "target" in assertion_data:
+            existing["target"] = assertion_data["target"]
+        if "expected" in assertion_data:
+            existing["expected"] = assertion_data["expected"]
+        if "step_number" in assertion_data:
+            existing["step_number"] = int(assertion_data["step_number"])
+        if "enforced" in assertion_data:
+            existing["enforced"] = bool(assertion_data["enforced"])
+        save_testcase(tc_file, testcase)
+    return testcase
+
+
+def update_testcase_metadata(
+    identifier: str,
+    name: str | None = None,
+    description: str | None = None,
+    start_url: str | None = None,
+) -> TestCase:
+    """Update metadata for an existing test case and sync with SQLite."""
+    tc_file, testcase = resolve_testcase_file(identifier)
+    if name is not None and name.strip():
+        testcase.name = name.strip()
+    if description is not None:
+        testcase.description = description.strip()
+    if start_url is not None and start_url.strip():
+        testcase.start_url = start_url.strip()
+
+    save_testcase(tc_file, testcase)
+    try:
+        from qa_auto.ui.db import sync_testcase_meta
+
+        sync_testcase_meta(testcase, tc_file)
+    except Exception:
+        pass
+    return testcase
+
+
 def run_visual_diff_for_step(
     identifier: str,
     step_number: int,
@@ -692,4 +827,29 @@ def delete_testcase(identifier: str) -> bool:
     except Exception:
         pass
     return True
+
+
+def persist_generated_testcase(
+    testcase: TestCase, project_id: str = "default_project"
+) -> TestCase:
+    """Save an AI-generated or mutated test case to disk and register in the database."""
+    slug = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in testcase.name.lower())
+    target_dir = Path("recordings") / f"{slug}_{testcase.id}"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "screenshots").mkdir(exist_ok=True)
+
+    tc_file = target_dir / "testcase.json"
+    save_testcase(tc_file, testcase)
+
+    from qa_auto.ui.db import sync_testcase_meta
+
+    sync_testcase_meta(testcase, tc_file, project_id=project_id)
+    try:
+        from qa_auto.index.store import index_testcase
+
+        index_testcase(testcase, tc_file)
+    except Exception:
+        pass
+    return testcase
+
 

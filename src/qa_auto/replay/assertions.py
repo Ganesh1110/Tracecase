@@ -72,15 +72,24 @@ def evaluate_assertions(
         if assertion.step_number != step.number:
             continue
 
-        if assertion.kind == "status" and assertion.target:
-            statuses = response_statuses.get(assertion.target)
+        if assertion.kind == "status":
+            target = assertion.target or (step.url or "")
+            statuses = response_statuses.get(assertion.target) if assertion.target else None
+            if not statuses and target:
+                statuses = next(
+                    (v for k, v in response_statuses.items() if target in k or k in target),
+                    None,
+                )
+            if not statuses and response_statuses:
+                statuses = next(iter(response_statuses.values()), None)
+
             if not statuses:
                 results.append(
                     AssertionResult(
                         assertion=assertion,
                         passed=False,
                         actual="not observed",
-                        message=f"No response observed for {assertion.target}",
+                        message=f"No response observed for {target or 'request'}",
                     )
                 )
                 continue

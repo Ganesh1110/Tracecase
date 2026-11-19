@@ -98,3 +98,19 @@ async def broadcast_recording_event(
     }
     await manager.broadcast(msg, channel=f"recording:{session_id}")
     await manager.broadcast(msg, channel="recorder")
+
+
+async def broadcast_exploration_event(
+    exploration_id: str,
+    event_type: str,
+    data: dict[str, Any],
+) -> None:
+    """Convenience helper to broadcast autonomous exploration events."""
+    msg = {
+        "channel": f"exploration:{exploration_id}",
+        "type": event_type,
+        "exploration_id": exploration_id,
+        "data": data,
+    }
+    await manager.broadcast(msg, channel=f"exploration:{exploration_id}")
+    await manager.broadcast(msg, channel="explorations")

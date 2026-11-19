@@ -321,10 +321,18 @@ class ReplayEngine:
         start: int,
         targets: list[str],
     ) -> None:
-        deadline = time.monotonic() + self.timeout / 1000
+        from urllib.parse import urlparse
+
+        deadline = time.monotonic() + min(self.timeout / 1000, 3.0)
         while time.monotonic() < deadline:
             seen = {url for url, _ in responses[start:]}
-            if all(target in seen for target in targets):
+            matched_all = True
+            for target in targets:
+                t_path = urlparse(target).path or target
+                if not any(target in s or (t_path and t_path in s) for s in seen):
+                    matched_all = False
+                    break
+            if matched_all:
                 return
             await asyncio.sleep(0.05)
 
