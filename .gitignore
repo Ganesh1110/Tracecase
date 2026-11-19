@@ -89,4 +89,23 @@ recordings/
 *.har
 diff_result.png
 tests/test_orangehrm_*.py
+.qa_auto/
+
+# Frontend (Node / React / Vite)
+node_modules/
+*/node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm
+.yarn
+.pnpm-store
+.env.local
+.env.*.local
+
 

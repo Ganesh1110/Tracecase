@@ -7,9 +7,9 @@ import webbrowser
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from qa_auto import __version__
@@ -17,13 +17,14 @@ from qa_auto.ui.api import router as api_router
 
 logger = logging.getLogger("qa_auto.ui.server")
 STATIC_DIR = Path(__file__).parent / "static"
+ASSETS_DIR = STATIC_DIR / "assets"
 
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI web application."""
     app = FastAPI(
         title="QA Auto Studio",
-        description="Autonomous AI-style Web QA Studio for recording, replaying, and inspecting browser tests.",
+        description="Autonomous Web QA Studio for recording, replaying, and inspecting browser tests.",
         version=__version__,
     )
 
@@ -39,16 +40,30 @@ def create_app() -> FastAPI:
     # Mount API routes
     app.include_router(api_router)
 
-    # Mount static assets if static directory exists
+    # Mount static assets if assets directory exists
+    if ASSETS_DIR.exists():
+        app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
+
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-    @app.get("/", response_class=HTMLResponse)
-    async def index() -> HTMLResponse:
+    def _serve_index() -> HTMLResponse:
         index_file = STATIC_DIR / "index.html"
         if index_file.exists():
             return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
         return HTMLResponse("<h2>QA Auto Studio is running. Static UI not found.</h2>")
+
+    @app.get("/", response_class=HTMLResponse)
+    async def index() -> HTMLResponse:
+        return _serve_index()
+
+    # SPA catch-all for client-side routing (React Router)
+    @app.get("/{full_path:path}", response_class=HTMLResponse)
+    async def catch_all(request: Request, full_path: str) -> HTMLResponse:
+        # Don't intercept API or static routes
+        if full_path.startswith(("api/", "assets/", "static/")):
+            return HTMLResponse(status_code=404, content="Not Found")
+        return _serve_index()
 
     return app
 
@@ -64,7 +79,6 @@ def start_server(
 
     if open_browser:
         url = f"http://{host}:{port}"
-        # Schedule browser opening after brief delay
         import threading
         import time
 

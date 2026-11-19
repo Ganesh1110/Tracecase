@@ -1,0 +1,30 @@
+import React, { useState } from 'react';
+import { Outlet } from 'react-router-dom';
+import { Sidebar } from './Sidebar';
+import { Header } from './Header';
+import { RecordModal } from '../modals/RecordModal';
+
+export function Layout() {
+  const [recordModalOpen, setRecordModalOpen] = useState(false);
+
+  return (
+    <div className="flex h-screen w-screen overflow-hidden bg-slate-50 dark:bg-surface-dark text-slate-800 dark:text-slate-100">
+      <Sidebar />
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        <Header
+          onOpenRecordModal={() => setRecordModalOpen(true)}
+        />
+        <main className="flex-1 overflow-y-auto p-6 md:p-8">
+          <div className="max-w-7xl mx-auto">
+            <Outlet context={{ openRecordModal: () => setRecordModalOpen(true) }} />
+          </div>
+        </main>
+      </div>
+
+      <RecordModal
+        isOpen={recordModalOpen}
+        onClose={() => setRecordModalOpen(false)}
+      />
+    </div>
+  );
+}
