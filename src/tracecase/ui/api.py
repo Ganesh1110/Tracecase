@@ -43,8 +43,12 @@ from tracecase.intelligence.models import (
     CodeImpactReport,
     GitChangeSet,
     ImpactedTestResult,
+    PredictiveRiskReport,
+    RiskScoringWeights,
     TestCodeMapping,
+    TestRiskScore,
 )
+from tracecase.intelligence.risk_scorer import PredictiveRiskScorer
 from tracecase.models import TestCase
 from tracecase.mutation.engine import MutationEngine
 from tracecase.replay.har import build_har
@@ -64,6 +68,7 @@ from tracecase.ui.db import (
     get_execution_matrix,
     get_execution_run,
     get_project,
+    get_risk_scores_snapshots,
     get_settings,
     get_suite,
     get_synthesized_draft,
@@ -1830,6 +1835,72 @@ async def analyze_code_impact_endpoint(
         impacted_tests=impacted,
         total_impacted_tests=len(impacted),
         total_coverage_mappings=len(graph.mappings),
+    )
+
+
+class EvaluateRiskRequest(BaseModel):
+    repo_path: str = "."
+    base_ref: str | None = None
+    target_ref: str | None = None
+    staged_only: bool = False
+    project_id: str = "default_project"
+    persist: bool = True
+
+
+@router.post("/intelligence/risk", response_model=PredictiveRiskReport)
+async def evaluate_predictive_risk_endpoint(
+    request: EvaluateRiskRequest | None = None,
+    repo_path: str = Query(".", description="Path to repository workspace"),
+    base_ref: str | None = Query(None, description="Optional base git ref (e.g. main, HEAD~1)"),
+    target_ref: str | None = Query(None, description="Optional target git ref (defaults to HEAD)"),
+    staged_only: bool = Query(False, description="Whether to inspect only staged changes"),
+    project_id: str = Query("default_project", description="Project ID"),
+    persist: bool = Query(True, description="Whether to persist snapshot to SQLite"),
+) -> PredictiveRiskReport:
+    """Calculate predictive failure risk scores across all regression tests for current code changes."""
+    from tracecase.ui.service import find_testcase_files, resolve_testcase_file
+
+    r_path = request.repo_path if request and request.repo_path != "." else repo_path
+    b_ref = (request.base_ref if request else None) or base_ref
+    t_ref = (request.target_ref if request else None) or target_ref
+    s_only = request.staged_only if request else staged_only
+    p_id = request.project_id if request and request.project_id != "default_project" else project_id
+    p_persist = request.persist if request is not None else persist
+
+    analyzer = GitChangeAnalyzer(r_path)
+    changeset = analyzer.analyze_repo(base_ref=b_ref, target_ref=t_ref, staged_only=s_only)
+
+    mapper = TestToCodeMapper(repo_path=r_path, project_id=p_id)
+    mapper.scan_codebase()
+
+    tc_files = find_testcase_files()
+    testcases: list[TestCase] = []
+    for f in tc_files:
+        try:
+            _, tc = resolve_testcase_file(str(f))
+            testcases.append(tc)
+        except Exception:
+            pass
+
+    graph = mapper.build_graph(testcases, persist=False)
+    scorer = PredictiveRiskScorer(project_id=p_id)
+    report = scorer.evaluate_suite_risk(testcases, graph, changeset, persist=p_persist)
+    return report
+
+
+@router.get("/intelligence/risk/snapshots", response_model=list[dict[str, Any]])
+async def get_risk_snapshots_endpoint(
+    commit_hash: str | None = Query(None, description="Filter by commit hash"),
+    testcase_id: str | None = Query(None, description="Filter by testcase ID"),
+    project_id: str = Query("default_project", description="Project ID"),
+    limit: int = Query(50, ge=1, le=500, description="Maximum snapshots to retrieve"),
+) -> list[dict[str, Any]]:
+    """Retrieve historical predictive risk calculation snapshots."""
+    return get_risk_scores_snapshots(
+        commit_hash=commit_hash,
+        testcase_id=testcase_id,
+        project_id=project_id,
+        limit=limit,
     )
 
 

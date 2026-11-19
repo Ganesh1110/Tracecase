@@ -468,32 +468,30 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             """
         )
 
-        # Test-to-Code Mapping Table (Phase 7.5.2)
+        # Predictive Risk Snapshots Table (Phase 7.5.3)
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS test_code_mappings (
+            CREATE TABLE IF NOT EXISTS test_risk_snapshots (
                 id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL DEFAULT 'default_project',
+                commit_hash TEXT,
+                branch TEXT,
                 testcase_id TEXT NOT NULL,
                 testcase_name TEXT NOT NULL DEFAULT '',
-                project_id TEXT NOT NULL DEFAULT 'default_project',
-                file_path TEXT NOT NULL,
-                relation_type TEXT NOT NULL,
-                matched_entity TEXT NOT NULL,
-                confidence REAL NOT NULL DEFAULT 1.0,
-                evidence_json TEXT NOT NULL DEFAULT '{}',
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                risk_score REAL NOT NULL,
+                risk_tier TEXT NOT NULL,
+                mapping_confidence REAL NOT NULL,
+                primary_driver TEXT NOT NULL,
+                breakdown_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_tc_mappings_testcase ON test_code_mappings(testcase_id)"
+            "CREATE INDEX IF NOT EXISTS idx_risk_snapshots_commit ON test_risk_snapshots(commit_hash)"
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_tc_mappings_file ON test_code_mappings(file_path)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_tc_mappings_relation ON test_code_mappings(relation_type)"
+            "CREATE INDEX IF NOT EXISTS idx_risk_snapshots_tc ON test_risk_snapshots(testcase_id)"
         )
 
         # Ensure default project exists
@@ -2991,5 +2989,113 @@ def clear_test_code_mappings(
                 (project_id,),
             )
             return cursor.rowcount
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Predictive Risk Snapshots Persistence (Phase 7.5.3)
+# ---------------------------------------------------------------------------
+
+def save_risk_scores_snapshot(
+    scores: list[Any],
+    commit_hash: str | None = None,
+    branch: str | None = None,
+    project_id: str = "default_project",
+    db_path: Path | str | None = None,
+) -> int:
+    """Persist a predictive risk scoring snapshot against a git commit."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    saved = 0
+    now = datetime.now().isoformat()
+    try:
+        with conn:
+            for s in scores:
+                if isinstance(s, dict):
+                    tc_id = s.get("testcase_id")
+                    tc_name = s.get("testcase_name", "")
+                    r_score = s.get("risk_score", 0.0)
+                    r_tier = s.get("risk_tier", "low")
+                    m_conf = s.get("mapping_confidence", 0.0)
+                    driver = s.get("primary_risk_driver", "")
+                    bd = s.get("breakdown", {})
+                else:
+                    tc_id = getattr(s, "testcase_id", "")
+                    tc_name = getattr(s, "testcase_name", "")
+                    r_score = getattr(s, "risk_score", 0.0)
+                    r_tier = getattr(s, "risk_tier", "low")
+                    m_conf = getattr(s, "mapping_confidence", 0.0)
+                    driver = getattr(s, "primary_risk_driver", "")
+                    bd = getattr(s, "breakdown", {})
+
+                bd_dict = bd.model_dump() if hasattr(bd, "model_dump") else bd if isinstance(bd, dict) else {}
+                bd_str = json.dumps(bd_dict)
+
+                snap_id = f"risk_{commit_hash or 'dirty'}_{tc_id}_{int(datetime.now().timestamp())}_{saved}"
+
+                conn.execute(
+                    """
+                    INSERT INTO test_risk_snapshots (
+                        id, project_id, commit_hash, branch, testcase_id, testcase_name,
+                        risk_score, risk_tier, mapping_confidence, primary_driver,
+                        breakdown_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        snap_id,
+                        project_id,
+                        commit_hash,
+                        branch,
+                        tc_id,
+                        tc_name,
+                        float(r_score),
+                        str(r_tier),
+                        float(m_conf),
+                        str(driver),
+                        bd_str,
+                        now,
+                    ),
+                )
+                saved += 1
+        return saved
+    finally:
+        conn.close()
+
+
+def get_risk_scores_snapshots(
+    commit_hash: str | None = None,
+    testcase_id: str | None = None,
+    project_id: str = "default_project",
+    limit: int = 50,
+    db_path: Path | str | None = None,
+) -> list[dict[str, Any]]:
+    """Retrieve historical predictive risk snapshots."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        query = "SELECT * FROM test_risk_snapshots WHERE project_id = ?"
+        params: list[Any] = [project_id]
+
+        if commit_hash:
+            query += " AND commit_hash = ?"
+            params.append(commit_hash)
+        if testcase_id:
+            query += " AND testcase_id = ?"
+            params.append(testcase_id)
+
+        query += " ORDER BY created_at DESC, risk_score DESC LIMIT ?"
+        params.append(limit)
+
+        rows = conn.execute(query, params).fetchall()
+        results: list[dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["breakdown"] = json.loads(d.get("breakdown_json") or "{}")
+            except Exception:
+                d["breakdown"] = {}
+            results.append(d)
+        return results
     finally:
         conn.close()

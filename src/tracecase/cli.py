@@ -1396,6 +1396,120 @@ def impact(
 
 
 @app.command()
+def risk(
+    repo_path: Annotated[
+        Path,
+        typer.Argument(help="Path to repository workspace (defaults to current dir)"),
+    ] = Path("."),
+    base: Annotated[
+        str | None,
+        typer.Option("--base", "-b", help="Base git ref to compare against (e.g. main, HEAD~1)"),
+    ] = None,
+    staged: Annotated[
+        bool,
+        typer.Option("--staged", help="Inspect only staged git changes"),
+    ] = False,
+    min_tier: Annotated[
+        str | None,
+        typer.Option("--min-tier", "-t", help="Minimum risk tier to display: critical, high, medium, low"),
+    ] = None,
+    project_id: Annotated[
+        str,
+        typer.Option("--project", "-p", help="Project identifier"),
+    ] = "default_project",
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output raw JSON instead of table"),
+    ] = False,
+) -> None:
+    """Evaluate predictive risk scores and priority rankings for regression test cases (Phase 7.5.3)."""
+    from rich.table import Table
+    from tracecase.intelligence.code_mapper import TestToCodeMapper
+    from tracecase.intelligence.git_analyzer import GitChangeAnalyzer
+    from tracecase.intelligence.risk_scorer import PredictiveRiskScorer
+    from tracecase.models import TestCase
+    from tracecase.ui.service import find_testcase_files, resolve_testcase_file
+
+    analyzer = GitChangeAnalyzer(repo_path)
+    changeset = analyzer.analyze_repo(base_ref=base, staged_only=staged)
+
+    mapper = TestToCodeMapper(repo_path=repo_path, project_id=project_id)
+    mapper.scan_codebase()
+
+    tc_files = find_testcase_files()
+    testcases: list[TestCase] = []
+    for f in tc_files:
+        try:
+            _, tc = resolve_testcase_file(str(f))
+            testcases.append(tc)
+        except Exception:
+            pass
+
+    graph = mapper.build_graph(testcases, persist=False)
+    scorer = PredictiveRiskScorer(project_id=project_id)
+    report = scorer.evaluate_suite_risk(testcases, graph, changeset, persist=True)
+
+    tier_order = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+    min_rank = tier_order.get(min_tier.lower(), 1) if min_tier else 1
+
+    filtered_scores = [s for s in report.scores if tier_order.get(s.risk_tier, 1) >= min_rank]
+
+    if as_json:
+        console.print_json(report.model_dump_json())
+        return
+
+    branch_str = f"on [bold cyan]{changeset.current_branch or 'detached'}[/bold cyan]"
+    commit_str = f"([dim]{changeset.current_commit or 'unknown'}[/dim])"
+    console.print(f"[bold]Predictive Risk Analysis[/bold] {branch_str} {commit_str}\n")
+
+    if not filtered_scores:
+        console.print("[dim]No test cases meet the selected risk criteria.[/dim]")
+        return
+
+    table = Table(title=f"Test Case Risk Rankings ({len(filtered_scores)} displayed)", border_style="cyan")
+    table.add_column("Tier", justify="center")
+    table.add_column("Test Case", style="bold")
+    table.add_column("Risk", justify="right")
+    table.add_column("Conf", justify="right")
+    table.add_column("Primary Risk Driver", style="yellow")
+    table.add_column("Signals (I/B/F/H/C)", style="dim", justify="center")
+
+    tier_styles = {
+        "critical": "[bold white on red] CRITICAL [/bold white on red]",
+        "high": "[bold red] HIGH [/bold red]",
+        "medium": "[bold yellow] MEDIUM [/bold yellow]",
+        "low": "[green] LOW [/green]",
+    }
+
+    for s in filtered_scores:
+        t_badge = tier_styles.get(s.risk_tier, s.risk_tier.upper())
+        r_style = "bold red" if s.risk_score >= 85 else "red" if s.risk_score >= 70 else "yellow" if s.risk_score >= 40 else "green"
+        conf_str = f"{s.mapping_confidence:.2f}"
+        b = s.breakdown
+        signals_str = f"{b.change_impact_score:.0f}/{b.selector_breakage_score:.0f}/{b.historical_failure_score:.0f}/{b.flakiness_recency_score:.0f}/{b.change_magnitude_score:.0f}"
+
+        table.add_row(
+            t_badge,
+            s.testcase_name or s.testcase_id,
+            f"[{r_style}]{s.risk_score:.1f}[/{r_style}]",
+            conf_str,
+            s.primary_risk_driver,
+            signals_str,
+        )
+
+    console.print(table)
+    console.print(
+        f"\n[bold]Risk Distribution:[/bold] "
+        f"[red]{report.critical_count} Critical[/red], "
+        f"[yellow]{report.high_count} High[/yellow], "
+        f"[blue]{report.medium_count} Medium[/blue], "
+        f"[green]{report.low_count} Low[/green] "
+        f"across {report.total_tests_evaluated} evaluated tests."
+    )
+
+
+
+@app.command()
 def ui(
     host: Annotated[
         str,

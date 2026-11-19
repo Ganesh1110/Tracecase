@@ -19,10 +19,16 @@ from tracecase.intelligence.models import (
     GitChangeSet,
     GitChangeSummary,
     ImpactedTestResult,
+    PredictiveRiskReport,
     RelationType,
+    RiskFactorBreakdown,
+    RiskScoringWeights,
+    RiskTier,
     TestCodeMapping,
     TestCoverageProfile,
+    TestRiskScore,
 )
+from tracecase.intelligence.risk_scorer import PredictiveRiskScorer
 
 __all__ = [
     "ChangedFile",
@@ -34,10 +40,16 @@ __all__ = [
     "GitChangeSet",
     "GitChangeSummary",
     "ImpactedTestResult",
+    "PredictiveRiskReport",
+    "PredictiveRiskScorer",
     "RelationType",
+    "RiskFactorBreakdown",
+    "RiskScoringWeights",
+    "RiskTier",
     "TestCodeMapping",
     "TestCoverageProfile",
     "TestReferenceExtractor",
+    "TestRiskScore",
     "TestToCodeGraph",
     "TestToCodeMapper",
 ]

@@ -126,3 +126,71 @@ class CodeImpactReport(BaseModel):
     impacted_tests: list[ImpactedTestResult] = Field(default_factory=list)
     total_impacted_tests: int = 0
     total_coverage_mappings: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Predictive Risk Scoring Models (Phase 7.5.3)
+# ---------------------------------------------------------------------------
+
+RiskTier = Literal["critical", "high", "medium", "low"]
+
+
+class RiskScoringWeights(BaseModel):
+    """Configurable weights for the risk calculation model."""
+    weight_impact: float = Field(default=0.30, ge=0.0, le=1.0)
+    weight_breakage: float = Field(default=0.25, ge=0.0, le=1.0)
+    weight_failure_rate: float = Field(default=0.20, ge=0.0, le=1.0)
+    weight_flakiness_recency: float = Field(default=0.15, ge=0.0, le=1.0)
+    weight_change_magnitude: float = Field(default=0.10, ge=0.0, le=1.0)
+
+
+class RiskFactorBreakdown(BaseModel):
+    """Detailed breakdown of individual normalized signals contributing to risk."""
+    change_impact_score: float = Field(ge=0.0, le=100.0)
+    selector_breakage_score: float = Field(ge=0.0, le=100.0)
+    historical_failure_score: float = Field(ge=0.0, le=100.0)
+    flakiness_recency_score: float = Field(ge=0.0, le=100.0)
+    change_magnitude_score: float = Field(ge=0.0, le=100.0)
+
+    weighted_impact: float
+    weighted_breakage: float
+    weighted_failure: float
+    weighted_flakiness: float
+    weighted_magnitude: float
+
+    has_history: bool = True
+    history_run_count: int = 0
+    recent_failure_detected: bool = False
+    broken_selectors_count: int = 0
+    modified_selectors_count: int = 0
+    lines_changed: int = 0
+
+
+class TestRiskScore(BaseModel):
+    """Calculated risk assessment for a single test case given a code change."""
+    __test__ = False
+    testcase_id: str
+    testcase_name: str
+    project_id: str = "default_project"
+    risk_score: float = Field(ge=0.0, le=100.0)
+    risk_tier: RiskTier
+    mapping_confidence: float = Field(ge=0.0, le=1.0)
+    primary_risk_driver: str
+    explanation: list[str] = Field(default_factory=list)
+    breakdown: RiskFactorBreakdown
+    affected_files: list[str] = Field(default_factory=list)
+    matched_selectors: list[str] = Field(default_factory=list)
+    matched_routes: list[str] = Field(default_factory=list)
+
+
+class PredictiveRiskReport(BaseModel):
+    """Report ranking all project test cases by predictive risk score."""
+    changeset_commit: str | None = None
+    changeset_branch: str | None = None
+    weights: RiskScoringWeights
+    total_tests_evaluated: int = 0
+    critical_count: int = 0
+    high_count: int = 0
+    medium_count: int = 0
+    low_count: int = 0
+    scores: list[TestRiskScore] = Field(default_factory=list)
