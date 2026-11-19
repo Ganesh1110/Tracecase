@@ -398,6 +398,34 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             """
         )
 
+        # Test-to-Code Mapping Table (Phase 7.5.2)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS test_code_mappings (
+                id TEXT PRIMARY KEY,
+                testcase_id TEXT NOT NULL,
+                testcase_name TEXT NOT NULL DEFAULT '',
+                project_id TEXT NOT NULL DEFAULT 'default_project',
+                file_path TEXT NOT NULL,
+                relation_type TEXT NOT NULL,
+                matched_entity TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 1.0,
+                evidence_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tc_mappings_testcase ON test_code_mappings(testcase_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tc_mappings_file ON test_code_mappings(file_path)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tc_mappings_relation ON test_code_mappings(relation_type)"
+        )
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS exploration_transitions (
@@ -438,6 +466,34 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             )
             """
+        )
+
+        # Test-to-Code Mapping Table (Phase 7.5.2)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS test_code_mappings (
+                id TEXT PRIMARY KEY,
+                testcase_id TEXT NOT NULL,
+                testcase_name TEXT NOT NULL DEFAULT '',
+                project_id TEXT NOT NULL DEFAULT 'default_project',
+                file_path TEXT NOT NULL,
+                relation_type TEXT NOT NULL,
+                matched_entity TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 1.0,
+                evidence_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tc_mappings_testcase ON test_code_mappings(testcase_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tc_mappings_file ON test_code_mappings(file_path)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tc_mappings_relation ON test_code_mappings(relation_type)"
         )
 
         # Ensure default project exists
@@ -2411,6 +2467,112 @@ def delete_exploration_run(
 
 
 # ---------------------------------------------------------------------------
+# Test-to-Code Mapping Persistence (Phase 7.5.2)
+# ---------------------------------------------------------------------------
+
+def save_test_code_mappings(
+    mappings: list[Any],
+    db_path: Path | str | None = None,
+) -> int:
+    """Save or update test-to-code mapping records into SQLite."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    saved = 0
+    now = datetime.now().isoformat()
+    try:
+        with conn:
+            for m in mappings:
+                m_id = getattr(m, "id", None) or m.get("id")
+                tc_id = getattr(m, "testcase_id", None) or m.get("testcase_id")
+                tc_name = getattr(m, "testcase_name", None) or m.get("testcase_name", "")
+                proj_id = getattr(m, "project_id", None) or m.get("project_id", "default_project")
+                f_path = getattr(m, "file_path", None) or m.get("file_path")
+                rel_type = getattr(m, "relation_type", None) or m.get("relation_type")
+                matched = getattr(m, "matched_entity", None) or m.get("matched_entity")
+                conf = getattr(m, "confidence", 1.0) or m.get("confidence", 1.0)
+                ev = getattr(m, "evidence", {}) or m.get("evidence", {})
+                ev_str = json.dumps(ev) if isinstance(ev, dict) else str(ev)
+
+                conn.execute(
+                    """
+                    INSERT INTO test_code_mappings (
+                        id, testcase_id, testcase_name, project_id, file_path,
+                        relation_type, matched_entity, confidence, evidence_json, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        confidence = excluded.confidence,
+                        evidence_json = excluded.evidence_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (m_id, tc_id, tc_name, proj_id, f_path, rel_type, matched, float(conf), ev_str, now),
+                )
+                saved += 1
+        return saved
+    finally:
+        conn.close()
+
+
+def get_test_code_mappings(
+    testcase_id: str | None = None,
+    file_path: str | None = None,
+    relation_type: str | None = None,
+    project_id: str | None = None,
+    db_path: Path | str | None = None,
+) -> list[dict[str, Any]]:
+    """Retrieve test-to-code mappings with optional filters."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        query = "SELECT * FROM test_code_mappings WHERE 1=1"
+        params: list[Any] = []
+
+        if testcase_id:
+            query += " AND testcase_id = ?"
+            params.append(testcase_id)
+        if file_path:
+            query += " AND file_path = ?"
+            params.append(file_path)
+        if relation_type:
+            query += " AND relation_type = ?"
+            params.append(relation_type)
+        if project_id:
+            query += " AND project_id = ?"
+            params.append(project_id)
+
+        query += " ORDER BY confidence DESC, file_path ASC"
+        rows = conn.execute(query, params).fetchall()
+        results: list[dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["evidence"] = json.loads(d.get("evidence_json") or "{}")
+            except Exception:
+                d["evidence"] = {}
+            results.append(d)
+        return results
+    finally:
+        conn.close()
+
+
+def clear_test_code_mappings(
+    project_id: str = "default_project",
+    db_path: Path | str | None = None,
+) -> int:
+    """Clear test-to-code mappings for a project."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        with conn:
+            cursor = conn.execute(
+                "DELETE FROM test_code_mappings WHERE project_id = ?",
+                (project_id,),
+            )
+            return cursor.rowcount
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Test Journey Drafts & Approval Operations
 # ---------------------------------------------------------------------------
 
@@ -2723,5 +2885,111 @@ def reject_synthesized_draft(
                 (reason or "Rejected by reviewer", now, draft_id),
             )
             return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Test-to-Code Mapping Persistence (Phase 7.5.2)
+# ---------------------------------------------------------------------------
+
+def save_test_code_mappings(
+    mappings: list[Any],
+    db_path: Path | str | None = None,
+) -> int:
+    """Save or update test-to-code mapping records into SQLite."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    saved = 0
+    now = datetime.now().isoformat()
+    try:
+        with conn:
+            for m in mappings:
+                m_id = getattr(m, "id", None) or m.get("id")
+                tc_id = getattr(m, "testcase_id", None) or m.get("testcase_id")
+                tc_name = getattr(m, "testcase_name", None) or m.get("testcase_name", "")
+                proj_id = getattr(m, "project_id", None) or m.get("project_id", "default_project")
+                f_path = getattr(m, "file_path", None) or m.get("file_path")
+                rel_type = getattr(m, "relation_type", None) or m.get("relation_type")
+                matched = getattr(m, "matched_entity", None) or m.get("matched_entity")
+                conf = getattr(m, "confidence", 1.0) or m.get("confidence", 1.0)
+                ev = getattr(m, "evidence", {}) or m.get("evidence", {})
+                ev_str = json.dumps(ev) if isinstance(ev, dict) else str(ev)
+
+                conn.execute(
+                    """
+                    INSERT INTO test_code_mappings (
+                        id, testcase_id, testcase_name, project_id, file_path,
+                        relation_type, matched_entity, confidence, evidence_json, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        confidence = excluded.confidence,
+                        evidence_json = excluded.evidence_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (m_id, tc_id, tc_name, proj_id, f_path, rel_type, matched, float(conf), ev_str, now),
+                )
+                saved += 1
+        return saved
+    finally:
+        conn.close()
+
+
+def get_test_code_mappings(
+    testcase_id: str | None = None,
+    file_path: str | None = None,
+    relation_type: str | None = None,
+    project_id: str | None = None,
+    db_path: Path | str | None = None,
+) -> list[dict[str, Any]]:
+    """Retrieve test-to-code mappings with optional filters."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        query = "SELECT * FROM test_code_mappings WHERE 1=1"
+        params: list[Any] = []
+
+        if testcase_id:
+            query += " AND testcase_id = ?"
+            params.append(testcase_id)
+        if file_path:
+            query += " AND file_path = ?"
+            params.append(file_path)
+        if relation_type:
+            query += " AND relation_type = ?"
+            params.append(relation_type)
+        if project_id:
+            query += " AND project_id = ?"
+            params.append(project_id)
+
+        query += " ORDER BY confidence DESC, file_path ASC"
+        rows = conn.execute(query, params).fetchall()
+        results: list[dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["evidence"] = json.loads(d.get("evidence_json") or "{}")
+            except Exception:
+                d["evidence"] = {}
+            results.append(d)
+        return results
+    finally:
+        conn.close()
+
+
+def clear_test_code_mappings(
+    project_id: str = "default_project",
+    db_path: Path | str | None = None,
+) -> int:
+    """Clear test-to-code mappings for a project."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        with conn:
+            cursor = conn.execute(
+                "DELETE FROM test_code_mappings WHERE project_id = ?",
+                (project_id,),
+            )
+            return cursor.rowcount
     finally:
         conn.close()

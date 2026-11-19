@@ -37,8 +37,14 @@ from tracecase.artifact_manager import (
 )
 from tracecase.index.search import get_coverage_report, search_testcases
 from tracecase.index.store import index_testcase
+from tracecase.intelligence.code_mapper import TestToCodeMapper
 from tracecase.intelligence.git_analyzer import GitChangeAnalyzer
-from tracecase.intelligence.models import GitChangeSet
+from tracecase.intelligence.models import (
+    CodeImpactReport,
+    GitChangeSet,
+    ImpactedTestResult,
+    TestCodeMapping,
+)
 from tracecase.models import TestCase
 from tracecase.mutation.engine import MutationEngine
 from tracecase.replay.har import build_har
@@ -61,6 +67,7 @@ from tracecase.ui.db import (
     get_settings,
     get_suite,
     get_synthesized_draft,
+    get_test_code_mappings,
     get_testcase_flakiness_stats,
     list_execution_batches,
     list_execution_matrices,
@@ -1738,6 +1745,92 @@ async def get_git_changes_endpoint(
     """Analyze git changes, diffs, changed selectors, routes, and symbols."""
     analyzer = GitChangeAnalyzer(repo_path)
     return analyzer.analyze_repo(base_ref=base_ref, target_ref=target_ref, staged_only=staged_only)
+
+
+@router.post("/intelligence/map")
+async def build_test_code_mappings_endpoint(
+    repo_path: str = Query(".", description="Path to repository workspace"),
+    project_id: str = Query("default_project", description="Project ID"),
+) -> dict[str, Any]:
+    """Scan codebase and testcases to build and persist bidirectional test-to-code mappings."""
+    from tracecase.ui.service import find_testcase_files, resolve_testcase_file
+
+    mapper = TestToCodeMapper(repo_path=repo_path, project_id=project_id)
+    mapper.scan_codebase()
+
+    tc_files = find_testcase_files()
+    testcases: list[TestCase] = []
+    for f in tc_files:
+        try:
+            _, tc = resolve_testcase_file(str(f))
+            testcases.append(tc)
+        except Exception:
+            pass
+
+    graph = mapper.build_graph(testcases, persist=True)
+    return {
+        "status": "success",
+        "project_id": project_id,
+        "scanned_code_files": len(mapper.file_indices),
+        "total_testcases": len(testcases),
+        "total_mappings": len(graph.mappings),
+    }
+
+
+@router.get("/intelligence/mappings", response_model=list[dict[str, Any]])
+async def get_test_code_mappings_endpoint(
+    testcase_id: str | None = Query(None, description="Filter by testcase ID"),
+    file_path: str | None = Query(None, description="Filter by application code file"),
+    relation_type: str | None = Query(None, description="Filter by relation type"),
+    project_id: str | None = Query("default_project", description="Project ID"),
+) -> list[dict[str, Any]]:
+    """Retrieve indexed test-to-code mappings from SQLite."""
+    return get_test_code_mappings(
+        testcase_id=testcase_id,
+        file_path=file_path,
+        relation_type=relation_type,
+        project_id=project_id,
+    )
+
+
+@router.post("/intelligence/impact", response_model=CodeImpactReport)
+async def analyze_code_impact_endpoint(
+    repo_path: str = Query(".", description="Path to repository workspace"),
+    base_ref: str | None = Query(None, description="Optional base git ref (e.g. main, HEAD~1)"),
+    target_ref: str | None = Query(None, description="Optional target git ref (defaults to HEAD)"),
+    staged_only: bool = Query(False, description="Whether to inspect only staged changes"),
+    project_id: str = Query("default_project", description="Project ID"),
+) -> CodeImpactReport:
+    """Detect git changes and identify impacted regression tests with ranked confidence and evidence."""
+    from tracecase.ui.service import find_testcase_files, resolve_testcase_file
+
+    analyzer = GitChangeAnalyzer(repo_path)
+    changeset = analyzer.analyze_repo(base_ref=base_ref, target_ref=target_ref, staged_only=staged_only)
+
+    mapper = TestToCodeMapper(repo_path=repo_path, project_id=project_id)
+    mapper.scan_codebase()
+
+    tc_files = find_testcase_files()
+    testcases: list[TestCase] = []
+    test_names: dict[str, str] = {}
+    for f in tc_files:
+        try:
+            _, tc = resolve_testcase_file(str(f))
+            testcases.append(tc)
+            test_names[tc.id] = tc.name
+        except Exception:
+            pass
+
+    graph = mapper.build_graph(testcases, persist=False)
+    impacted = graph.get_impacted_tests(changeset.files, all_tests=test_names)
+
+    return CodeImpactReport(
+        repo_path=str(Path(repo_path).resolve()),
+        changeset_summary=changeset.summary,
+        impacted_tests=impacted,
+        total_impacted_tests=len(impacted),
+        total_coverage_mappings=len(graph.mappings),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -151,6 +151,12 @@ class GitChangeAnalyzer:
                 current_file.change_type = "deleted"
             elif line.startswith("similarity index"):
                 current_file.change_type = "renamed"
+            elif line.startswith("rename from "):
+                current_file.old_path = line[12:].strip()
+                current_file.change_type = "renamed"
+            elif line.startswith("rename to "):
+                current_file.path = line[10:].strip()
+                current_file.change_type = "renamed"
 
             # Check hunk header: @@ -old_start,old_lines +new_start,new_lines @@ heading
             if line.startswith("@@ "):
@@ -381,20 +387,30 @@ class GitChangeAnalyzer:
         total_routes: set[str] = set()
         total_selectors: set[str] = set()
         total_symbols: set[str] = set()
+        total_removed_routes: set[str] = set()
+        total_removed_selectors: set[str] = set()
         files_by_type: dict[str, int] = {}
         total_adds = 0
         total_dels = 0
 
         for f in files:
             all_hunk_lines = [line for h in f.hunks for line in h.lines]
+            added_lines = [l for l in all_hunk_lines if l.startswith("+") and not l.startswith("+++")]
+            removed_lines = [l for l in all_hunk_lines if l.startswith("-") and not l.startswith("---")]
 
-            # 1. Selectors
-            f.changed_selectors = self.extract_selectors_from_lines(all_hunk_lines, f.path)
-            total_selectors.update(f.changed_selectors)
+            # 1. Selectors (all, added, removed)
+            f.added_selectors = self.extract_selectors_from_lines(added_lines, f.path)
+            f.removed_selectors = self.extract_selectors_from_lines(removed_lines, f.path)
+            f.changed_selectors = sorted(set(f.added_selectors + f.removed_selectors))
+            total_selectors.update(f.added_selectors)
+            total_removed_selectors.update(f.removed_selectors)
 
-            # 2. Routes
-            f.changed_routes = self.extract_routes_from_lines(all_hunk_lines, f.path)
-            total_routes.update(f.changed_routes)
+            # 2. Routes (all, added, removed)
+            f.added_routes = self.extract_routes_from_lines(added_lines, f.path)
+            f.removed_routes = self.extract_routes_from_lines(removed_lines, f.path)
+            f.changed_routes = sorted(set(f.added_routes + f.removed_routes))
+            total_routes.update(f.added_routes)
+            total_removed_routes.update(f.removed_routes)
 
             # 3. Symbols
             self.extract_symbols(f)
@@ -419,6 +435,8 @@ class GitChangeAnalyzer:
             total_changed_routes=sorted(total_routes),
             total_changed_selectors=sorted(total_selectors),
             total_changed_symbols=sorted(total_symbols),
+            total_removed_routes=sorted(total_removed_routes),
+            total_removed_selectors=sorted(total_removed_selectors),
         )
 
         return GitChangeSet(

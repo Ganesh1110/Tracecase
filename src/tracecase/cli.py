@@ -1,6 +1,7 @@
 """Command-line interface for Tracecase."""
 
 import asyncio
+import json
 import re
 import sys
 from enum import StrEnum
@@ -1249,6 +1250,149 @@ def changes(
         f"[yellow]{len(s.total_changed_selectors)} selectors[/yellow], "
         f"[blue]{len(s.total_changed_symbols)} symbols[/blue]."
     )
+
+
+@app.command(name="map")
+def map_code(
+    repo_path: Annotated[
+        Path,
+        typer.Argument(help="Path to repository workspace (defaults to current dir)"),
+    ] = Path("."),
+    project_id: Annotated[
+        str,
+        typer.Option("--project", "-p", help="Project identifier"),
+    ] = "default_project",
+) -> None:
+    """Scan codebase and map testcases to application routes, selectors, and files (Phase 7.5.2)."""
+    from rich.table import Table
+    from tracecase.intelligence.code_mapper import TestToCodeMapper
+    from tracecase.models import TestCase
+    from tracecase.ui.service import find_testcase_files, resolve_testcase_file
+
+    console.print(f"[cyan]Mapping test cases to codebase in '{repo_path.resolve()}'...[/cyan]")
+    mapper = TestToCodeMapper(repo_path=repo_path, project_id=project_id)
+    mapper.scan_codebase()
+
+    tc_files = find_testcase_files()
+    testcases: list[TestCase] = []
+    for f in tc_files:
+        try:
+            _, tc = resolve_testcase_file(str(f))
+            testcases.append(tc)
+        except Exception:
+            pass
+
+    graph = mapper.build_graph(testcases, persist=True)
+
+    table = Table(title=f"Test-to-Code Mappings ({len(graph.mappings)})", border_style="cyan")
+    table.add_column("Test Case", style="bold")
+    table.add_column("Relation", style="magenta")
+    table.add_column("Confidence", justify="right")
+    table.add_column("Matched Entity", style="yellow")
+    table.add_column("Application File", style="blue")
+
+    for m in graph.mappings[:20]:
+        conf_style = "green" if m.confidence >= 0.9 else "yellow" if m.confidence >= 0.7 else "dim"
+        table.add_row(
+            m.testcase_name or m.testcase_id,
+            m.relation_type,
+            f"[{conf_style}]{m.confidence:.2f}[/{conf_style}]",
+            m.matched_entity,
+            m.file_path,
+        )
+
+    console.print(table)
+    if len(graph.mappings) > 20:
+        console.print(f"[dim]...and {len(graph.mappings) - 20} more mappings indexed in studio.db[/dim]")
+
+    console.print(
+        f"\n[green]✓[/green] Successfully indexed [bold]{len(graph.mappings)}[/bold] mappings across "
+        f"[bold]{len(testcases)}[/bold] tests and [bold]{len(mapper.file_indices)}[/bold] code files."
+    )
+
+
+@app.command()
+def impact(
+    repo_path: Annotated[
+        Path,
+        typer.Argument(help="Path to repository workspace (defaults to current dir)"),
+    ] = Path("."),
+    base: Annotated[
+        str | None,
+        typer.Option("--base", "-b", help="Base git ref to compare against (e.g. main, HEAD~1)"),
+    ] = None,
+    staged: Annotated[
+        bool,
+        typer.Option("--staged", help="Inspect only staged git changes"),
+    ] = False,
+    project_id: Annotated[
+        str,
+        typer.Option("--project", "-p", help="Project identifier"),
+    ] = "default_project",
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output raw JSON instead of table"),
+    ] = False,
+) -> None:
+    """Identify regression test cases impacted by git code changes with ranked confidence (Phase 7.5.2)."""
+    from rich.table import Table
+    from tracecase.intelligence.code_mapper import TestToCodeMapper
+    from tracecase.intelligence.git_analyzer import GitChangeAnalyzer
+    from tracecase.models import TestCase
+    from tracecase.ui.service import find_testcase_files, resolve_testcase_file
+
+    analyzer = GitChangeAnalyzer(repo_path)
+    changeset = analyzer.analyze_repo(base_ref=base, staged_only=staged)
+
+    mapper = TestToCodeMapper(repo_path=repo_path, project_id=project_id)
+    mapper.scan_codebase()
+
+    tc_files = find_testcase_files()
+    testcases: list[TestCase] = []
+    test_names: dict[str, str] = {}
+    for f in tc_files:
+        try:
+            _, tc = resolve_testcase_file(str(f))
+            testcases.append(tc)
+            test_names[tc.id] = tc.name
+        except Exception:
+            pass
+
+    graph = mapper.build_graph(testcases, persist=False)
+    impacted = graph.get_impacted_tests(changeset.files, all_tests=test_names)
+
+    if as_json:
+        report = {
+            "total_impacted_tests": len(impacted),
+            "changeset_summary": changeset.summary.model_dump(),
+            "impacted_tests": [t.model_dump() for t in impacted],
+        }
+        console.print_json(json.dumps(report))
+        return
+
+    console.print(f"[bold cyan]Code Change Impact Analysis[/bold cyan] ({len(changeset.files)} files modified)\n")
+
+    if not impacted:
+        console.print("[green]✓ No existing test cases impacted by these code changes.[/green]")
+        return
+
+    table = Table(title=f"Impacted Regression Tests ({len(impacted)})", border_style="red")
+    table.add_column("Test Case", style="bold")
+    table.add_column("Confidence", justify="right")
+    table.add_column("Primary Reason", style="yellow")
+    table.add_column("Affected Files", style="blue")
+
+    for t in impacted:
+        conf_style = "bold red" if t.max_confidence >= 0.95 else "yellow" if t.max_confidence >= 0.8 else "dim"
+        table.add_row(
+            t.testcase_name,
+            f"[{conf_style}]{t.max_confidence:.2f}[/{conf_style}]",
+            t.primary_reason,
+            ", ".join(t.affected_files[:2]),
+        )
+
+    console.print(table)
+    console.print(f"\n[bold red]Impact:[/bold red] {len(impacted)} tests should be prioritized for regression verification.")
 
 
 @app.command()
