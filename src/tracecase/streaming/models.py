@@ -146,12 +146,3 @@ class StreamClientMessage(BaseModel):
 
     type: str  # "input", "resize", "ping"
     data: dict[str, Any] = Field(default_factory=dict)
-
-    viewport_width: int
-    viewport_height: int
-    started_at: datetime
-    last_frame_at: datetime | None = None
-    frames_sent: int = 0
-    total_bytes_streamed: int = 0
-    owner_id: str
-    error: str | None = None

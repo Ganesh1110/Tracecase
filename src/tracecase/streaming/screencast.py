@@ -105,12 +105,20 @@ class CDPScreencastManager:
                     },
                 )
                 self._is_active = True
+
+                # Wait briefly for Chromium to deliver the initial viewport frame
+                for _ in range(15):
+                    if self._latest_frame is not None:
+                        break
+                    await asyncio.sleep(0.04)
+
                 logger.info(
-                    "CDP Screencast started for page (format=%s, quality=%d, size=%dx%d)",
+                    "CDP Screencast started for page (format=%s, quality=%d, size=%dx%d, initial_frame=%s)",
                     self.format,
                     self.quality,
                     self.max_width,
                     self.max_height,
+                    self._latest_frame is not None,
                 )
             except Exception as exc:
                 logger.exception("Failed to start CDP screencast: %s", exc)
