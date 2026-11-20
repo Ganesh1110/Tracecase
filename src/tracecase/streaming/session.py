@@ -9,7 +9,9 @@ from typing import Any
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 
+from tracecase.streaming.input import dispatch_input_event
 from tracecase.streaming.models import (
+    InputEvent,
     ScreencastFrame,
     StreamSessionConfig,
     StreamSessionInfo,
@@ -167,6 +169,35 @@ class ManagedChromiumSession:
             owner_id=self.config.owner_id,
             error=self.error,
         )
+
+    async def handle_input(self, event: InputEvent) -> None:
+        """Forward validated user input event directly to active Playwright page."""
+        if self.state != StreamSessionState.ACTIVE or not self._page:
+            logger.warning(
+                "Dropped input event %s: session %s is not ACTIVE",
+                event.event_type,
+                self.session_id,
+            )
+            return
+
+        browser_vp = (self.config.viewport_width, self.config.viewport_height)
+        await dispatch_input_event(
+            page=self._page, event=event, browser_viewport=browser_vp
+        )
+
+    async def resize_viewport(self, width: int, height: int) -> None:
+        """Resize browser viewport and adjust screencast frame dimensions."""
+        if not self._page:
+            return
+
+        w = max(320, min(width, 3840))
+        h = max(240, min(height, 2160))
+        self.config.viewport_width = w
+        self.config.viewport_height = h
+        await self._page.set_viewport_size({"width": w, "height": h})
+        if self._screencast:
+            self._screencast.max_width = w
+            self._screencast.max_height = h
 
     async def close(self) -> None:
         """Gracefully terminate screencast, close context, and reap browser process."""

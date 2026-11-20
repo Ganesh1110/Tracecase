@@ -62,6 +62,7 @@ from tracecase.models import TestCase
 from tracecase.mutation.engine import MutationEngine
 from tracecase.replay.har import build_har
 from tracecase.replay.visual import compare_images
+from tracecase.streaming.models import StreamSessionConfig
 from tracecase.ui.broadcaster import manager
 from tracecase.ui.db import (
     add_testcase_to_suite,
@@ -3123,3 +3124,210 @@ async def matrix_websocket(websocket: WebSocket, matrix_id: str) -> None:
             await websocket.receive_text()
     except WebSocketDisconnect:
         await manager.disconnect(websocket, channel=channel)
+
+
+# ---------------------------------------------------------------------------
+# Embedded Browser Streaming WebSocket & Controls (Step 3.2)
+# ---------------------------------------------------------------------------
+
+@router.post("/record/stream/start")
+async def start_stream_session_endpoint(
+    req: StreamSessionConfig,
+) -> dict[str, Any]:
+    """Start a managed Chromium streaming browser session."""
+    from tracecase.streaming import get_streaming_session_manager
+
+    mgr = get_streaming_session_manager()
+    try:
+        session = await mgr.create_session(config=req)
+        info = await session.get_info()
+        return info.model_dump(mode="json")
+    except Exception as exc:
+        logger.exception("Failed to start stream session: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+
+@router.get("/record/stream/{session_id}")
+async def get_stream_session_endpoint(session_id: str) -> dict[str, Any]:
+    """Retrieve telemetry and state for a streaming session."""
+    from tracecase.streaming import get_streaming_session_manager
+
+    mgr = get_streaming_session_manager()
+    session = mgr.get_session(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Streaming session '{session_id}' not found.",
+        )
+    info = await session.get_info()
+    return info.model_dump(mode="json")
+
+
+@router.post("/record/stream/{session_id}/stop")
+async def stop_stream_session_endpoint(session_id: str) -> dict[str, Any]:
+    """Stop and release a managed streaming browser session."""
+    from tracecase.streaming import get_streaming_session_manager
+
+    mgr = get_streaming_session_manager()
+    closed = await mgr.close_session(session_id)
+    if not closed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Streaming session '{session_id}' not found.",
+        )
+    return {"session_id": session_id, "status": "stopped"}
+
+
+@router.websocket("/ws/record/stream/{session_id}")
+async def record_stream_websocket(
+    websocket: WebSocket,
+    session_id: str,
+    token: str | None = None,
+) -> None:
+    """
+    Dedicated interactive WebSocket for live browser streaming and input forwarding.
+    
+    Streams high-frequency CDP frames to authorized client and forwards mouse,
+    keyboard, typing, and wheel interactions to the active Playwright page.
+    """
+    import time
+    from tracecase.streaming import (
+        InputEvent,
+        ScreencastFrame,
+        StreamClientMessage,
+        StreamServerMessage,
+        StreamSessionState,
+        get_streaming_session_manager,
+    )
+
+    mgr = get_streaming_session_manager()
+
+    # Authenticate / resolve user identity from query token (never trust client-supplied owner_id in payload)
+    authenticated_user = "default_user"
+    if token and token.strip():
+        # In multi-tenant environments this resolves token -> user_id
+        authenticated_user = token.strip()
+
+    try:
+        session = mgr.get_session(session_id, owner_id=authenticated_user)
+    except PermissionError as perm_err:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=str(perm_err))
+        return
+
+    if not session or session.state in (StreamSessionState.STOPPED, StreamSessionState.FAILED):
+        await websocket.close(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason=f"Streaming session '{session_id}' not active or not found.",
+        )
+        return
+
+    await websocket.accept()
+
+    # Rate limiting trackers: max 180 input messages/sec to prevent DoS / flooding
+    max_rate_limit = 180
+    rate_window_start = time.time()
+    rate_counter = 0
+
+    # Frame dispatch callback delivering CDP frames to this client
+    async def frame_sender(frame: ScreencastFrame) -> None:
+        try:
+            msg = StreamServerMessage(
+                type="frame",
+                payload={
+                    "frame_index": frame.frame_index,
+                    "data_base64": frame.data_base64,
+                    "metadata": frame.metadata,
+                    "byte_size": frame.byte_size,
+                },
+            )
+            await websocket.send_text(msg.model_dump_json())
+        except Exception:
+            # Client disconnected or send buffer full
+            pass
+
+    session.add_frame_listener(frame_sender)
+
+    # Send initial session metadata and state
+    try:
+        init_info = await session.get_info()
+        await websocket.send_text(
+            StreamServerMessage(
+                type="session_state",
+                payload=init_info.model_dump(mode="json"),
+            ).model_dump_json()
+        )
+    except Exception:
+        pass
+
+    try:
+        while True:
+            raw_text = await websocket.receive_text()
+
+            # Enforce message size limit (64 KB)
+            if len(raw_text) > 65536:
+                await websocket.send_text(
+                    StreamServerMessage(
+                        type="error",
+                        payload={"error": "Message size exceeds 64KB limit"},
+                    ).model_dump_json()
+                )
+                continue
+
+            # Enforce rate limit
+            now = time.time()
+            if now - rate_window_start > 1.0:
+                rate_window_start = now
+                rate_counter = 0
+            rate_counter += 1
+            if rate_counter > max_rate_limit:
+                continue
+
+            try:
+                raw_json = json.loads(raw_text)
+                client_msg = StreamClientMessage(**raw_json)
+            except Exception as parse_err:
+                await websocket.send_text(
+                    StreamServerMessage(
+                        type="error",
+                        payload={"error": f"Malformed client message: {parse_err}"},
+                    ).model_dump_json()
+                )
+                continue
+
+            msg_type = client_msg.type.lower().strip()
+
+            if msg_type == "ping":
+                await websocket.send_text(
+                    StreamServerMessage(type="pong").model_dump_json()
+                )
+
+            elif msg_type == "input":
+                try:
+                    event = InputEvent(**client_msg.data)
+                    await session.handle_input(event)
+                except Exception as input_err:
+                    logger.warning("Error dispatching input event: %s", input_err)
+                    await websocket.send_text(
+                        StreamServerMessage(
+                            type="error",
+                            payload={"error": f"Input dispatch error: {input_err}"},
+                        ).model_dump_json()
+                    )
+
+            elif msg_type == "resize":
+                try:
+                    new_w = int(client_msg.data.get("width", 1280))
+                    new_h = int(client_msg.data.get("height", 720))
+                    await session.resize_viewport(width=new_w, height=new_h)
+                except Exception as resize_err:
+                    logger.warning("Error resizing viewport: %s", resize_err)
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        logger.debug("Websocket exception in stream %s: %s", session_id, exc)
+    finally:
+        session.remove_frame_listener(frame_sender)
+
