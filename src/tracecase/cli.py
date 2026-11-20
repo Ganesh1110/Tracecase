@@ -2083,5 +2083,211 @@ def ui(
         console.print("\n[yellow]Tracecase Studio stopped.[/yellow]")
 
 
+@app.command(name="ci")
+def ci_command(
+    base: Annotated[
+        str | None,
+        typer.Option("--base", "-b", help="Base git ref to compare against (e.g. origin/main, HEAD~1)"),
+    ] = None,
+    target: Annotated[
+        str | None,
+        typer.Option("--target", help="Target git ref (defaults to HEAD)"),
+    ] = None,
+    budget: Annotated[
+        str | None,
+        typer.Option("--budget", help="Time budget constraint (e.g. 180s, 3m)"),
+    ] = "180s",
+    gate: Annotated[
+        str,
+        typer.Option("--gate", "-g", help="Named quality gate policy (strict, standard, lenient, permissive)"),
+    ] = "standard",
+    concurrency: Annotated[
+        int,
+        typer.Option("--concurrency", "-c", help="Worker pool concurrency (1-16)"),
+    ] = 2,
+    browser: Annotated[
+        str,
+        typer.Option("--browser", help="Browser engine (chromium, firefox, webkit)"),
+    ] = "chromium",
+    retries: Annotated[
+        int,
+        typer.Option("--retries", help="Attempt retries on failure (0-3)"),
+    ] = 1,
+    headed: Annotated[
+        bool,
+        typer.Option("--headed", help="Run browser in headed mode"),
+    ] = False,
+    include_critical_exceptions: Annotated[
+        bool,
+        typer.Option("--include-critical-exceptions", help="Force execution of critical tests exceeding time budget"),
+    ] = False,
+    junit: Annotated[
+        Path | None,
+        typer.Option("--junit", help="Path to write JUnit XML report"),
+    ] = None,
+    sarif: Annotated[
+        Path | None,
+        typer.Option("--sarif", help="Path to write SARIF report"),
+    ] = None,
+    report: Annotated[
+        Path | None,
+        typer.Option("--report", help="Path to write Markdown summary report"),
+    ] = None,
+    manifest: Annotated[
+        Path | None,
+        typer.Option("--manifest", help="Path to write JSON manifest"),
+    ] = None,
+    config_file: Annotated[
+        Path | None,
+        typer.Option("--config", help="Path to YAML configuration file"),
+    ] = None,
+    repo_path: Annotated[
+        Path,
+        typer.Option("--repo", help="Repository path"),
+    ] = Path("."),
+    project_id: Annotated[
+        str,
+        typer.Option("--project", "-p", help="Project identifier"),
+    ] = "default_project",
+    json_out: Annotated[
+        bool,
+        typer.Option("--json", help="Output machine-readable JSON result to stdout"),
+    ] = False,
+) -> None:
+    """Run automated CI Quality Gate with predictive regression selection and multi-format reporting."""
+    from tracecase.ci.config import CIRunnerConfig
+    from tracecase.ci.policy import get_policy
+    from tracecase.ci.runner import CIRunner
+
+    # 1. Load base configuration from file if provided, otherwise defaults
+    if config_file and Path(config_file).is_file():
+        ci_config = CIRunnerConfig.load_from_file(config_file)
+    else:
+        ci_config = CIRunnerConfig(
+            base_ref=base,
+            target_ref=target,
+            repo_path=str(repo_path),
+            project_id=project_id,
+            time_budget=budget,
+            concurrency=concurrency,
+            browser=browser,
+            retries=retries,
+            headed=headed,
+            include_critical_exceptions=include_critical_exceptions,
+            gate_policy=get_policy(gate),
+            junit_path=str(junit) if junit else None,
+            sarif_path=str(sarif) if sarif else None,
+            markdown_path=str(report) if report else None,
+            json_path=str(manifest) if manifest else None,
+        )
+
+    # CLI option overrides if specified explicitly
+    if base is not None:
+        ci_config.base_ref = base
+    if target is not None:
+        ci_config.target_ref = target
+    if gate != "standard" or ci_config.gate_policy.name != gate:
+        ci_config.gate_policy = get_policy(gate)
+    if junit:
+        ci_config.junit_path = str(junit)
+    if sarif:
+        ci_config.sarif_path = str(sarif)
+    if report:
+        ci_config.markdown_path = str(report)
+    if manifest:
+        ci_config.json_path = str(manifest)
+
+    if not json_out:
+        print_banner()
+        console.print(Panel(
+            f"[bold cyan]Tracecase Continuous Quality Gate[/bold cyan]\n"
+            f"[dim]Policy:[/dim] [yellow]{ci_config.gate_policy.name.upper()}[/yellow] | "
+            f"[dim]Base:[/dim] [cyan]{ci_config.base_ref or 'HEAD (uncommitted)'}[/cyan] | "
+            f"[dim]Budget:[/dim] [green]{ci_config.time_budget}[/green] | "
+            f"[dim]Concurrency:[/dim] {ci_config.concurrency}",
+            border_style="cyan",
+        ))
+
+    runner = CIRunner(config=ci_config)
+    result = asyncio.run(runner.run())
+
+    if json_out:
+        console.print_json(result.model_dump_json())
+        raise typer.Exit(code=result.exit_code)
+
+    # Console visualization
+    m = result.gate_result.metrics
+    table = Table(title="Quality Gate Results Summary", border_style="dim")
+    table.add_column("Metric", style="bold")
+    table.add_column("Value")
+    table.add_column("Status")
+
+    table.add_row("Execution Duration", f"{result.duration_seconds:.2f}s", "ℹ")
+    table.add_row("Considered Tests", str(result.total_considered), "ℹ")
+    table.add_row("Selected / Executed", f"{result.selected_count} / {result.executed_count}", "ℹ")
+    table.add_row(
+        "Passed Tests",
+        str(m.get("passed_count", 0)),
+        "[green]✓[/green]" if m.get("passed_count", 0) > 0 else "—",
+    )
+    table.add_row(
+        "Failed Tests",
+        f"{m.get('failed_count', 0)} ({m.get('failure_rate_pct', 0.0)}%)",
+        "[red]❌[/red]" if m.get("failed_count", 0) > 0 else "[green]✓[/green]",
+    )
+    table.add_row(
+        "Critical Breakages",
+        str(m.get("critical_failures_count", 0)),
+        "[red]❌[/red]" if m.get("critical_failures_count", 0) > 0 else "[green]✓[/green]",
+    )
+    table.add_row(
+        "Flaky Tests",
+        f"{m.get('flaky_count', 0)} ({m.get('flakiness_rate_pct', 0.0)}%)",
+        "[yellow]⚡[/yellow]" if m.get("flaky_count", 0) > 0 else "[green]✓[/green]",
+    )
+    table.add_row(
+        "Surface Coverage",
+        f"{m.get('surface_coverage_pct', 0.0)}%",
+        "[green]✓[/green]" if m.get("surface_coverage_pct", 0.0) >= 70.0 else "[yellow]⚠[/yellow]",
+    )
+    table.add_row(
+        "Budget Exceptions",
+        str(m.get("budget_exceptions_count", 0)),
+        "[yellow]⚠[/yellow]" if m.get("budget_exceptions_count", 0) > 0 else "[green]✓[/green]",
+    )
+
+    console.print(table)
+
+    if result.gate_result.violations:
+        console.print("\n[bold red]Quality Gate Policy Violations:[/bold red]")
+        for v in result.gate_result.violations:
+            console.print(f"  [red]• [{v.severity.upper()}] {v.rule_name}:[/red] {v.message}")
+
+    if result.exit_code == 0:
+        console.print(f"\n[bold green]✓ QUALITY GATE PASSED[/bold green] (Exit Code: 0)")
+    elif result.exit_code == 1:
+        console.print(f"\n[bold red]✗ QUALITY GATE FAILED[/bold red] (Exit Code: 1)")
+    elif result.exit_code == 2:
+        console.print(f"\n[bold yellow]! CONFIGURATION / ENVIRONMENT ERROR[/bold yellow] (Exit Code: 2)")
+        if result.error_detail:
+            console.print(f"  [yellow]{result.error_detail}[/yellow]")
+    elif result.exit_code == 3:
+        console.print(f"\n[bold red]💥 INFRASTRUCTURE / EXECUTION ERROR[/bold red] (Exit Code: 3)")
+        if result.error_detail:
+            console.print(f"  [red]{result.error_detail}[/red]")
+
+    # Generated reports info
+    if ci_config.junit_path:
+        console.print(f"  [dim]JUnit XML:[/dim] {ci_config.junit_path}")
+    if ci_config.sarif_path:
+        console.print(f"  [dim]SARIF 2.1.0:[/dim] {ci_config.sarif_path}")
+    if ci_config.markdown_path:
+        console.print(f"  [dim]Markdown Summary:[/dim] {ci_config.markdown_path}")
+    if ci_config.json_path:
+        console.print(f"  [dim]JSON Manifest:[/dim] {ci_config.json_path}")
+
+    raise typer.Exit(code=result.exit_code)
+
+
 if __name__ == "__main__":
     app()

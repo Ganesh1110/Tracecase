@@ -106,6 +106,7 @@ class Step(BaseModel):
 
 class TestCase(BaseModel):
     """Complete test case with all steps and metadata."""
+    __test__ = False
 
     # Metadata
     id: str = Field(description="Unique test case ID")

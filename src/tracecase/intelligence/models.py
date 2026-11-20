@@ -250,6 +250,14 @@ class RegressionSelectionResult(BaseModel):
         "and recorded steps, not guaranteed durations."
     )
 
+    @property
+    def budget_exceptions(self) -> list[str]:
+        return self.budget_exception_test_ids
+
+    @property
+    def total_considered(self) -> int:
+        return self.total_tests_considered
+
 
 # ---------------------------------------------------------------------------
 # Explainable Test Prioritization Models (Phase 7.5.5)
