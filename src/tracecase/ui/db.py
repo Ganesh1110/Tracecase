@@ -533,6 +533,7 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
                 testcase_id TEXT NOT NULL,
                 testcase_name TEXT NOT NULL,
                 decision TEXT NOT NULL,
+                original_decision TEXT,
                 risk_score REAL NOT NULL,
                 risk_tier TEXT NOT NULL,
                 mapping_confidence REAL NOT NULL,
@@ -548,6 +549,10 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             )
             """
         )
+        trace_cols = {col["name"] for col in conn.execute("PRAGMA table_info(regression_decision_traces)").fetchall()}
+        if "original_decision" not in trace_cols:
+            conn.execute("ALTER TABLE regression_decision_traces ADD COLUMN original_decision TEXT")
+
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_dec_traces_sel ON regression_decision_traces(selection_id)"
         )
@@ -3442,11 +3447,23 @@ def save_decision_traces(
 
                 conn.execute(
                     """
-                    INSERT OR REPLACE INTO regression_decision_traces (
+                    INSERT INTO regression_decision_traces (
                         id, selection_id, project_id, commit_hash, testcase_id, testcase_name,
-                        decision, risk_score, risk_tier, mapping_confidence, estimated_duration_s,
+                        decision, original_decision, risk_score, risk_tier, mapping_confidence, estimated_duration_s,
                         duration_source, decision_summary, evidence_json, rationale, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        commit_hash = excluded.commit_hash,
+                        testcase_name = excluded.testcase_name,
+                        decision = CASE WHEN regression_decision_traces.user_override = 1 THEN regression_decision_traces.decision ELSE excluded.decision END,
+                        risk_score = excluded.risk_score,
+                        risk_tier = excluded.risk_tier,
+                        mapping_confidence = excluded.mapping_confidence,
+                        estimated_duration_s = excluded.estimated_duration_s,
+                        duration_source = excluded.duration_source,
+                        decision_summary = excluded.decision_summary,
+                        evidence_json = excluded.evidence_json,
+                        rationale = excluded.rationale
                     """,
                     (
                         trace_id,
@@ -3455,6 +3472,7 @@ def save_decision_traces(
                         commit_hash,
                         tc_id,
                         tc_name,
+                        str(decision),
                         str(decision),
                         r_score,
                         str(r_tier),
@@ -3533,10 +3551,10 @@ def record_user_decision_override(
                     """
                     INSERT INTO regression_decision_traces (
                         id, selection_id, project_id, testcase_id, testcase_name,
-                        decision, risk_score, risk_tier, mapping_confidence, estimated_duration_s,
+                        decision, original_decision, risk_score, risk_tier, mapping_confidence, estimated_duration_s,
                         duration_source, decision_summary, evidence_json, rationale,
                         user_override, override_reason, created_at
-                    ) VALUES (?, ?, 'default_project', ?, ?, ?, 0.0, 'low', 0.0, 15.0, 'estimated_fallback', ?, '{}', ?, 1, ?, ?)
+                    ) VALUES (?, ?, 'default_project', ?, ?, ?, ?, 0.0, 'low', 0.0, 15.0, 'estimated_fallback', ?, '{}', ?, 1, ?, ?)
                     """,
                     (
                         trace_id,
@@ -3544,6 +3562,7 @@ def record_user_decision_override(
                         testcase_id,
                         tc_name,
                         override_decision,
+                        "untracked",
                         f"User override to {override_decision}",
                         override_reason,
                         override_reason,

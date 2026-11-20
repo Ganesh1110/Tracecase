@@ -273,6 +273,7 @@ class TestPrioritizationExplanation(BaseModel):
     testcase_id: str
     testcase_name: str
     decision: SelectionDecision
+    original_decision: str | None = None
     decision_summary: str
     risk_score: float = Field(ge=0.0, le=100.0)
     risk_tier: RiskTier
@@ -299,6 +300,7 @@ class DecisionTraceRecord(BaseModel):
     testcase_id: str
     testcase_name: str
     decision: str
+    original_decision: str | None = None
     risk_score: float
     risk_tier: str
     mapping_confidence: float

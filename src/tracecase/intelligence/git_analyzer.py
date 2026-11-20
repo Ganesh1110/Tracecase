@@ -45,8 +45,9 @@ RE_ROUTE_PATTERNS = [
     # React Router / Next.js
     re.compile(r"""path:\s*["']([^"']+)["']""", re.IGNORECASE),
     re.compile(r"""<Route\s+[^>]*path=["']([^"']+)["']""", re.IGNORECASE),
-    # HTML link / API fetch
+    # HTML link / API fetch / Form action
     re.compile(r"""<a\s+[^>]*href=["'](/[^"']*)["']""", re.IGNORECASE),
+    re.compile(r"""action=["'](/[^"']*)["']""", re.IGNORECASE),
     re.compile(r"""(?:fetch|axios\.(?:get|post|put|delete)|api\.(?:get|post|put|delete))\s*\(\s*["'](/[^"']*)["']""", re.IGNORECASE),
 ]
 

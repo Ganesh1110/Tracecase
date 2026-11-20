@@ -36,6 +36,7 @@ from tracecase.intelligence.models import (
 )
 from tracecase.models import TestCase
 from tracecase.ui.db import (
+    get_decision_traces,
     get_regression_selection_by_id,
     save_decision_traces,
     save_regression_selection,
@@ -241,6 +242,7 @@ class PrioritizationExplainer:
             testcase_id=item.testcase_id,
             testcase_name=item.testcase_name,
             decision=item.decision,
+            original_decision=getattr(item, "original_decision", None) or item.decision,
             decision_summary=f"Decision: {item.decision.upper()} - {item.decision_reason}",
             risk_score=item.risk_score,
             risk_tier=item.risk_tier,
@@ -263,6 +265,79 @@ class PrioritizationExplainer:
     # Comprehensive Prioritization Report Generation
     # -----------------------------------------------------------------------
 
+    def build_report_from_traces(
+        self,
+        selection: RegressionSelectionResult,
+        traces: list[dict[str, Any]],
+    ) -> PrioritizationReport:
+        """Reconstruct PrioritizationReport from persisted decision traces without re-running AST analysis."""
+        explanations: list[TestPrioritizationExplanation] = []
+        covered_files: set[str] = set()
+        all_impacted_files: set[str] = set()
+
+        for t in traces:
+            ev = t.get("evidence") or {}
+            obs = [EvidenceItem(**x) if isinstance(x, dict) else x for x in ev.get("observed", [])]
+            heu = [EvidenceItem(**x) if isinstance(x, dict) else x for x in ev.get("heuristic", [])]
+            mis = [EvidenceItem(**x) if isinstance(x, dict) else x for x in ev.get("missing", [])]
+            aff_files = ev.get("affected_files", [])
+            all_impacted_files.update(aff_files)
+
+            exp = TestPrioritizationExplanation(
+                testcase_id=t["testcase_id"],
+                testcase_name=t["testcase_name"],
+                decision=t["decision"],
+                original_decision=t.get("original_decision") or t["decision"],
+                decision_summary=t.get("decision_summary") or f"Decision: {t['decision'].upper()}",
+                risk_score=float(t.get("risk_score", 0.0)),
+                risk_tier=t.get("risk_tier", "low"),
+                mapping_confidence=float(t.get("mapping_confidence", 0.0)),
+                confidence_type=t.get("confidence_type") or "exact",
+                estimated_duration_s=float(t.get("estimated_duration_s", 15.0)),
+                duration_source=t.get("duration_source", "estimated_fallback"),
+                primary_risk_driver=t.get("primary_risk_driver") or "Code change impact",
+                observed_evidence=obs,
+                heuristic_inferences=heu,
+                missing_evidence=mis,
+                risk_narrative=ev.get("risk_narrative", ""),
+                selection_rationale=t.get("rationale", ""),
+                affected_files=aff_files,
+                matched_selectors=ev.get("matched_selectors", []),
+                matched_routes=ev.get("matched_routes", []),
+            )
+            explanations.append(exp)
+            if t["decision"] == "selected":
+                covered_files.update(aff_files)
+
+        if all_impacted_files:
+            surface_cov_pct = round((len(covered_files & all_impacted_files) / len(all_impacted_files)) * 100.0, 1)
+        else:
+            surface_cov_pct = 100.0 if selection.selected_count > 0 else 0.0
+
+        report = PrioritizationReport(
+            selection_id=selection.id,
+            project_id=self.project_id,
+            commit_hash=selection.commit_hash,
+            branch=selection.branch,
+            strategy=selection.strategy,
+            strategy_params=selection.strategy_params,
+            created_at=selection.created_at,
+            total_tests=selection.total_tests_considered,
+            selected_count=len([e for e in explanations if e.decision == "selected"]),
+            excluded_count=len([e for e in explanations if e.decision == "excluded"]),
+            budget_exception_count=len([e for e in explanations if e.decision == "budget_exception"]),
+            time_budget_s=selection.time_budget_s,
+            estimated_total_duration_s=selection.estimated_total_duration_s,
+            risk_coverage_pct=selection.risk_coverage_pct,
+            critical_coverage_pct=selection.critical_coverage_pct,
+            functional_surface_coverage_pct=surface_cov_pct,
+            covered_files_count=len(covered_files),
+            total_impacted_files_count=len(all_impacted_files),
+            explanations=explanations,
+        )
+        report.markdown_report = self.generate_markdown_report(report)
+        return report
+
     def build_report(
         self,
         selection: RegressionSelectionResult,
@@ -272,6 +347,10 @@ class PrioritizationExplainer:
         persist: bool = True,
     ) -> PrioritizationReport:
         """Build the full prioritization report, generate markdown, and persist decision traces."""
+        if risk_report is None and changeset is None:
+            stored_traces = get_decision_traces(selection.id, db_path=self.db_path)
+            if stored_traces:
+                return self.build_report_from_traces(selection, stored_traces)
         score_map: dict[str, TestRiskScore] = {}
         if risk_report:
             score_map = {s.testcase_id: s for s in risk_report.scores}

@@ -59,13 +59,56 @@ class _MockLLMHandler(BaseHTTPRequestHandler):
         pass
 
 
+class _MockResponse:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def read(self) -> bytes:
+        return self._data
+
+    def __enter__(self) -> _MockResponse:
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        pass
+
+
 @pytest.fixture
-def mock_llm_server() -> Generator[str]:
+def mock_llm_server(monkeypatch: pytest.MonkeyPatch) -> Generator[str]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), _MockLLMHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+
+    def _mock_urlopen(req: Any, *args: Any, **kwargs: Any) -> Any:
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if "/api/chat" in url:
+            data = json.dumps({
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps({"summary": "Ollama response"}),
+                }
+            }).encode("utf-8")
+            return _MockResponse(data)
+        elif "/v1/chat/completions" in url:
+            data = json.dumps({
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps({"summary": "OpenAI response"}),
+                        }
+                    }
+                ]
+            }).encode("utf-8")
+            return _MockResponse(data)
+        return _MockResponse(b"{}")
+
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "urlopen", _mock_urlopen)
+
     try:
-        yield f"http://127.0.0.1:{server.server_address[1]}"
+        yield base
     finally:
         server.shutdown()
         thread.join(timeout=5)

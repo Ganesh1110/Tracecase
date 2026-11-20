@@ -2123,6 +2123,7 @@ class DecisionOverrideRequest(BaseModel):
     testcase_id: str
     override_decision: str  # "selected" or "excluded"
     override_reason: str
+    project_id: str | None = None
 
 
 def _reconstruct_selection_obj(sel: dict[str, Any]) -> RegressionSelectionResult:
@@ -2217,6 +2218,24 @@ async def override_selection_decision_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Regression selection '{selection_id}' not found.",
+        )
+    # Project isolation check
+    if req.project_id and req.project_id != sel.get("project_id", "default_project"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Project ID mismatch. Cannot override selection belonging to another project.",
+        )
+    # Ensure testcase belongs to this selection candidates
+    all_candidate_ids = set(
+        (sel.get("selected_test_ids") or [])
+        + (sel.get("excluded_test_ids") or [])
+        + (sel.get("budget_exceptions") or [])
+        + [t.get("testcase_id") for t in (sel.get("tests") or [])]
+    )
+    if all_candidate_ids and req.testcase_id not in all_candidate_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Testcase '{req.testcase_id}' does not belong to selection '{selection_id}'.",
         )
     if req.override_decision not in ("selected", "excluded", "user_excluded"):
         raise HTTPException(

@@ -68,6 +68,7 @@ class PredictiveRiskScorer:
         testcase_id: str,
         graph: TestToCodeGraph,
         changed_files: list[ChangedFile],
+        profile: TestCoverageProfile | None = None,
     ) -> tuple[float, float, list[str]]:
         """
         Compute Signal I: Change Impact (0-100) and return (score, max_mapping_confidence, explanations).
@@ -75,8 +76,6 @@ class PredictiveRiskScorer:
         Mapping confidence is strictly tracked separately from risk.
         """
         mappings = graph.get_mappings_for_test(testcase_id)
-        if not mappings:
-            return 0.0, 0.0, ["No direct test-to-code mapping found for this testcase."]
 
         changed_paths = {f.path for f in changed_files}
         old_changed_paths = {f.old_path for f in changed_files if f.old_path}
@@ -85,6 +84,7 @@ class PredictiveRiskScorer:
         max_conf = 0.0
         explanations: list[str] = []
 
+        # Check direct graph mappings
         for m in mappings:
             if m.file_path in changed_paths or (old_changed_paths and m.file_path in old_changed_paths):
                 max_conf = max(max_conf, m.confidence)
@@ -108,6 +108,18 @@ class PredictiveRiskScorer:
                     score = 40.0
 
                 best_score = max(best_score, score)
+
+        # Check if changed files have deleted selectors or routes that this test uses
+        test_sels = {s.lower() for s in profile.selectors_used} if profile else set()
+        test_rts = {r.lower() for r in profile.page_routes} if profile else set()
+
+        for cf in changed_files:
+            matched_deleted = any(s.lower() in test_sels for s in cf.removed_selectors)
+            matched_deleted_rt = any(r.lower() in test_rts for r in cf.removed_routes)
+            if matched_deleted or matched_deleted_rt:
+                best_score = 100.0
+                max_conf = max(max_conf, 0.98)
+                explanations.append(f"Direct code breakage: Deleted entity in '{cf.path}' covers test.")
 
         if not explanations:
             return 0.0, max_conf, ["Test files are unaffected by the current code modifications."]
@@ -277,7 +289,7 @@ class PredictiveRiskScorer:
         stats = get_testcase_flakiness_stats(tc.id, limit=30, db_path=self.db_path)
 
         # 2. Compute individual signals (all 0 - 100)
-        s_impact, max_conf, exp_impact = self.compute_change_impact(tc.id, graph, changed_files)
+        s_impact, max_conf, exp_impact = self.compute_change_impact(tc.id, graph, changed_files, profile=profile)
         s_breakage, broken_cnt, mod_cnt, exp_breakage = self.compute_selector_breakage(profile, changed_files)
         s_failure, has_hist, run_cnt, exp_failure = self.compute_historical_failure(stats)
         s_flakiness, rec_fail, exp_flakiness = self.compute_flakiness_and_recency(stats)
@@ -325,7 +337,12 @@ class PredictiveRiskScorer:
 
         # Associated files, selectors, and routes
         mappings = graph.get_mappings_for_test(tc.id)
-        aff_files = sorted({m.file_path for m in mappings if any(m.file_path == cf.path for cf in changed_files)})
+        test_sels = {s.lower() for s in profile.selectors_used}
+        test_rts = {r.lower() for r in profile.page_routes}
+        aff_files = sorted(
+            {m.file_path for m in mappings if any(m.file_path == cf.path for cf in changed_files)}
+            | {cf.path for cf in changed_files if any(s.lower() in test_sels for s in cf.removed_selectors) or any(r.lower() in test_rts for r in cf.removed_routes)}
+        )
         matched_sels = sorted({m.matched_entity for m in mappings if m.relation_type == "exact_selector"})
         matched_rts = sorted({m.matched_entity for m in mappings if m.relation_type in ("exact_route", "api_endpoint")})
 
