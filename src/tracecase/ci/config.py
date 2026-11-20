@@ -35,6 +35,8 @@ class CIRunnerConfig(BaseModel):
     sarif_path: str | None = None
     markdown_path: str | None = None
     json_path: str | None = None
+    upload_url: str | None = None
+    upload_token: str | None = None
 
     @classmethod
     def load_from_file(cls, config_path: Path | str) -> CIRunnerConfig:
@@ -82,4 +84,6 @@ class CIRunnerConfig(BaseModel):
             sarif_path=reports_section.get("sarif"),
             markdown_path=reports_section.get("markdown") or reports_section.get("report"),
             json_path=reports_section.get("manifest") or reports_section.get("json"),
+            upload_url=ci_section.get("upload_url") or data.get("upload_url"),
+            upload_token=ci_section.get("upload_token") or data.get("upload_token"),
         )

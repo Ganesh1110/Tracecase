@@ -118,7 +118,7 @@ class RegressionDriftClassifier:
                 )
             if pr_status == "flaky":
                 return (
-                    DriftClassification.FIXED_REGRESSION,
+                    DriftClassification.PARTIAL_RECOVERY,
                     f"Partially recovered: Test was failing on base commit and passed on retry on PR.{drift_note}",
                     test_def_drift,
                 )
@@ -139,7 +139,7 @@ class RegressionDriftClassifier:
             if pr_status == "failed":
                 return (
                     DriftClassification.NEW_REGRESSION,
-                    f"Regression: Previously flaky test has now degraded to complete failure on PR.{drift_note}",
+                    f"Regression: Previously flaky test has now degraded to complete failure on PR (worsened instability).{drift_note}",
                     test_def_drift,
                 )
             return (
@@ -148,17 +148,17 @@ class RegressionDriftClassifier:
                 test_def_drift,
             )
 
-        # Fallback for base errors
+        # Fallback for base infrastructure errors (baseline unknown)
         if base_st == "error":
             if pr_status == "passed":
                 return (
                     DriftClassification.NEW_TEST_PASS,
-                    f"Recovered from previous infrastructure error on base commit.{drift_note}",
+                    f"Test passed on PR; base commit encountered infrastructure error so baseline test outcome is unknown.{drift_note}",
                     test_def_drift,
                 )
             return (
                 DriftClassification.UNKNOWN_BASELINE_FAILURE,
-                f"Base commit run encountered infrastructure error; comparison cannot be verified.{drift_note}",
+                f"Base commit run encountered infrastructure error; baseline outcome is unknown and cannot confirm regression.{drift_note}",
                 test_def_drift,
             )
 

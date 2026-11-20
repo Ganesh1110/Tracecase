@@ -43,8 +43,17 @@
         BASE_ARG="--base origin/$CI_DEFAULT_BRANCH"
       fi
 
+      UPLOAD_ARG=""
+      if [ -n "$TRACECASE_URL" ]; then
+        UPLOAD_ARG="--upload-url $TRACECASE_URL"
+        if [ -n "$TRACECASE_TOKEN" ]; then
+          UPLOAD_ARG="$UPLOAD_ARG --upload-token $TRACECASE_TOKEN"
+        fi
+      fi
+
       tracecase ci \
         $BASE_ARG \
+        $UPLOAD_ARG \
         --target "$TRACETEST_TARGET_REF" \
         --gate "$TRACETEST_GATE_POLICY" \
         --budget "$TRACETEST_BUDGET" \

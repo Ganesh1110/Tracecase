@@ -797,7 +797,7 @@ def test_extended_drift_transitions_and_definition_drift():
     # 2. Failed on base -> Flaky on PR: Partial recovery
     base_failed = BaselineTestOutcome(testcase_id="tc_fail", testcase_name="Fail Test", status="failed")
     clf2, expl2, _ = RegressionDriftClassifier.classify(pr_status="flaky", base_outcome=base_failed)
-    assert clf2 == DriftClassification.FIXED_REGRESSION
+    assert clf2 == DriftClassification.PARTIAL_RECOVERY
     assert "Partially recovered" in expl2
 
     # 3. Cancelled on base -> Failed on PR: Baseline invalid -> Unknown baseline failure

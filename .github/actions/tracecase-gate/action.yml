@@ -62,6 +62,14 @@ inputs:
     description: "Tracecase project identifier."
     required: false
     default: "default_project"
+  studio-url:
+    description: "Optional Tracecase Studio URL to ingest CI run results into."
+    required: false
+    default: ""
+  studio-token:
+    description: "Optional ingestion token for Tracecase Studio."
+    required: false
+    default: ""
   upload-artifacts:
     description: "Whether to upload report artifacts to GitHub workflow run."
     required: false
@@ -130,6 +138,13 @@ runs:
 
         if [ -n "${{ inputs.config }}" ]; then
           CMD="$CMD --config '${{ inputs.config }}'"
+        fi
+
+        if [ -n "${{ inputs.studio-url }}" ]; then
+          CMD="$CMD --upload-url '${{ inputs.studio-url }}'"
+          if [ -n "${{ inputs.studio-token }}" ]; then
+            CMD="$CMD --upload-token '${{ inputs.studio-token }}'"
+          fi
         fi
 
         echo "Executing: $CMD"

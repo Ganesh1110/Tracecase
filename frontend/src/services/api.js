@@ -363,4 +363,10 @@ export const api = {
     const q = new URLSearchParams(params);
     return request(`/ci/analytics?${q.toString()}`);
   },
+  ingestCIManifest: (payload, token = null) =>
+    request('/ci/ingest', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }),
 };

@@ -24,6 +24,7 @@ import {
   X,
   Sliders,
   Award,
+  Upload,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useToast } from '../context/ToastContext';
@@ -52,6 +53,12 @@ export function CIDashboard() {
     testcaseId: null,
     evidence: null,
   });
+
+  // Import Manifest Modal State
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importJsonText, setImportJsonText] = useState('');
+  const [importToken, setImportToken] = useState('');
+  const [importing, setImporting] = useState(false);
 
   // Load runs on mount
   useEffect(() => {
@@ -133,6 +140,39 @@ export function CIDashboard() {
     }
   };
 
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setImportJsonText(event.target.result || '');
+    };
+    reader.readAsText(file);
+  };
+
+  const handleImportManifest = async () => {
+    if (!importJsonText.trim()) {
+      showToast('Please provide JSON manifest content', 'error');
+      return;
+    }
+    setImporting(true);
+    try {
+      const parsed = JSON.parse(importJsonText);
+      const res = await api.ingestCIManifest(parsed, importToken || null);
+      showToast(`Successfully ingested CI run ${res.run_id}`, 'success');
+      setImportModalOpen(false);
+      setImportJsonText('');
+      await loadRuns();
+      if (res.run_id) {
+        navigate(`/ci/${res.run_id}`);
+      }
+    } catch (err) {
+      showToast(err.message || 'Failed to ingest manifest', 'error');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   // Helper for status badge styling
   const getStatusBadge = (status) => {
     switch (status) {
@@ -200,6 +240,9 @@ export function CIDashboard() {
     }
     if (driftCategoryFilter === 'fixed') {
       return driftData.items.filter((i) => i.classification === 'fixed_regression');
+    }
+    if (driftCategoryFilter === 'partial') {
+      return driftData.items.filter((i) => i.classification === 'partial_recovery');
     }
     if (driftCategoryFilter === 'flaky') {
       return driftData.items.filter((i) => ['newly_flaky', 'persistent_flaky'].includes(i.classification));
@@ -348,14 +391,24 @@ export function CIDashboard() {
               ))}
             </div>
 
-            <button
-              onClick={loadRuns}
-              disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-surface-borderDark text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-surface-panelDark"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setImportModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-xs font-medium shadow-sm transition-colors"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                Import Manifest
+              </button>
+
+              <button
+                onClick={loadRuns}
+                disabled={loading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-surface-borderDark text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-surface-panelDark"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            </div>
           </div>
 
           {/* Runs Table */}
@@ -1142,6 +1195,105 @@ export function CIDashboard() {
                 className="px-4 py-2 text-xs font-medium rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
               >
                 Close Comparison
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* -------------------------------------------------------------------- */}
+      {/* Import CI Manifest Modal (Subphase 8.5.1)                           */}
+      {/* -------------------------------------------------------------------- */}
+      {importModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-surface-panelDark border border-slate-200 dark:border-surface-borderDark rounded-2xl max-w-xl w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-surface-borderDark pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-brand-500/10 text-brand-600 dark:text-brand-400">
+                  <Upload className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                    Import CI Manifest & Run Record
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Ingest an exported <code className="font-mono">tracecase-manifest.json</code> from hosted CI pipelines.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setImportModalOpen(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                  Upload Manifest JSON File
+                </label>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleFileUpload}
+                  className="w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-brand-50 file:text-brand-700 dark:file:bg-brand-500/10 dark:file:text-brand-400 hover:file:bg-brand-100"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                  Or Paste JSON Content
+                </label>
+                <textarea
+                  value={importJsonText}
+                  onChange={(e) => setImportJsonText(e.target.value)}
+                  placeholder='{"schema_version": "1.1.0", "run_id": "...", ...}'
+                  rows={7}
+                  className="w-full p-2.5 font-mono text-[11px] rounded-lg border border-slate-200 dark:border-surface-borderDark bg-slate-50 dark:bg-slate-900/60 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Optional API Ingestion Token
+                </label>
+                <input
+                  type="password"
+                  value={importToken}
+                  onChange={(e) => setImportToken(e.target.value)}
+                  placeholder="Optional token if studio authentication is enabled"
+                  className="w-full p-2 text-xs rounded-lg border border-slate-200 dark:border-surface-borderDark bg-slate-50 dark:bg-slate-900/60 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-200 dark:border-surface-borderDark">
+              <button
+                type="button"
+                onClick={() => setImportModalOpen(false)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleImportManifest}
+                disabled={importing || !importJsonText.trim()}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-xs font-semibold shadow-sm transition-colors"
+              >
+                {importing ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    Ingesting...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-3.5 h-3.5" />
+                    Ingest Manifest
+                  </>
+                )}
               </button>
             </div>
           </div>

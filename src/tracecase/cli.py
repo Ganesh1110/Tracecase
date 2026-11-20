@@ -2165,6 +2165,14 @@ def ci_command(
         bool,
         typer.Option("--json", help="Output machine-readable JSON result to stdout"),
     ] = False,
+    upload_url: Annotated[
+        str | None,
+        typer.Option("--upload-url", help="Tracecase Studio URL to upload CI run manifest to"),
+    ] = None,
+    upload_token: Annotated[
+        str | None,
+        typer.Option("--upload-token", help="Bearer token for Tracecase Studio upload"),
+    ] = None,
 ) -> None:
     """Run automated CI Quality Gate with predictive regression selection and multi-format reporting."""
     from tracecase.ci.config import CIRunnerConfig
@@ -2214,6 +2222,10 @@ def ci_command(
         ci_config.auto_run_baseline = auto_run_baseline
     if allow_preexisting is not None:
         ci_config.gate_policy.allow_pre_existing_failures = allow_preexisting
+    if upload_url:
+        ci_config.upload_url = upload_url
+    if upload_token:
+        ci_config.upload_token = upload_token
 
     if not json_out:
         print_banner()
@@ -2342,6 +2354,50 @@ def ci_command(
         console.print(f"  [dim]JSON Manifest:[/dim] {ci_config.json_path}")
 
     raise typer.Exit(code=result.exit_code)
+
+
+@app.command(name="ci-upload")
+def ci_upload_command(
+    manifest_path: Annotated[Path, typer.Argument(help="Path to tracecase JSON manifest file")],
+    url: Annotated[str, typer.Option("--url", "-u", help="Tracecase Studio server URL")],
+    token: Annotated[str | None, typer.Option("--token", "-t", help="Ingestion token")] = None,
+) -> None:
+    """Upload an exported CI run manifest to Tracecase Studio."""
+    import urllib.request
+    import urllib.error
+
+    if not manifest_path.is_file():
+        console.print(f"[bold red]Error:[/bold red] Manifest file not found: {manifest_path}")
+        raise typer.Exit(code=2)
+
+    try:
+        manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        console.print(f"[bold red]Error:[/bold red] Invalid JSON in {manifest_path}: {exc}")
+        raise typer.Exit(code=2)
+
+    base_url = url.rstrip("/")
+    if not base_url.endswith("/api"):
+        endpoint = f"{base_url}/api/ci/ingest"
+    else:
+        endpoint = f"{base_url}/ci/ingest"
+
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    payload_bytes = json.dumps({"manifest": manifest_data}).encode("utf-8")
+    req = urllib.request.Request(endpoint, data=payload_bytes, headers=headers, method="POST")
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            resp_body = json.loads(resp.read().decode("utf-8"))
+            console.print(
+                f"[bold green]✓[/bold green] Ingested run [cyan]{resp_body.get('run_id')}[/cyan] into Studio ({resp_body.get('gate_status')})"
+            )
+    except Exception as exc:
+        console.print(f"[bold red]Error uploading manifest to {endpoint}:[/bold red] {exc}")
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

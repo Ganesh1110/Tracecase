@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import logging
 import shutil
@@ -9,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Header, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
@@ -99,6 +100,7 @@ from tracecase.ui.db import (
     reject_synthesized_draft,
     remove_testcase_from_suite,
     save_ai_analysis,
+    save_ci_run,
     save_decision_traces,
     save_regression_selection,
     save_synthesized_draft,
@@ -2607,6 +2609,8 @@ def get_ci_run_regression_drift(run_id: str) -> dict[str, Any]:
             grouped["pre_existing_failures"].append(item)
         elif cls_name == "fixed_regression":
             grouped["fixed_regressions"].append(item)
+        elif cls_name == "partial_recovery":
+            grouped.setdefault("partial_recovery", []).append(item)
         elif cls_name == "newly_flaky":
             grouped["newly_flaky"].append(item)
         elif cls_name == "persistent_flaky":
@@ -2631,14 +2635,142 @@ def get_ci_run_regression_drift(run_id: str) -> dict[str, Any]:
     }
 
 
+@router.post("/ci/ingest")
+def ingest_ci_run_manifest(
+    payload: dict[str, Any],
+    authorization: str | None = Header(default=None),
+    x_tracecase_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Ingest a CI quality gate run manifest or result payload from hosted CI pipelines (GitHub/GitLab)."""
+    # 1. Validate Token if configured
+    settings = get_settings()
+    configured_token = settings.get("ci_api_token")
+    if configured_token:
+        import secrets
+        provided = ""
+        if authorization and authorization.lower().startswith("bearer "):
+            provided = authorization[7:].strip()
+        elif x_tracecase_token:
+            provided = x_tracecase_token.strip()
+
+        if not secrets.compare_digest(provided, configured_token):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or missing Tracecase CI ingestion token",
+            )
+
+    # 2. Extract run metadata from payload (supports both manifest schema and CIRunResult)
+    manifest = payload.get("manifest") or payload
+    schema_ver = manifest.get("schema_version")
+    if schema_ver and schema_ver not in ("1.0.0", "1.1.0"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported manifest schema version: '{schema_ver}'. Supported versions: 1.0.0, 1.1.0",
+        )
+
+    run_id = manifest.get("run_id") or manifest.get("id") or f"ci_ingest_{uuid.uuid4().hex[:10]}"
+    project_id = manifest.get("project_id", "default_project")
+    commit_hash = manifest.get("commit") or manifest.get("commit_hash", "HEAD")
+    branch = manifest.get("branch")
+    base_ref = manifest.get("base_ref") or manifest.get("baseline_commit")
+    exit_code = int(manifest.get("exit_code", 0))
+
+    gate = manifest.get("gate") or manifest.get("gate_result") or {}
+    metrics = gate.get("metrics") or manifest.get("metrics") or {}
+    drift = manifest.get("drift") or manifest.get("drift_summary") or {}
+    test_results = manifest.get("tests") or manifest.get("test_results") or []
+
+    run_record = {
+        "run_id": run_id,
+        "project_id": project_id,
+        "commit_hash": commit_hash,
+        "branch": branch,
+        "base_ref": base_ref,
+        "target_ref": manifest.get("target_ref"),
+        "exit_code": exit_code,
+        "duration_seconds": float(manifest.get("duration_seconds", 0.0)),
+        "gate_result": gate,
+        "total_considered": int(manifest.get("total_considered", len(test_results))),
+        "selected_count": int(manifest.get("selected_count", len(test_results))),
+        "executed_count": int(manifest.get("executed_count", len(test_results))),
+        "test_results": test_results,
+        "drift_summary": drift,
+        "error_category": manifest.get("error_category"),
+        "error_detail": manifest.get("error_detail"),
+        "created_at": manifest.get("timestamp") or manifest.get("created_at") or datetime.now().isoformat(),
+    }
+
+    # 3. Persist into ci_runs
+    save_ci_run(run_record)
+
+    # 4. If drift items are present, persist into ci_drift_records
+    from tracecase.ci.drift.analytics import DriftAnalytics
+    from tracecase.ci.drift.models import DriftAnalysisResult, DriftClassification, TestDriftItem
+
+    drift_items_raw = drift.get("items") or []
+    if drift_items_raw:
+        items = []
+        for it in drift_items_raw:
+            items.append(
+                TestDriftItem(
+                    testcase_id=it.get("testcase_id", ""),
+                    testcase_name=it.get("testcase_name") or it.get("testcase_id", ""),
+                    classification=DriftClassification(it.get("classification", "stable_pass")),
+                    pr_status=it.get("pr_status", "passed"),
+                    base_status=it.get("base_status"),
+                    test_definition_drift=bool(it.get("test_definition_drift", False)),
+                    base_duration_ms=it.get("base_duration_ms"),
+                    pr_duration_ms=float(it.get("pr_duration_ms", 0.0)),
+                    duration_delta_ms=it.get("duration_delta_ms"),
+                    explanation=it.get("explanation", ""),
+                )
+            )
+
+        analytics = DriftAnalytics()
+        drift_res = DriftAnalysisResult(
+            run_id=run_id,
+            project_id=project_id,
+            base_commit=base_ref,
+            pr_commit=commit_hash,
+            browser=manifest.get("browser", "chromium"),
+            total_compared=len(items),
+            new_regressions_count=int(drift.get("new_regressions_count", 0)),
+            pre_existing_failures_count=int(drift.get("pre_existing_failures_count", 0)),
+            fixed_regressions_count=int(drift.get("fixed_regressions_count", 0)),
+            newly_flaky_count=int(drift.get("newly_flaky_count", 0)),
+            items=items,
+        )
+        analytics.save_drift_result(drift_res)
+
+    return {
+        "status": "ingested",
+        "run_id": run_id,
+        "project_id": project_id,
+        "gate_status": "PASSED" if gate.get("passed") else ("ERROR" if exit_code == 3 else "FAILED"),
+        "total_tests": len(test_results),
+        "drift_items_count": len(drift_items_raw),
+    }
+
+
 @router.get("/ci/runs/{run_id}/visual-diff/{testcase_id}")
-def get_ci_visual_diff_evidence(run_id: str, testcase_id: str) -> dict[str, Any]:
-    """Retrieve side-by-side execution evidence, screenshots, and logs for a testcase."""
+def get_ci_visual_diff_evidence(
+    run_id: str,
+    testcase_id: str,
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    """Retrieve side-by-side execution evidence, screenshots, and logs for a testcase with security validation."""
     run = get_ci_run_by_id(run_id)
     if not run:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"CI run '{run_id}' not found",
+        )
+
+    # Project ownership validation
+    if project_id and run.get("project_id") != project_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Run does not belong to requested project",
         )
 
     # Find PR test result
@@ -2655,29 +2787,64 @@ def get_ci_visual_diff_evidence(run_id: str, testcase_id: str) -> dict[str, Any]
     elif drift_item and drift_item.get("testcase_name"):
         tc_name = drift_item["testcase_name"]
 
+    # Safe artifact path verification using canonical path resolution and containment checking
+    def _safe_artifact_path(raw: str | None) -> str | None:
+        if not raw:
+            return None
+        try:
+            target = Path(raw).resolve()
+            allowed_roots = [
+                Path.cwd().resolve(),
+                (Path.cwd() / ".tracecase").resolve(),
+                (Path.cwd() / "tracecase-reports").resolve(),
+            ]
+            if not any(target.is_relative_to(root) for root in allowed_roots):
+                return None
+            return str(target) if (target.exists() and target.is_file()) else None
+        except Exception:
+            return None
+
+    pr_raw_ss = pr_test.get("screenshot_path") if pr_test else None
+    pr_safe_ss = _safe_artifact_path(pr_raw_ss)
+
+    pr_raw_trace = pr_test.get("trace_path") if pr_test else None
+    pr_safe_trace = _safe_artifact_path(pr_raw_trace)
+
     # PR evidence
     pr_evidence = {
         "status": pr_test.get("status") if pr_test else (drift_item.get("pr_status") if drift_item else "unknown"),
         "duration_ms": pr_test.get("duration_ms") if pr_test else (drift_item.get("pr_duration_ms", 0.0) if drift_item else 0.0),
         "error_message": pr_test.get("error_message") if pr_test else (drift_item.get("details", {}).get("pr_error_message") if drift_item else None),
-        "screenshot_path": pr_test.get("screenshot_path") if pr_test else None,
-        "trace_path": pr_test.get("trace_path") if pr_test else None,
+        "screenshot_path": pr_safe_ss,
+        "trace_path": pr_safe_trace,
         "failed_step": pr_test.get("failed_step") if pr_test else None,
+        "has_screenshot": pr_safe_ss is not None,
     }
 
     # Base evidence
+    base_raw_ss = drift_item.get("details", {}).get("base_screenshot_path") if drift_item else None
+    base_safe_ss = _safe_artifact_path(base_raw_ss)
+
     base_evidence = {
         "status": drift_item.get("base_status") if drift_item else "unknown",
         "duration_ms": drift_item.get("base_duration_ms") if drift_item else 0.0,
         "error_message": drift_item.get("details", {}).get("base_error_message") if drift_item else None,
-        "screenshot_path": None,
+        "screenshot_path": base_safe_ss,
         "trace_path": None,
         "failed_step": None,
+        "has_screenshot": base_safe_ss is not None,
     }
 
-    # If test run has execution attempt screenshots on disk
-    pr_has_screenshot = bool(pr_evidence.get("screenshot_path") and Path(pr_evidence["screenshot_path"]).exists())
-    base_has_screenshot = bool(base_evidence.get("screenshot_path") and Path(base_evidence["screenshot_path"]).exists())
+    # Distinguish unavailable evidence from identical
+    if pr_safe_ss and base_safe_ss:
+        diff_status = "available"
+        similarity = 1.0 if pr_evidence["status"] == base_evidence["status"] else 0.0
+    elif not pr_safe_ss and not base_safe_ss:
+        diff_status = "unavailable"
+        similarity = None
+    else:
+        diff_status = "partial"
+        similarity = None
 
     return {
         "run_id": run_id,
@@ -2686,10 +2853,15 @@ def get_ci_visual_diff_evidence(run_id: str, testcase_id: str) -> dict[str, Any]
         "classification": drift_item.get("classification") if drift_item else "unknown",
         "duration_delta_ms": drift_item.get("duration_delta_ms") if drift_item else None,
         "test_definition_drift": bool(drift_item.get("test_definition_drift")) if drift_item else False,
+        "visual_diff_status": diff_status,
         "pr_evidence": pr_evidence,
         "base_evidence": base_evidence,
-        "visual_diff_available": pr_has_screenshot and base_has_screenshot,
-        "similarity_score": 1.0 if pr_evidence["status"] == base_evidence["status"] else 0.0,
+        "visual_diff_available": diff_status == "available",
+        "similarity_score": similarity,
+        "environment_parity": {
+            "browser": run.get("metrics", {}).get("browser", "chromium"),
+            "viewport": run.get("metrics", {}).get("viewport", "1280x720"),
+        },
     }
 
 

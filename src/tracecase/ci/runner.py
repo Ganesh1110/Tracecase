@@ -512,3 +512,45 @@ class CIRunner:
             p.write_text(json_str, encoding="utf-8")
 
         run_res.reports = reports
+
+        # 5. Upload to Tracecase Studio if upload_url configured
+        if self.config.upload_url:
+            self._upload_manifest_if_configured(json_dict, run_res)
+
+    def _upload_manifest_if_configured(self, manifest: dict[str, Any], run_res: CIRunResult) -> None:
+        """Upload CI run manifest to hosted Tracecase Studio instance."""
+        if not self.config.upload_url:
+            return
+        import urllib.request
+        import urllib.error
+
+        base_url = self.config.upload_url.rstrip("/")
+        if not base_url.endswith("/api"):
+            endpoint = f"{base_url}/api/ci/ingest"
+        else:
+            endpoint = f"{base_url}/ci/ingest"
+
+        headers = {"Content-Type": "application/json"}
+        if self.config.upload_token:
+            headers["Authorization"] = f"Bearer {self.config.upload_token}"
+
+        payload_bytes = json.dumps({"manifest": manifest}).encode("utf-8")
+        req = urllib.request.Request(endpoint, data=payload_bytes, headers=headers, method="POST")
+
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    logger.info("Successfully uploaded CI run %s to Studio: HTTP %s", run_res.run_id, resp.status)
+                    return
+            except Exception as exc:
+                if attempt == max_retries:
+                    logger.warning(
+                        "Failed to upload CI run manifest to Studio (%s) after %d attempts: %s. Quality gate result (exit code %d) preserved.",
+                        endpoint,
+                        max_retries + 1,
+                        exc,
+                        run_res.exit_code,
+                    )
+                else:
+                    time.sleep(0.2 * (attempt + 1))

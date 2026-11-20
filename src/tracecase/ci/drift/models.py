@@ -13,6 +13,7 @@ class DriftClassification(StrEnum):
     NEW_REGRESSION = "new_regression"                    # Base: passed -> PR: failed
     PRE_EXISTING_FAILURE = "pre_existing_failure"        # Base: failed -> PR: failed
     FIXED_REGRESSION = "fixed_regression"                # Base: failed -> PR: passed
+    PARTIAL_RECOVERY = "partial_recovery"                # Base: failed -> PR: flaky
     STABLE_PASS = "stable_pass"                          # Base: passed -> PR: passed
     NEWLY_FLAKY = "newly_flaky"                          # Base: passed -> PR: flaky
     PERSISTENT_FLAKY = "persistent_flaky"                # Base: flaky  -> PR: flaky
@@ -55,6 +56,7 @@ class DriftAnalysisResult(BaseModel):
     new_regressions_count: int = 0
     pre_existing_failures_count: int = 0
     fixed_regressions_count: int = 0
+    partial_recoveries_count: int = 0
     newly_flaky_count: int = 0
     persistent_flaky_count: int = 0
     stable_passes_count: int = 0

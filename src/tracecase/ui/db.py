@@ -606,6 +606,67 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             "CREATE INDEX IF NOT EXISTS idx_ci_runs_branch ON ci_runs(branch)"
         )
 
+        # CI Baselines Table (Phase 8.3 & 8.5)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ci_baselines (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL DEFAULT 'default_project',
+                commit_hash TEXT NOT NULL,
+                branch TEXT,
+                browser TEXT NOT NULL,
+                testcase_id TEXT NOT NULL,
+                testcase_name TEXT NOT NULL,
+                test_revision_hash TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL,
+                duration_ms REAL NOT NULL DEFAULT 0.0,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                run_id TEXT,
+                batch_id TEXT,
+                environment_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ci_baselines_lookup ON ci_baselines(project_id, commit_hash, browser, testcase_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ci_baselines_branch ON ci_baselines(project_id, branch, browser, testcase_id)"
+        )
+
+        # CI Drift Records Table (Phase 8.3 & 8.5)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ci_drift_records (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                project_id TEXT NOT NULL DEFAULT 'default_project',
+                base_commit TEXT NOT NULL,
+                target_commit TEXT NOT NULL,
+                browser TEXT NOT NULL,
+                testcase_id TEXT NOT NULL,
+                testcase_name TEXT NOT NULL,
+                base_status TEXT,
+                pr_status TEXT NOT NULL,
+                classification TEXT NOT NULL,
+                test_definition_drift INTEGER NOT NULL DEFAULT 0,
+                base_duration_ms REAL,
+                pr_duration_ms REAL,
+                duration_delta_ms REAL,
+                details_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ci_drift_run ON ci_drift_records(run_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ci_drift_tc ON ci_drift_records(testcase_id)"
+        )
+
         # Ensure default project exists
         default_proj = conn.execute(
             "SELECT id FROM projects WHERE id = 'default_project'"
