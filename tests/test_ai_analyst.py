@@ -8,9 +8,25 @@ from typing import Any
 import pytest
 
 from tracecase.ai.analyst import analyze_testcase, write_analysis_result
+from tracecase.ai.assertion_generator import suggest_assertions
+from tracecase.ai.failure_analyst import analyze_execution_failure
 from tracecase.ai.models import Message
 from tracecase.ai.provider import NullProvider
 from tracecase.models import ElementInfo, PageError, Step, TestCase
+
+
+class _CapturingProvider:
+    name: str = "mock_ai"
+    model: str | None = "test-model"
+
+    def __init__(self) -> None:
+        self.messages: list[Message] = []
+
+    async def chat(
+        self, messages: list[Message], schema: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        self.messages = messages
+        return {}
 
 
 def _step(number: int, action: str = "click", value: str | None = None) -> Step:
@@ -101,6 +117,41 @@ async def test_ai_enrichment_integrates_suggestions() -> None:
     assert len(result.suggested_assertions) == 1
     assert result.suggested_assertions[0].source == "ai"
     assert result.suggested_assertions[0].enforced is False
+
+
+@pytest.mark.asyncio
+async def test_ai_enrichment_sends_structured_json_system_prompt() -> None:
+    provider = _CapturingProvider()
+    await analyze_testcase(_testcase([_step(1)]), provider=provider)
+
+    assert provider.messages[0].role == "system"
+    assert "JSON" in provider.messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_suggest_assertions_sends_structured_json_system_prompt() -> None:
+    provider = _CapturingProvider()
+    await suggest_assertions(_testcase([_step(1)]), provider=provider)
+
+    assert provider.messages[0].role == "system"
+    assert "JSON" in provider.messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_failure_analysis_sends_structured_json_system_prompt() -> None:
+    run = {
+        "id": "run_failed_prompt",
+        "status": "failed",
+        "error_message": "Timeout 5000ms exceeded waiting for locator('button#submit')",
+        "step_number_failed": 1,
+        "logs": ["Timeout 5000ms exceeded waiting for locator('button#submit')"],
+        "steps": [{"step_number": 1, "status": "failed", "error": "timeout"}],
+    }
+    provider = _CapturingProvider()
+    await analyze_execution_failure(run, provider)
+
+    assert provider.messages[0].role == "system"
+    assert "JSON" in provider.messages[0].content
 
 
 def test_write_analysis_result(temp_dir: Path) -> None:

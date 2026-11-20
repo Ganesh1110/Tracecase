@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field
 
 from tracecase.ai.models import Message
-from tracecase.ai.provider import Provider
+from tracecase.ai.provider import STRUCTURED_JSON_SYSTEM_PROMPT, Provider
 from tracecase.models import TestCase
 
 
@@ -203,7 +203,13 @@ async def suggest_assertions(
                 "step_number (int), kind ('text'|'visible'|'url'|'status'|'no_page_error'), target (str or null), "
                 "expected (any), confidence (float between 0.0 and 1.0), reasoning (str)."
             )
-            response = await provider.chat([Message(role="user", content=prompt)], schema={})
+            response = await provider.chat(
+                [
+                    Message(role="system", content=STRUCTURED_JSON_SYSTEM_PROMPT),
+                    Message(role="user", content=prompt),
+                ],
+                schema={},
+            )
             ai_list = response.get("suggestions", [])
             if isinstance(ai_list, list) and ai_list:
                 for item in ai_list:

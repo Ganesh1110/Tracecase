@@ -787,7 +787,11 @@ def analyze(
 ) -> None:
     """Analyze recorded user flow with heuristics and optional local AI."""
     from tracecase.ai.analyst import analyze_testcase, write_analysis_result
-    from tracecase.ai.provider import get_provider
+    from tracecase.ai.provider import (
+        DEFAULT_HOSTED_BASE_URL,
+        DEFAULT_HOSTED_MODEL,
+        get_provider,
+    )
     from tracecase.models import TestCase as RecordedTestCase
 
     if not testcase.exists():
@@ -802,7 +806,9 @@ def analyze(
 
     chosen_provider = provider
     if ai and chosen_provider == "null":
-        chosen_provider = "ollama"
+        chosen_provider = "openai"
+        base_url = base_url or DEFAULT_HOSTED_BASE_URL
+        model = model or DEFAULT_HOSTED_MODEL
 
     prov = get_provider(chosen_provider, base_url=base_url, model=model)
     console.print(f"[bold cyan]Analyzing '{case.name}' with provider: {prov.name}[/bold cyan]")

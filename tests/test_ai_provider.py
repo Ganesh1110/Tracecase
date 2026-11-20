@@ -2,6 +2,8 @@
 
 import json
 import threading
+import urllib.error
+import urllib.request
 from collections.abc import Generator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -14,6 +16,7 @@ from tracecase.ai.provider import (
     OllamaProvider,
     OpenAICompatProvider,
     get_provider,
+    parse_json_content,
 )
 
 
@@ -66,7 +69,7 @@ class _MockResponse:
     def read(self) -> bytes:
         return self._data
 
-    def __enter__(self) -> _MockResponse:
+    def __enter__(self) -> "_MockResponse":
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -140,3 +143,115 @@ def test_get_provider_factory() -> None:
     assert isinstance(get_provider("null"), NullProvider)
     assert isinstance(get_provider("ollama"), OllamaProvider)
     assert isinstance(get_provider("openai"), OpenAICompatProvider)
+
+
+def test_parse_json_content_strips_markdown_fences() -> None:
+    raw = '```json\n{"summary": "fenced"}\n```'
+    assert parse_json_content(raw) == {"summary": "fenced"}
+
+
+def test_parse_json_content_handles_plain_json() -> None:
+    assert parse_json_content('{"summary": "plain"}') == {"summary": "plain"}
+
+
+def test_parse_json_content_falls_back_to_content_on_invalid_json() -> None:
+    assert parse_json_content("not json") == {"content": "not json"}
+
+
+def _capture_urlopen(
+    monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any], *, fail_times: int = 0
+) -> dict[str, int]:
+    calls = {"n": 0}
+
+    def _urlopen(req: Any, *args: Any, **kwargs: Any) -> _MockResponse:
+        calls["n"] += 1
+        if calls["n"] <= fail_times:
+            raise urllib.error.URLError("temporary failure")
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        data = json.dumps(
+            {"choices": [{"message": {"content": json.dumps({"ok": True})}}]}
+        ).encode("utf-8")
+        return _MockResponse(data)
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_parses_fenced_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _urlopen(req: Any, *args: Any, **kwargs: Any) -> _MockResponse:
+        data = json.dumps(
+            {"choices": [{"message": {"content": '```json\n{"ok": true}\n```'}}]}
+        ).encode("utf-8")
+        return _MockResponse(data)
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+    provider = OpenAICompatProvider(base_url="http://example.test/v1", model="m")
+    assert await provider.chat([Message(role="user", content="hi")]) == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_retries_transient_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("tracecase.ai.provider.time.sleep", lambda _s: None)
+    captured: dict[str, Any] = {}
+    calls = _capture_urlopen(monkeypatch, captured, fail_times=2)
+    provider = OpenAICompatProvider(base_url="http://example.test/v1", model="m")
+    assert await provider.chat([Message(role="user", content="hi")]) == {"ok": True}
+    assert calls["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_returns_empty_after_retry_exhaustion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("tracecase.ai.provider.time.sleep", lambda _s: None)
+    captured: dict[str, Any] = {}
+    calls = _capture_urlopen(monkeypatch, captured, fail_times=99)
+    provider = OpenAICompatProvider(base_url="http://example.test/v1", model="m")
+    assert await provider.chat([Message(role="user", content="hi")]) == {}
+    assert calls["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_requests_json_mode_when_schema_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    _capture_urlopen(monkeypatch, captured)
+    provider = OpenAICompatProvider(base_url="http://example.test/v1", model="m")
+    await provider.chat([Message(role="user", content="hi")], schema={})
+    assert captured["body"]["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_omits_json_mode_without_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    _capture_urlopen(monkeypatch, captured)
+    provider = OpenAICompatProvider(base_url="http://example.test/v1", model="m")
+    await provider.chat([Message(role="user", content="hi")])
+    assert "response_format" not in captured["body"]
+
+
+@pytest.mark.asyncio
+async def test_ollama_provider_requests_json_format_when_schema_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _urlopen(req: Any, *args: Any, **kwargs: Any) -> _MockResponse:
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        data = json.dumps(
+            {"message": {"role": "assistant", "content": json.dumps({"ok": True})}}
+        ).encode("utf-8")
+        return _MockResponse(data)
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+    provider = OllamaProvider(base_url="http://example.test", model="llama3")
+    await provider.chat([Message(role="user", content="hi")], schema={})
+    assert captured["body"]["format"] == "json"

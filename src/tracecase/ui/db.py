@@ -830,9 +830,9 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
         default_settings = {
             "default_browser": "chromium",
             "default_timeout": "30000",
-            "ai_provider": "ollama",
-            "ai_model": "llama3",
-            "ai_api_base": "http://localhost:11434/v1",
+            "ai_provider": "openai",
+            "ai_model": "gemma-4-12b-it",
+            "ai_api_base": "https://chatbot.infospica.in/v1",
             "ai_api_key": "",
             "theme": "dark",
             "artifact_retention_mode": "all",

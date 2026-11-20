@@ -11,7 +11,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from tracecase.ai.models import Message
-from tracecase.ai.provider import Provider
+from tracecase.ai.provider import STRUCTURED_JSON_SYSTEM_PROMPT, Provider
 
 FailureCategory = Literal[
     "APPLICATION_BUG",
@@ -172,7 +172,13 @@ async def analyze_execution_failure(
                 "Return a JSON object with keys: failure_category ('APPLICATION_BUG'|'SELECTOR_DRIFT'|'ASSERTION_FAILURE'|'TIMEOUT_ENVIRONMENT'|'AUTH_EXPIRY'), "
                 "root_cause (str), remediation_advice (str), confidence (float)."
             )
-            ai_data = await provider.chat([Message(role="user", content=prompt)], schema={})
+            ai_data = await provider.chat(
+                [
+                    Message(role="system", content=STRUCTURED_JSON_SYSTEM_PROMPT),
+                    Message(role="user", content=prompt),
+                ],
+                schema={},
+            )
             if ai_data and "root_cause" in ai_data:
                 base_result.root_cause = str(ai_data["root_cause"])
             if ai_data and "remediation_advice" in ai_data:

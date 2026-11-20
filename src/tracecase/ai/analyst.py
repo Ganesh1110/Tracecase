@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from tracecase.ai.models import AnalysisResult, Annotation, Message
-from tracecase.ai.provider import Provider
+from tracecase.ai.provider import STRUCTURED_JSON_SYSTEM_PROMPT, Provider
 from tracecase.models import TestCase
 from tracecase.replay.models import Assertion
 
@@ -61,7 +61,11 @@ async def analyze_testcase(testcase: TestCase, provider: Provider) -> AnalysisRe
             "suggested_assertions (list of {kind, target, expected, step_number, confidence})."
         )
         ai_resp: dict[str, Any] = await provider.chat(
-            [Message(role="user", content=prompt)], schema={}
+            [
+                Message(role="system", content=STRUCTURED_JSON_SYSTEM_PROMPT),
+                Message(role="user", content=prompt),
+            ],
+            schema={},
         )
         if ai_resp:
             if "summary" in ai_resp:

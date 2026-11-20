@@ -4,11 +4,69 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Protocol, runtime_checkable
 
 from tracecase.ai.models import Message
+
+DEFAULT_HOSTED_BASE_URL = "https://chatbot.infospica.in/v1"
+DEFAULT_HOSTED_MODEL = "gemma-4-12b-it"
+
+STRUCTURED_JSON_SYSTEM_PROMPT = (
+    "You are a precise QA analysis engine. Respond with a single valid JSON object only. "
+    "Do not include markdown code fences, commentary, or any text outside the JSON object."
+)
+
+_REQUEST_TIMEOUT_S = 30
+_MAX_ATTEMPTS = 3
+
+
+def parse_json_content(text: str) -> dict[str, Any]:
+    """Parse a JSON object from model output, tolerating markdown code fences."""
+    if not isinstance(text, str):
+        return {}
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return {"content": text}
+    return parsed if isinstance(parsed, dict) else {"content": parsed}
+
+
+def _post_json(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    *,
+    timeout: int = _REQUEST_TIMEOUT_S,
+    attempts: int = _MAX_ATTEMPTS,
+) -> dict[str, Any]:
+    """POST JSON with bounded retries on transient failures; return {} on failure."""
+    body = json.dumps(payload).encode("utf-8")
+    for attempt in range(1, attempts + 1):
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (408, 429) and exc.code < 500:
+                return {}
+        except json.JSONDecodeError:
+            return {}
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            pass
+        if attempt < attempts:
+            time.sleep(0.2 * attempt)
+    return {}
 
 
 @runtime_checkable
@@ -54,25 +112,15 @@ class OllamaProvider:
         self.model: str | None = model
 
     def _sync_request(self, payload: dict[str, Any]) -> dict[str, Any]:
-        url = f"{self.base_url}/api/chat"
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        data = _post_json(
+            f"{self.base_url}/api/chat",
+            payload,
+            {"Content-Type": "application/json"},
         )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                content = data.get("message", {}).get("content", "{}")
-                if isinstance(content, str):
-                    try:
-                        return json.loads(content)
-                    except json.JSONDecodeError:
-                        return {"content": content}
-                return content if isinstance(content, dict) else {}
-        except Exception:
-            return {}
+        content = data.get("message", {}).get("content", "{}")
+        if isinstance(content, str):
+            return parse_json_content(content)
+        return content if isinstance(content, dict) else {}
 
     async def chat(
         self,
@@ -105,31 +153,21 @@ class OpenAICompatProvider:
         self.api_key = api_key
 
     def _sync_request(self, payload: dict[str, Any]) -> dict[str, Any]:
-        url = f"{self.base_url}/chat/completions"
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
+        data = _post_json(
+            f"{self.base_url}/chat/completions",
+            payload,
+            {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.api_key}",
             },
-            method="POST",
         )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                choices = data.get("choices", [])
-                if choices:
-                    content = choices[0].get("message", {}).get("content", "{}")
-                    if isinstance(content, str):
-                        try:
-                            return json.loads(content)
-                        except json.JSONDecodeError:
-                            return {"content": content}
-                    return content if isinstance(content, dict) else {}
-                return {}
-        except Exception:
+        choices = data.get("choices", [])
+        if not choices:
             return {}
+        content = choices[0].get("message", {}).get("content", "{}")
+        if isinstance(content, str):
+            return parse_json_content(content)
+        return content if isinstance(content, dict) else {}
 
     async def chat(
         self,
@@ -140,6 +178,8 @@ class OpenAICompatProvider:
             "model": self.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
         }
+        if schema is not None:
+            payload["response_format"] = {"type": "json_object"}
         return await asyncio.to_thread(self._sync_request, payload)
 
 

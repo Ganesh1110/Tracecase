@@ -177,19 +177,29 @@ class ManagedChromiumSession:
         )
 
     async def handle_input(self, event: InputEvent) -> None:
-        """Forward validated user input event directly to active Playwright page."""
+        """Forward validated user input event directly to active Playwright page.
+        Adds detailed timestamped logging and safety checks.
+        """
+        ts = datetime.utcnow().isoformat()
+        logger.debug("%s Handling input event %s for session %s (state=%s)", ts, event, self.session_id, self.state)
         if self.state != StreamSessionState.ACTIVE or not self._page:
             logger.warning(
-                "Dropped input event %s: session %s is not ACTIVE",
+                "%s Dropped input event %s: session %s is not ACTIVE (state=%s)",
+                ts,
                 event.event_type,
                 self.session_id,
+                self.state,
             )
             return
-
+        if self._page.is_closed():
+            logger.error("%s Input dispatch aborted: page already closed for session %s", ts, self.session_id)
+            return
         browser_vp = (self.config.viewport_width, self.config.viewport_height)
-        await dispatch_input_event(
-            page=self._page, event=event, browser_viewport=browser_vp
-        )
+        try:
+            await dispatch_input_event(page=self._page, event=event, browser_viewport=browser_vp)
+            logger.debug("%s Successfully dispatched input %s to page for session %s", ts, event.event_type, self.session_id)
+        except Exception as exc:
+            logger.exception("%s Exception during input dispatch for session %s: %s", ts, self.session_id, exc)
 
     async def resize_viewport(self, width: int, height: int) -> None:
         """Resize browser viewport and adjust screencast frame dimensions."""
