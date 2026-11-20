@@ -2,9 +2,15 @@
 
 **Record once, test everywhere.**
 
-Tracecase is an open-source command-line tool that turns real browser interactions into structured, shareable test cases. Open a URL, hit **Start**, exercise your application, hit **Stop**, and Tracecase writes a complete test case with screenshots, network activity, console output, and JavaScript errors.
+Tracecase turns real browser interactions into structured, reusable QA assets. Open a URL,
+perform a user flow once, and Tracecase writes a complete test case with screenshots, network
+activity, console output, and JavaScript errors. Replay it, analyze it with AI, generate
+Playwright automation, and run it in CI.
 
-The generated reports are readable by QA engineers, developers, and AI agents, and are available as JSON, Markdown, and HTML.
+Tracecase comes in two forms:
+
+- **Tracecase Studio** — a full web application for recording, analyzing, and managing tests.
+- **Tracecase CLI** — a scriptable command-line tool for automation and CI pipelines.
 
 [![CI](https://github.com/Ganesh1110/Tracecase/actions/workflows/ci.yml/badge.svg)](https://github.com/Ganesh1110/Tracecase/actions/workflows/ci.yml)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/)
@@ -15,38 +21,88 @@ The generated reports are readable by QA engineers, developers, and AI agents, a
 ## Table of contents
 
 - [Why Tracecase](#why-tracecase)
+- [Feature highlights](#feature-highlights)
 - [Requirements](#requirements)
 - [Installation](#installation)
-- [Quick start](#quick-start)
-- [Comprehensive User Guide](docs/USER_GUIDE.md)
-- [QA Demo Guide](docs/DEMO_GUIDE.md)
-- [How it works](#how-it-works)
-- [Output](#output)
+- [Quick start: Tracecase Studio](#quick-start-tracecase-studio)
+- [Quick start: CLI](#quick-start-cli)
+- [Tracecase Studio modules](#tracecase-studio-modules)
+- [AI configuration](#ai-configuration)
+- [How recording works](#how-recording-works)
+- [Output artifacts](#output-artifacts)
 - [CLI reference](#cli-reference)
 - [What gets captured](#what-gets-captured)
 - [Project structure](#project-structure)
 - [Development](#development)
+- [Troubleshooting](#troubleshooting)
 - [Limitations](#limitations)
+- [Documentation](#documentation)
 - [License](#license)
 
 ---
 
 ## Why Tracecase
 
-- **Zero manual documentation.** Perform a flow once and get a step-by-step test case.
-- **Visual evidence.** Every captured step includes a screenshot with the target element highlighted.
-- **Full context.** Network requests, console logs, and JavaScript errors are attached to the relevant steps.
-- **Three formats.** JSON for automation, Markdown for tickets and docs, HTML for reviews and demos.
-- **Cross-browser.** Record with Chromium, Firefox, or WebKit.
-- **Multi-tab & pop-up support.** Seamlessly captures and replays actions across newly opened tabs, pop-ups, and `target="_blank"` windows.
-- **Local and private.** Recordings run on your machine and stay there.
-- **Clean screenshots.** The Tracecase control panel is automatically hidden while screenshots are taken.
+- **Zero manual documentation.** Perform a flow once and get a structured, replayable test case.
+- **Visual evidence.** Every step includes a screenshot with the target element highlighted.
+- **Full context.** Network requests, console logs, and JavaScript errors are attached to steps.
+- **Three formats.** JSON for automation, Markdown for tickets, HTML for reviews and demos.
+- **AI-assisted QA.** Suggested assertions, selector audits, coverage gaps, and risk analysis.
+- **Automation ready.** Export standalone `pytest` + Playwright tests.
+- **Cross-browser.** Record and replay with Chromium, Firefox, or WebKit.
+- **Multi-tab support.** Captures and replays actions across new tabs, pop-ups, and
+  `target="_blank"` windows.
+- **Local and private.** Recordings stay on your machine. AI is optional and configurable.
 
-Tracecase is useful for:
+Tracecase is built for:
 
-- QA engineers documenting manual test scenarios
+- QA engineers documenting and automating manual test scenarios
 - Developers reporting bugs with full reproduction context
-- Teams building datasets for test automation and AI tooling
+- Teams building regression suites and test datasets for automation or AI tooling
+
+---
+
+## Feature highlights
+
+### Record and document
+
+- Capture clicks, inputs, selects, checkboxes, key presses, and navigation
+- Screenshot per step with the target element outlined
+- Element metadata: CSS selector, XPath, text, placeholder, attributes, bounding box
+- Export to JSON, Markdown, and self-contained HTML
+
+### Replay and validate
+
+- Deterministic replay with Playwright
+- Derived assertions from captured DOM, HTTP statuses, and console output
+- Multi-tier self-healing locators: ID, name, CSS, text, and XPath fallbacks
+- Pixel-accurate visual regression diffing
+- HAR-based offline network mocking
+- Multi-tab and pop-up synchronization
+
+### AI QA intelligence
+
+- Assertion recommendations from recorded evidence
+- Selector fragility audit with resilient locator suggestions
+- Corpus coverage insights and test-gap analysis
+- Workflow risk audit
+- Failure diagnosis with root cause and remediation advice
+- Natural-language test assistant over your repository
+
+### Automation and CI
+
+- Standalone `pytest` + Playwright code generation
+- Negative test generation: boundary values, injection probes, network faults
+- Smart regression selection with explainable decisions
+- CI quality gate with regression drift classification
+- Markdown and JSON manifests for PRs and pipelines
+
+### Corpus and integrations
+
+- SQLite FTS5 full-text search with BM25 ranking
+- Coverage analytics across domains, routes, and endpoints
+- MCP server for Claude Desktop, Cursor, and other AI tools
+- Storage inspection and artifact pruning
 
 ---
 
@@ -54,32 +110,74 @@ Tracecase is useful for:
 
 - Python 3.13 or newer
 - [Playwright](https://playwright.dev/python/) and a Playwright browser
+- Node.js 18+ only if you want to rebuild the Studio web UI
 
 ---
 
 ## Installation
 
-From PyPI:
+### From PyPI
 
 ```bash
 pip install tracecase
 playwright install chromium
 ```
 
-From source:
+### From source
 
 ```bash
 git clone https://github.com/Ganesh1110/Tracecase.git
 cd Tracecase
-python -m venv .venv
-source .venv/bin/activate
+
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+
 pip install -e ".[dev]"
 playwright install chromium
 ```
 
+### Verify the installation
+
+```bash
+tracecase check
+tracecase version
+```
+
 ---
 
-## Quick start
+## Quick start: Tracecase Studio
+
+Studio is the recommended starting point. It provides a web UI for recording, replaying,
+analyzing, and managing tests.
+
+```bash
+tracecase ui
+```
+
+This starts the Studio at `http://127.0.0.1:8000` and opens your browser automatically.
+
+```bash
+tracecase ui --port 8080        # use a different port
+tracecase ui --no-browser       # do not open a browser automatically
+tracecase ui --host 0.0.0.0     # allow access from other machines on the network
+```
+
+The web UI is prebuilt and included with the package. Rebuild it only if you change frontend
+code:
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+For a guided walkthrough, see the [QA Demo Guide](docs/DEMO_GUIDE.md).
+
+---
+
+## Quick start: CLI
+
+Record a flow:
 
 ```bash
 tracecase record https://example.com --output ./my_test
@@ -91,33 +189,102 @@ With options:
 tracecase record https://example.com -o ./tests -n "Login Flow" -b firefox
 ```
 
-Check your environment:
-
-```bash
-tracecase check
-```
-
-Show version and installed dependencies:
-
-```bash
-tracecase version
-```
+A browser opens with a control panel. Click **Start**, perform your actions, then click **Stop**.
+Tracecase saves the test case and closes the session.
 
 ---
 
-## How it works
+## Tracecase Studio modules
 
-1. Run `tracecase record <url> -o <output-dir>`.
-2. A browser window opens with the Tracecase control panel in the top-right corner.
+| Module | What it does |
+|--------|--------------|
+| **Overview** | Workspace dashboard for tests, runs, and quality signals |
+| **Projects** | Group test assets by product or team |
+| **Test Cases** | Browse, inspect, and replay recorded tests |
+| **Test Suites** | Organize tests into suites |
+| **Browser Recorder** | Record a live flow into a test case |
+| **Test Executions** | Run and monitor replay batches and browser matrices |
+| **Execution History** | Review past runs and outcomes |
+| **Reports** | Generate and download execution reports |
+| **Visual Regression** | Compare screenshots and inspect visual diffs |
+| **CI Quality Gate** | Review CI runs, gate status, and regression drift |
+| **Smart Regression** | Select the highest-value tests within a time budget |
+| **Autonomous Exploration** | Crawl a site, map a navigation graph, and plan requirements |
+| **AI Test Assistant** | Chat with an assistant connected to your test repository |
+| **Test Analysis** | Assertion suggestions, selector audit, coverage, and risk audit |
+| **Negative Test Generation** | Generate edge-case and security-style variations |
+| **Test Repository** | Full-text search across indexed tests |
+| **Code Generator** | Produce ready-to-run pytest + Playwright scripts |
+| **Network Inspector** | Inspect recorded network activity |
+| **MCP Integrations** | Connect the corpus to AI coding tools |
+| **Settings** | Configure browser defaults, AI provider, and theme |
+| **Storage Management** | Inspect usage and prune artifacts |
+
+---
+
+## AI configuration
+
+AI features are optional. Heuristic analysis, replay, search, code generation, and visual
+diffing work fully offline.
+
+Configure the provider in **Settings → AI Intelligence Provider**:
+
+| Provider | Use case | Default endpoint | Default model |
+|----------|----------|------------------|---------------|
+| `openai` | Hosted or local OpenAI-compatible server (vLLM, LM Studio, llama.cpp) | `http://127.0.0.1:8000/v1` | `default` |
+| `ollama` | Local Ollama server | `http://127.0.0.1:11434` | `llama3` |
+| `null` | Deterministic heuristics only | — | — |
+
+For an OpenAI-compatible endpoint, the base URL must include `/v1`, for example:
+
+```text
+Provider Type:  OpenAI / Compatible Endpoint (vLLM, LMStudio)
+Model:          gemma-4-12b-it
+Base URL:       https://chatbot.infospica.in/v1
+API Key:        leave blank if the server does not require one
+```
+
+Verify the endpoint:
+
+```bash
+curl -s https://chatbot.infospica.in/v1/models
+```
+
+Privacy: heuristic analysis is local. When a hosted provider is enabled, test metadata such as
+step descriptions, URLs, selectors, and error text is sent to that endpoint. Do not record
+production secrets or customer data while a hosted AI provider is enabled.
+
+---
+
+## How recording works
+
+1. Run `tracecase record <url> -o <output-dir>`, or use **Browser Recorder** in Studio.
+2. A browser window opens with the Tracecase control panel.
 3. Click **Start** in the panel.
-4. Perform your test actions in the browser.
+4. Perform your test actions.
 5. Click **Stop**. Tracecase saves the test case and closes the session.
 
-The control panel tracks the number of captured steps. The panel itself is excluded from every screenshot.
+The control panel tracks the number of captured steps and is excluded from every screenshot.
+
+```text
+[ Browser interaction ]
+          |
+          v
+   tracecase record  ---> testcase.json + Markdown + HTML + screenshots
+          |
+          +---> replay    ---> assertions, self-healing, visual diff
+          +---> codegen   ---> pytest + Playwright script
+          +---> analyze   ---> risks, assertions, negative scenarios
+          +---> mutate    ---> negative and edge-case test cases
+          +---> index     ---> SQLite FTS5 corpus
+          |         |
+          |         +---> search / coverage / mcp
+          +---> ci        ---> quality gate and regression selection
+```
 
 ---
 
-## Output
+## Output artifacts
 
 After a recording, the output directory contains:
 
@@ -129,14 +296,24 @@ output/
 │   └── ...
 ├── testcase.json    # Machine-readable test case
 ├── testcase.md      # Markdown documentation
-└── testcase.html    # Visual HTML report
+└── testcase.html    # Self-contained visual report
 ```
 
-The JSON model includes test case metadata, ordered steps, element details, screenshots, network requests, console logs, and page errors.
+The JSON model includes metadata, ordered steps, element details, screenshots, network requests,
+console logs, and page errors.
 
 ---
 
 ## CLI reference
+
+### Core commands
+
+| Command | Description |
+|---------|-------------|
+| `tracecase record <url> -o <dir>` | Record a browser flow and generate a test case |
+| `tracecase ui` | Launch Tracecase Studio |
+| `tracecase check` | Verify dependencies and Playwright browsers |
+| `tracecase version` | Print version and system information |
 
 ### `tracecase record`
 
@@ -147,36 +324,24 @@ Record browser actions and generate a test case.
 | `--output` | `-o` | Output directory for test case files | required |
 | `--name` | `-n` | Test case name | generated from the URL |
 | `--browser` | `-b` | Browser: `chromium`, `firefox`, `webkit` | `chromium` |
-| `--headless` | | Run the browser without a visible window | `false` |
+| `--headless` | | Run without a visible window | `false` |
 | `--timeout` | `-t` | Action timeout in milliseconds | `30000` |
 
 ### `tracecase ui`
 
-Launch the Tracecase Studio interactive web application.
-
-```bash
-tracecase ui
-# or specify host/port
-tracecase ui --host 127.0.0.1 --port 8000
-```
+Launch the Tracecase Studio web application.
 
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
-| `--host` | `-h` | Server host address | `127.0.0.1` |
-| `--port` | `-p` | Server port | `8000` |
-| `--browser` / `--no-browser` | | Automatically open browser window | `true` |
+| `--host` | `-h` | Bind host address | `127.0.0.1` |
+| `--port` | `-p` | Bind port | `8000` |
+| `--browser` / `--no-browser` | | Open a browser window automatically | `true` |
 
-### `tracecase check`
+### Replay and validation
 
-Verify that Python packages and Playwright browsers are installed correctly.
+#### `tracecase replay`
 
-### `tracecase version`
-
-Print the Tracecase version along with Python, Playwright, and Pydantic versions.
-
-### `tracecase replay`
-
-Replay a recorded test case, evaluate derived assertions, and optionally heal selectors.
+Replay a recorded test case, evaluate assertions, and optionally heal selectors.
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -192,138 +357,214 @@ Replay a recorded test case, evaluate derived assertions, and optionally heal se
 
 Exit codes: `0` passed, `1` assertion or visual diff failed, `2` infrastructure error.
 
-### `tracecase diff`
+```bash
+tracecase replay ./recordings/example/testcase.json --headed --heal
+tracecase replay ./recordings/example/testcase.json --diff --diff-threshold 0.5 --diff-fail
+```
 
-Compare two screenshots or images pixel-by-pixel, compute diff metrics, and optionally save a highlighted diff overlay image.
+#### `tracecase diff`
+
+Compare two images pixel-by-pixel and optionally save a highlighted diff overlay.
 
 ```bash
-# Compare two images with default 0.1% threshold
 tracecase diff baseline.png candidate.png
-
-# Specify custom tolerance threshold and save highlighted diff image
 tracecase diff baseline.png candidate.png -o diff.png --threshold 0.5
-```
-
-### `tracecase export-har`
-
-Write recorded network activity to a HAR file for offline replay.
-
-```bash
-tracecase export-har ./my_test/testcase.json -o ./my_test/network.har
-tracecase replay ./my_test/testcase.json --from-har ./my_test/network.har
-```
-
-### `tracecase codegen`
-
-Generate standalone, executable `pytest` + Playwright Python test modules from recorded test cases.
-
-```bash
-# Generate test_<name>.py in the same folder
-tracecase codegen ./my_test/testcase.json
-
-# Specify an output path and optional HAR for offline mock routing
-tracecase codegen ./my_test/testcase.json -o ./tests/test_checkout.py --har ./my_test/network.har
-
-# Run the generated test with pytest
-pytest ./tests/test_checkout.py -v
-```
-
-### `tracecase analyze`
-
-Analyze recorded flows with deterministic heuristics and optional local AI enrichment (Ollama, OpenAI-compatible). Generates flow summaries, risk flagging, negative test scenarios, and assertion suggestions in `analysis.json`.
-
-```bash
-# Run deterministic heuristics (offline, no LLM required)
-tracecase analyze ./my_test/testcase.json
-
-# Enrich with local Ollama (default http://127.0.0.1:11434, llama3)
-tracecase analyze ./my_test/testcase.json --ai
-
-# Enrich with custom local OpenAI-compatible endpoint or model
-tracecase analyze ./my_test/testcase.json --provider openai --base-url http://127.0.0.1:8000/v1 --model qwen2.5
-```
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--output` / `-o` | Directory to save `analysis.json` | test case dir |
-| `--ai` | Enable local AI enrichment | `false` |
-| `--provider` | AI provider (`null`, `ollama`, `openai`) | `null` |
-| `--base-url` | Provider endpoint URL | default per provider |
-| `--model` / `-m` | Model name | default per provider |
-
-### `tracecase mutate`
-
-Synthesize realistic negative test cases from a recorded user flow. Generates variations covering empty inputs, boundary strings (2048 chars), special characters / injection probes, unicode edge cases, rapid double clicks, and simulated HTTP 500 network errors.
-
-```bash
-# Generate negative test variations
-tracecase mutate ./my_test/testcase.json -o ./my_test/mutations/
-
-# Filter by strategy (inputs, actions, network, or all)
-tracecase mutate ./my_test/testcase.json --strategy inputs --limit 5
-
-# Replay any synthesized negative test
-tracecase replay ./my_test/mutations/tc_order_mut_1_empty/testcase.json
 ```
 
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
-| `--output` | `-o` | Output directory for mutated test cases | `<testcase_dir>/mutations` |
-| `--strategy` | `-s` | Strategy filter: `all`, `inputs`, `actions`, `network` | `all` |
-| `--limit` | `-n` | Maximum number of variations to synthesize | `20` |
+| `--output` | `-o` | Path to save the highlighted diff image | none |
+| `--threshold` | `-t` | Tolerance percentage | `0.1` |
 
-### `tracecase index`
+#### `tracecase export-har`
 
-Index directories of `testcase.json` recordings into a local SQLite database with full-text search (FTS5).
+Export recorded network activity to a HAR file for offline replay.
 
 ```bash
-# Index recordings in a directory
-tracecase index ./my_test/
-
-# Specify a custom corpus database location
-tracecase index ./tests/recordings/ --db ./corpus.db
+tracecase export-har ./recordings/example/testcase.json -o ./recordings/example/network.har
+tracecase replay ./recordings/example/testcase.json --from-har ./recordings/example/network.har
 ```
 
-### `tracecase search`
+### Automation
 
-Search indexed test cases and actions using fast FTS5 BM25 relevance ranking and matched text snippets.
+#### `tracecase codegen`
+
+Generate a standalone `pytest` + Playwright test module.
+
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--output` | `-o` | Output Python test file path | `test_<name>.py` |
+| `--har` | | HAR file for offline route mocking | none |
 
 ```bash
-# Search for actions or flows mentioning "checkout" or "Payment"
-tracecase search "Payment"
+tracecase codegen ./recordings/example/testcase.json
+tracecase codegen ./recordings/example/testcase.json -o ./tests/test_checkout.py --har ./recordings/example/network.har
+pytest ./tests/test_checkout.py -v
+```
 
-# Limit the number of search results
+#### `tracecase mutate`
+
+Synthesize negative test cases from a recorded flow.
+
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--output` | `-o` | Output directory for mutations | `<testcase_dir>/mutations` |
+| `--strategy` | `-s` | `all`, `inputs`, `actions`, `network` | `all` |
+| `--limit` | `-n` | Maximum number of variations | `20` |
+
+Strategies include empty and boundary inputs, SQL injection and XSS probes, Unicode edge cases,
+skipped or repeated actions, and simulated HTTP errors or latency.
+
+```bash
+tracecase mutate ./recordings/example/testcase.json -o ./mutations/
+tracecase mutate ./recordings/example/testcase.json --strategy inputs --limit 5
+```
+
+### AI and intelligence
+
+#### `tracecase analyze`
+
+Analyze a recorded flow with heuristics and optional AI enrichment.
+
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--output` | `-o` | Directory to save `analysis.json` | test case directory |
+| `--ai` | | Enable AI enrichment | `false` |
+| `--provider` | | `null`, `ollama`, `openai` | `null` |
+| `--base-url` | | Provider endpoint URL | per provider |
+| `--model` | `-m` | Model name | per provider |
+
+```bash
+# Offline heuristics
+tracecase analyze ./recordings/example/testcase.json
+
+# Local Ollama
+tracecase analyze ./recordings/example/testcase.json --ai
+
+# OpenAI-compatible endpoint
+tracecase analyze ./recordings/example/testcase.json --ai \
+  --provider openai \
+  --base-url https://chatbot.infospica.in/v1 \
+  --model gemma-4-12b-it
+```
+
+### Corpus and integrations
+
+#### `tracecase index`
+
+Index a directory of `testcase.json` files into a local SQLite FTS5 database.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--db` | Path to the SQLite corpus database | local default |
+| `--clear` | Wipe the database before indexing | `false` |
+
+```bash
+tracecase index ./recordings/
+tracecase index ./recordings/ --db ./corpus.db --clear
+```
+
+#### `tracecase search`
+
+Search indexed tests and actions with BM25 ranking.
+
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--db` | | Path to the SQLite corpus database | local default |
+| `--limit` | `-n` | Maximum number of results | `10` |
+
+```bash
+tracecase search "Payment"
 tracecase search "login" --limit 5
 ```
 
-### `tracecase coverage`
+#### `tracecase coverage`
 
-Analyze test corpus coverage across tested domains, start URLs, network endpoints, and flag potential duplicate test flows.
+Analyze coverage across domains, start URLs, and network endpoints.
 
 ```bash
 tracecase coverage
 tracecase coverage --db ./corpus.db
 ```
 
-### `tracecase mcp`
+#### `tracecase mcp`
 
-Start the Model Context Protocol (MCP) server over stdio, exposing your indexed test corpus (`search_testcases`, `get_testcase`, `coverage_report`) to local LLM agents and IDE assistants.
+Start a stdio Model Context Protocol server exposing the corpus to AI tools.
 
 ```bash
 tracecase mcp
 tracecase mcp --db ./corpus.db
 ```
 
-### `tracecase clean`
+Tools exposed: `search_testcases`, `get_testcase`, and `coverage_report`.
 
-Wipe the local SQLite corpus database and/or recorded session artifacts when they are no longer needed:
+Example Claude Desktop configuration:
+
+```json
+{
+  "mcpServers": {
+    "tracecase": {
+      "command": "/path/to/.venv/bin/tracecase",
+      "args": ["mcp", "--db", "/path/to/.tracecase/corpus.db"]
+    }
+  }
+}
+```
+
+### Advanced regression and CI
+
+These commands power the predictive regression and CI workflows. Run
+`tracecase <command> --help` for the full option list.
+
+| Command | Description |
+|---------|-------------|
+| `tracecase changes` | Analyze git changes, diffs, selectors, routes, and symbols |
+| `tracecase map` | Map test cases to application routes, selectors, and files |
+| `tracecase impact` | Identify tests impacted by code changes with confidence scores |
+| `tracecase risk` | Score and rank regression risk per test |
+| `tracecase select` | Select tests using change risk and execution constraints |
+| `tracecase explain` | Explain why tests were selected, excluded, or flagged |
+| `tracecase report` | Generate a Markdown report or CI/PR JSON manifest |
+| `tracecase run` | Execute tests with intelligent regression selection |
+| `tracecase ci` | Run the CI quality gate with regression selection and reporting |
+| `tracecase ci-upload` | Upload an exported CI manifest to Tracecase Studio |
+| `tracecase benchmark` | Benchmark sequential, parallel, and pooled execution |
+| `tracecase storage` | Inspect storage usage and prune execution artifacts |
 
 ```bash
-# Wipe the local SQLite corpus database
-tracecase clean --db
+tracecase ci --base origin/main --budget 180s --gate standard
+tracecase ci --base HEAD~1 --target HEAD --concurrency 4 --browser chromium
+```
 
-# Wipe both the local corpus database and all recorded test cases in ./recordings/
+### Maintenance
+
+#### `tracecase clean`
+
+Wipe the local corpus database and/or recorded artifacts.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--db` / `--no-db` | Clear the local SQLite corpus database | enabled |
+| `--recordings` / `--no-recordings` | Remove the local `./recordings` directory | disabled |
+| `--all` / `-a` | Remove both the database and recordings | disabled |
+| `--db-path` | Path to a custom corpus database | local default |
+
+```bash
+tracecase clean --db
 tracecase clean --all
+```
+
+Warning: `--all` deletes local recordings.
+
+#### `tracecase storage`
+
+Inspect disk usage and prune replay artifacts.
+
+```bash
+tracecase storage
+tracecase storage --diffs --dry-run
+tracecase storage --older-than 14 --keep-latest 10
+tracecase storage --failures-only --max-mb 500
 ```
 
 ---
@@ -331,12 +572,12 @@ tracecase clean --all
 ## What gets captured
 
 - Clicks and double-clicks
-- Text input (debounced)
+- Text input, debounced
 - Select, checkbox, and radio changes
-- Special key presses (`Enter`, `Escape`, `Tab`)
-- CSS selector, XPath, tag name, text, placeholder, and bounding box for each target element
-- A screenshot per step, with the target element outlined
-- Network requests and responses, including headers, bodies, status, and timing
+- Special key presses such as Enter, Escape, and Tab
+- CSS selector, XPath, tag name, text, placeholder, and bounding box per element
+- One screenshot per step with the target element outlined
+- Network requests and responses with headers, bodies, status, and timing
 - Browser console messages
 - Uncaught JavaScript errors
 - Multi-tab tracking (`page_id`) across pop-ups and new windows
@@ -358,11 +599,14 @@ tracecase/
 │   ├── exporters/         # JSON, Markdown, and HTML exporters
 │   ├── replay/            # Replay engine, assertions, HAR, self-healing
 │   ├── codegen/           # Pytest Playwright code generator
-│   ├── ai/                # Heuristic and local LLM flow analyzer
+│   ├── ai/                # Heuristic and LLM flow analysis
 │   ├── index/             # SQLite FTS5 corpus index and search
 │   ├── mcp/               # Stdio Model Context Protocol server
-│   ├── mutation/          # Negative scenario generator and mutator
+│   ├── mutation/          # Negative scenario generator
+│   ├── ui/                # FastAPI backend and prebuilt Studio frontend
 │   └── templates/         # Jinja2 report templates
+├── frontend/              # React + Vite source for Tracecase Studio
+├── docs/                  # User guide and demo guide
 └── tests/                 # Unit and integration tests
 ```
 
@@ -384,9 +628,9 @@ playwright install chromium
 ### Tests
 
 ```bash
-pytest                 # All tests
-pytest -m "not slow"   # Skip slow tests
-pytest --cov=tracecase   # With coverage
+pytest                   # all tests
+pytest -m "not slow"     # skip slow tests
+pytest --cov=tracecase   # with coverage
 ```
 
 ### Linting and type checking
@@ -397,12 +641,75 @@ ruff format src/ tests/
 mypy src/tracecase --ignore-missing-imports
 ```
 
+### Frontend development
+
+```bash
+cd frontend
+npm install
+npm run dev      # Vite dev server on http://localhost:3000, proxies /api to port 8000
+npm run build    # rebuild the bundled UI into src/tracecase/ui/static
+```
+
+Run `tracecase ui --no-browser` in another terminal while using the Vite dev server.
+
+---
+
+## Troubleshooting
+
+### The Studio page is blank or shows "Static UI not found"
+
+Rebuild the frontend:
+
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+tracecase ui
+```
+
+### Port 8000 is already in use
+
+```bash
+tracecase ui --port 8080
+```
+
+### Playwright browser fails to launch
+
+```bash
+playwright install --with-deps chromium
+```
+
+### AI returns heuristic results only
+
+1. Confirm the endpoint is reachable with `curl`.
+2. Confirm the provider is `openai` or `ollama` in **Settings**.
+3. Confirm the base URL includes `/v1` for OpenAI-compatible servers.
+4. Switch to `null` (heuristics only) if the network is restricted.
+
+### A replay step cannot find an element
+
+```bash
+tracecase replay ./recordings/example/testcase.json --timeout 60000 --heal
+```
+
+For more, see the [Comprehensive User Guide](docs/USER_GUIDE.md).
+
 ---
 
 ## Limitations
 
-- Replay supports derived assertions, heuristic selector healing, and pixel-accurate visual regression diffing.
-- Desktop web only; mobile apps and API-only testing are not covered.
+- Desktop web only. Mobile apps and API-only testing are not covered.
+- AI output is advisory. Assertions and test drafts require human review.
+- Hosted AI providers receive test metadata; use heuristics-only mode for sensitive data.
+
+---
+
+## Documentation
+
+- [Comprehensive User Guide](docs/USER_GUIDE.md)
+- [QA Demo Guide](docs/DEMO_GUIDE.md)
+- [Changelog](CHANGELOG.md)
 
 ---
 
