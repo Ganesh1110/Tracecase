@@ -560,6 +560,52 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             "CREATE INDEX IF NOT EXISTS idx_dec_traces_tc ON regression_decision_traces(testcase_id)"
         )
 
+        # CI Quality Gate Runs Table (Phase 8.4)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ci_runs (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL DEFAULT 'default_project',
+                commit_hash TEXT NOT NULL,
+                branch TEXT,
+                base_ref TEXT,
+                target_ref TEXT,
+                status TEXT NOT NULL,
+                exit_code INTEGER NOT NULL,
+                policy_name TEXT NOT NULL,
+                gate_passed INTEGER NOT NULL,
+                gate_summary TEXT,
+                duration_seconds REAL NOT NULL DEFAULT 0.0,
+                total_considered INTEGER NOT NULL DEFAULT 0,
+                selected_count INTEGER NOT NULL DEFAULT 0,
+                executed_count INTEGER NOT NULL DEFAULT 0,
+                failed_count INTEGER NOT NULL DEFAULT 0,
+                flaky_count INTEGER NOT NULL DEFAULT 0,
+                new_regressions_count INTEGER NOT NULL DEFAULT 0,
+                pre_existing_failures_count INTEGER NOT NULL DEFAULT 0,
+                fixed_regressions_count INTEGER NOT NULL DEFAULT 0,
+                surface_coverage_pct REAL DEFAULT 100.0,
+                batch_id TEXT,
+                selection_id TEXT,
+                metrics_json TEXT NOT NULL DEFAULT '{}',
+                test_results_json TEXT NOT NULL DEFAULT '[]',
+                drift_summary_json TEXT NOT NULL DEFAULT '{}',
+                error_category TEXT,
+                error_detail TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ci_runs_project ON ci_runs(project_id, created_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ci_runs_commit ON ci_runs(commit_hash)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ci_runs_branch ON ci_runs(branch)"
+        )
+
         # Ensure default project exists
         default_proj = conn.execute(
             "SELECT id FROM projects WHERE id = 'default_project'"
@@ -3601,5 +3647,257 @@ def record_user_decision_override(
             (selection_id, testcase_id),
         ).fetchone()
         return dict(updated) if updated else None
+    finally:
+        conn.close()
+
+
+def save_ci_run(run_data: dict[str, Any] | Any, db_path: Path | str | None = None) -> None:
+    """Persist a completed CI quality gate run record into SQLite."""
+    init_studio_db(db_path)
+    if hasattr(run_data, "model_dump"):
+        data = run_data.model_dump()
+    elif hasattr(run_data, "__dict__"):
+        data = dict(run_data.__dict__)
+    else:
+        data = dict(run_data)
+
+    gate = data.get("gate_result") or {}
+    if hasattr(gate, "model_dump"):
+        gate = gate.model_dump()
+    elif hasattr(gate, "__dict__"):
+        gate = dict(gate.__dict__)
+
+    metrics = gate.get("metrics") or {}
+    drift = data.get("drift_summary") or {}
+    if hasattr(drift, "model_dump"):
+        drift = drift.model_dump()
+
+    test_results = data.get("test_results") or []
+
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO ci_runs (
+                id, project_id, commit_hash, branch, base_ref, target_ref,
+                status, exit_code, policy_name, gate_passed, gate_summary,
+                duration_seconds, total_considered, selected_count, executed_count,
+                failed_count, flaky_count, new_regressions_count, pre_existing_failures_count,
+                fixed_regressions_count, surface_coverage_pct, batch_id, selection_id,
+                metrics_json, test_results_json, drift_summary_json, error_category, error_detail, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                data.get("run_id") or f"ci_run_{uuid.uuid4().hex[:12]}",
+                data.get("project_id", "default_project"),
+                data.get("commit_hash", "HEAD"),
+                data.get("branch"),
+                data.get("base_ref"),
+                data.get("target_ref"),
+                "PASSED" if gate.get("passed") else ("ERROR" if data.get("exit_code") == 3 else "FAILED"),
+                data.get("exit_code", 0),
+                gate.get("policy_name", "standard"),
+                1 if gate.get("passed") else 0,
+                gate.get("summary", ""),
+                float(data.get("duration_seconds", 0.0)),
+                int(data.get("total_considered", 0)),
+                int(data.get("selected_count", 0)),
+                int(data.get("executed_count", 0)),
+                int(metrics.get("failed_count", 0)),
+                int(metrics.get("flaky_count", 0)),
+                int(drift.get("new_regressions_count", 0)),
+                int(drift.get("pre_existing_failures_count", 0)),
+                int(drift.get("fixed_regressions_count", 0)),
+                float(metrics.get("surface_coverage_pct", 100.0)),
+                data.get("batch_id"),
+                data.get("selection_id"),
+                json.dumps(metrics),
+                json.dumps(test_results),
+                json.dumps(drift),
+                data.get("error_category"),
+                data.get("error_detail"),
+                data.get("started_at") or data.get("created_at") or datetime.now().isoformat(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_ci_runs(
+    project_id: str | None = None,
+    branch: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    db_path: Path | str | None = None,
+) -> list[dict[str, Any]]:
+    """Retrieve list of CI quality gate runs with optional filtering."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        conditions = []
+        params: list[Any] = []
+        if project_id:
+            conditions.append("project_id = ?")
+            params.append(project_id)
+        if branch:
+            conditions.append("branch = ?")
+            params.append(branch)
+        if status:
+            conditions.append("status = ?")
+            params.append(status.upper())
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        query = f"""
+            SELECT * FROM ci_runs
+            {where_clause}
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+        rows = conn.execute(query, tuple(params)).fetchall()
+
+        results = []
+        for r in rows:
+            d = dict(r)
+            d["metrics"] = json.loads(d.get("metrics_json") or "{}")
+            d["drift_summary"] = json.loads(d.get("drift_summary_json") or "{}")
+            results.append(d)
+        return results
+    finally:
+        conn.close()
+
+
+def get_ci_run_by_id(run_id: str, db_path: Path | str | None = None) -> dict[str, Any] | None:
+    """Retrieve full details of a specific CI quality gate run."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute("SELECT * FROM ci_runs WHERE id = ?", (run_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["metrics"] = json.loads(d.get("metrics_json") or "{}")
+        d["test_results"] = json.loads(d.get("test_results_json") or "[]")
+        d["drift_summary"] = json.loads(d.get("drift_summary_json") or "{}")
+        return d
+    finally:
+        conn.close()
+
+
+def get_ci_drift_for_run(run_id: str, db_path: Path | str | None = None) -> list[dict[str, Any]]:
+    """Retrieve persisted drift items for a given CI run from ci_drift_records."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM ci_drift_records
+            WHERE run_id = ?
+            ORDER BY classification ASC, duration_delta_ms DESC
+            """,
+            (run_id,),
+        ).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            d["details"] = json.loads(d.get("details_json") or "{}")
+            results.append(d)
+        return results
+    finally:
+        conn.close()
+
+
+def get_ci_analytics(
+    project_id: str | None = None,
+    days: int = 30,
+    db_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Calculate aggregated historical CI analytics, pass rates, and trends."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        cond = "WHERE datetime(created_at) >= datetime('now', ?)"
+        params: list[Any] = [f"-{days} days"]
+        if project_id:
+            cond += " AND project_id = ?"
+            params.append(project_id)
+
+        # Overview statistics
+        overview_query = f"""
+            SELECT
+                COUNT(*) as total_runs,
+                SUM(CASE WHEN status = 'PASSED' THEN 1 ELSE 0 END) as passed_runs,
+                SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed_runs,
+                SUM(CASE WHEN status = 'ERROR' THEN 1 ELSE 0 END) as error_runs,
+                AVG(duration_seconds) as avg_duration_s,
+                SUM(new_regressions_count) as total_new_regressions,
+                SUM(pre_existing_failures_count) as total_pre_existing,
+                SUM(fixed_regressions_count) as total_fixed_regressions
+            FROM ci_runs
+            {cond}
+        """
+        overview = dict(conn.execute(overview_query, tuple(params)).fetchone() or {})
+        total = overview.get("total_runs") or 0
+        passed = overview.get("passed_runs") or 0
+        overview["pass_rate_pct"] = round((passed / total * 100), 1) if total > 0 else 100.0
+
+        # Runs by day
+        runs_by_day_query = f"""
+            SELECT
+                DATE(created_at) as date,
+                COUNT(*) as total,
+                SUM(CASE WHEN status = 'PASSED' THEN 1 ELSE 0 END) as passed,
+                SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed,
+                SUM(new_regressions_count) as new_regressions,
+                ROUND(AVG(duration_seconds), 1) as avg_duration_s
+            FROM ci_runs
+            {cond}
+            GROUP BY DATE(created_at)
+            ORDER BY DATE(created_at) ASC
+        """
+        runs_by_day = [dict(r) for r in conn.execute(runs_by_day_query, tuple(params)).fetchall()]
+
+        # Top flaky tests in CI
+        flaky_query = f"""
+            SELECT
+                testcase_id,
+                testcase_name,
+                COUNT(*) as flaky_occurrences,
+                SUM(CASE WHEN classification = 'newly_flaky' THEN 1 ELSE 0 END) as newly_flaky_count,
+                SUM(CASE WHEN classification = 'persistent_flaky' THEN 1 ELSE 0 END) as persistent_flaky_count
+            FROM ci_drift_records
+            WHERE classification IN ('newly_flaky', 'persistent_flaky')
+              AND datetime(created_at) >= datetime('now', ?)
+            GROUP BY testcase_id, testcase_name
+            ORDER BY flaky_occurrences DESC
+            LIMIT 10
+        """
+        top_flaky = [dict(r) for r in conn.execute(flaky_query, (f"-{days} days",)).fetchall()]
+
+        # Branch breakdown
+        branch_query = f"""
+            SELECT
+                COALESCE(branch, 'unknown') as branch_name,
+                COUNT(*) as total_runs,
+                SUM(CASE WHEN status = 'PASSED' THEN 1 ELSE 0 END) as passed_runs,
+                SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed_runs,
+                SUM(new_regressions_count) as new_regressions
+            FROM ci_runs
+            {cond}
+            GROUP BY branch_name
+            ORDER BY total_runs DESC
+            LIMIT 10
+        """
+        branch_breakdown = [dict(r) for r in conn.execute(branch_query, tuple(params)).fetchall()]
+
+        return {
+            "overview": overview,
+            "runs_by_day": runs_by_day,
+            "top_flaky_tests": top_flaky,
+            "branch_breakdown": branch_breakdown,
+            "days_analyzed": days,
+        }
     finally:
         conn.close()

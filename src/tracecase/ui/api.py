@@ -70,6 +70,10 @@ from tracecase.ui.db import (
     delete_project,
     delete_suite,
     get_ai_analyses_for_testcase,
+    get_ci_analytics,
+    get_ci_drift_for_run,
+    get_ci_run_by_id,
+    get_ci_runs,
     get_dashboard_metrics,
     get_decision_traces,
     get_execution_attempts,
@@ -2535,6 +2539,167 @@ async def select_regression_endpoint(req: RegressionSelectRequest) -> dict[str, 
         project_id=req.project_id,
         max_recommendations=req.max_recommendations,
     )
+
+
+# ---------------------------------------------------------------------------
+# CI Quality Gate & Regression Drift Dashboard Endpoints (Phase 8.4)
+# ---------------------------------------------------------------------------
+
+@router.get("/ci/runs")
+def list_ci_quality_gate_runs(
+    project_id: str | None = None,
+    branch: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """List CI quality gate execution runs with filtering."""
+    return get_ci_runs(
+        project_id=project_id,
+        branch=branch,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/ci/runs/{run_id}")
+def get_ci_quality_gate_run(run_id: str) -> dict[str, Any]:
+    """Retrieve full details of a CI quality gate execution run."""
+    run = get_ci_run_by_id(run_id)
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"CI run '{run_id}' not found",
+        )
+    return run
+
+
+@router.get("/ci/runs/{run_id}/drift")
+def get_ci_run_regression_drift(run_id: str) -> dict[str, Any]:
+    """Retrieve categorized regression drift items and summary for a CI run."""
+    run = get_ci_run_by_id(run_id)
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"CI run '{run_id}' not found",
+        )
+
+    drift_items = get_ci_drift_for_run(run_id)
+
+    # Group items by classification
+    grouped: dict[str, list[dict[str, Any]]] = {
+        "new_regressions": [],
+        "pre_existing_failures": [],
+        "fixed_regressions": [],
+        "newly_flaky": [],
+        "persistent_flaky": [],
+        "stable_passes": [],
+        "unknown_baseline": [],
+        "definition_drift": [],
+    }
+
+    for item in drift_items:
+        cls_name = item.get("classification")
+        if cls_name == "new_regression":
+            grouped["new_regressions"].append(item)
+        elif cls_name == "pre_existing_failure":
+            grouped["pre_existing_failures"].append(item)
+        elif cls_name == "fixed_regression":
+            grouped["fixed_regressions"].append(item)
+        elif cls_name == "newly_flaky":
+            grouped["newly_flaky"].append(item)
+        elif cls_name == "persistent_flaky":
+            grouped["persistent_flaky"].append(item)
+        elif cls_name == "stable_pass":
+            grouped["stable_passes"].append(item)
+        elif cls_name in ("unknown_baseline_failure", "new_test_pass"):
+            grouped["unknown_baseline"].append(item)
+
+        if item.get("test_definition_drift"):
+            grouped["definition_drift"].append(item)
+
+    return {
+        "run_id": run_id,
+        "base_commit": run.get("base_ref"),
+        "pr_commit": run.get("commit_hash"),
+        "branch": run.get("branch"),
+        "summary": run.get("drift_summary") or {},
+        "grouped": grouped,
+        "total_items": len(drift_items),
+        "items": drift_items,
+    }
+
+
+@router.get("/ci/runs/{run_id}/visual-diff/{testcase_id}")
+def get_ci_visual_diff_evidence(run_id: str, testcase_id: str) -> dict[str, Any]:
+    """Retrieve side-by-side execution evidence, screenshots, and logs for a testcase."""
+    run = get_ci_run_by_id(run_id)
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"CI run '{run_id}' not found",
+        )
+
+    # Find PR test result
+    test_results = run.get("test_results") or []
+    pr_test = next((t for t in test_results if t.get("testcase_id") == testcase_id), None)
+
+    # Find drift item
+    drift_items = get_ci_drift_for_run(run_id)
+    drift_item = next((d for d in drift_items if d.get("testcase_id") == testcase_id), None)
+
+    tc_name = testcase_id
+    if pr_test and pr_test.get("name"):
+        tc_name = pr_test["name"]
+    elif drift_item and drift_item.get("testcase_name"):
+        tc_name = drift_item["testcase_name"]
+
+    # PR evidence
+    pr_evidence = {
+        "status": pr_test.get("status") if pr_test else (drift_item.get("pr_status") if drift_item else "unknown"),
+        "duration_ms": pr_test.get("duration_ms") if pr_test else (drift_item.get("pr_duration_ms", 0.0) if drift_item else 0.0),
+        "error_message": pr_test.get("error_message") if pr_test else (drift_item.get("details", {}).get("pr_error_message") if drift_item else None),
+        "screenshot_path": pr_test.get("screenshot_path") if pr_test else None,
+        "trace_path": pr_test.get("trace_path") if pr_test else None,
+        "failed_step": pr_test.get("failed_step") if pr_test else None,
+    }
+
+    # Base evidence
+    base_evidence = {
+        "status": drift_item.get("base_status") if drift_item else "unknown",
+        "duration_ms": drift_item.get("base_duration_ms") if drift_item else 0.0,
+        "error_message": drift_item.get("details", {}).get("base_error_message") if drift_item else None,
+        "screenshot_path": None,
+        "trace_path": None,
+        "failed_step": None,
+    }
+
+    # If test run has execution attempt screenshots on disk
+    pr_has_screenshot = bool(pr_evidence.get("screenshot_path") and Path(pr_evidence["screenshot_path"]).exists())
+    base_has_screenshot = bool(base_evidence.get("screenshot_path") and Path(base_evidence["screenshot_path"]).exists())
+
+    return {
+        "run_id": run_id,
+        "testcase_id": testcase_id,
+        "testcase_name": tc_name,
+        "classification": drift_item.get("classification") if drift_item else "unknown",
+        "duration_delta_ms": drift_item.get("duration_delta_ms") if drift_item else None,
+        "test_definition_drift": bool(drift_item.get("test_definition_drift")) if drift_item else False,
+        "pr_evidence": pr_evidence,
+        "base_evidence": base_evidence,
+        "visual_diff_available": pr_has_screenshot and base_has_screenshot,
+        "similarity_score": 1.0 if pr_evidence["status"] == base_evidence["status"] else 0.0,
+    }
+
+
+@router.get("/ci/analytics")
+def get_ci_historical_analytics(
+    project_id: str | None = None,
+    days: int = 30,
+) -> dict[str, Any]:
+    """Retrieve historical CI analytics, pass rate trends, and flakiness leaderboards."""
+    return get_ci_analytics(project_id=project_id, days=days)
 
 
 # ---------------------------------------------------------------------------

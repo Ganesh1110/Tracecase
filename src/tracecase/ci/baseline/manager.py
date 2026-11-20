@@ -91,6 +91,8 @@ class BaselineManager:
     def save_snapshot(self, snapshot: BaselineSnapshot) -> None:
         """Persist a complete baseline snapshot into SQLite."""
         conn = get_connection(self.db_path)
+        env_to_save = dict(snapshot.environment)
+        env_to_save["status"] = snapshot.status
         try:
             for outcome in snapshot.outcomes.values():
                 record_id = f"base_{snapshot.commit_hash[:10]}_{snapshot.browser}_{outcome.testcase_id}"
@@ -117,7 +119,7 @@ class BaselineManager:
                         outcome.retry_count,
                         outcome.error_message,
                         outcome.run_id,
-                        json.dumps(snapshot.environment),
+                        json.dumps(env_to_save),
                         snapshot.created_at,
                     ),
                 )
@@ -175,13 +177,17 @@ class BaselineManager:
                     timestamp=d["created_at"],
                 )
 
+            env_dict = json.loads(first["environment_json"] or "{}")
+            snap_status = env_dict.get("status", "completed")
+
             return BaselineSnapshot(
                 id=f"snap_{first['commit_hash'][:8]}_{browser}",
                 project_id=project_id,
                 commit_hash=first["commit_hash"],
                 branch=first["branch"],
                 browser=browser,
-                environment=json.loads(first["environment_json"] or "{}"),
+                status=snap_status,
+                environment=env_dict,
                 created_at=first["created_at"],
                 total_tests=len(outcomes),
                 passed_count=passed_cnt,

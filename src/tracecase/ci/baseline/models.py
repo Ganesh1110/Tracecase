@@ -62,6 +62,7 @@ class BaselineSnapshot(BaseModel):
     commit_hash: str
     branch: str | None = None
     browser: str = "chromium"
+    status: str = "completed"  # "completed", "crashed", "cancelled", "aborted"
     environment: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     total_tests: int = 0

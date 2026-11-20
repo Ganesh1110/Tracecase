@@ -29,6 +29,7 @@ class CIRunnerConfig(BaseModel):
     baseline_ref: str | None = None
     auto_run_baseline: bool = False
     require_exact_baseline: bool = False
+    environment: dict[str, Any] = Field(default_factory=dict)
     gate_policy: QualityGatePolicy = Field(default_factory=QualityGatePolicy)
     junit_path: str | None = None
     sarif_path: str | None = None
@@ -75,6 +76,7 @@ class CIRunnerConfig(BaseModel):
             baseline_ref=ci_section.get("baseline_ref") or ci_section.get("baseline_branch"),
             auto_run_baseline=bool(ci_section.get("auto_run_baseline", False)),
             require_exact_baseline=bool(ci_section.get("require_exact_baseline", False)),
+            environment=dict(ci_section.get("environment", {})),
             gate_policy=final_policy,
             junit_path=reports_section.get("junit"),
             sarif_path=reports_section.get("sarif"),

@@ -68,7 +68,21 @@ class RegressionDriftClassifier:
 
         base_st = base_outcome.status
 
-        # 5. Core 7-state taxonomy
+        # 5. Core transition taxonomy
+        if base_st in ("cancelled", "crashed", "aborted"):
+            if pr_status == "failed":
+                return (
+                    DriftClassification.UNKNOWN_BASELINE_FAILURE,
+                    f"Base execution was {base_st}; baseline outcome is invalid and cannot be compared.{drift_note}",
+                    test_def_drift,
+                )
+            if pr_status == "passed":
+                return (
+                    DriftClassification.NEW_TEST_PASS,
+                    f"Test passed on PR (base execution was {base_st}).{drift_note}",
+                    test_def_drift,
+                )
+
         if base_st == "passed":
             if pr_status == "failed":
                 return (
@@ -82,10 +96,17 @@ class RegressionDriftClassifier:
                     f"Newly unstable test: Test was stable on base commit but required retry recovery on PR.{drift_note}",
                     test_def_drift,
                 )
+            # Passed -> Passed
+            if test_def_drift:
+                return (
+                    DriftClassification.STABLE_PASS,
+                    f"Passed with test definition drift: Test passed on both base and PR, but definition (locators or steps) changed.{drift_note}",
+                    True,
+                )
             return (
                 DriftClassification.STABLE_PASS,
-                f"Stable test: Passed on both base commit and PR.{drift_note}",
-                test_def_drift,
+                "Stable test: Passed on both base commit and PR.",
+                False,
             )
 
         if base_st == "failed":
@@ -95,7 +116,13 @@ class RegressionDriftClassifier:
                     f"Pre-existing failure: Test was already failing on base commit before this PR was created.{drift_note}",
                     test_def_drift,
                 )
-            if pr_status in ("passed", "flaky"):
+            if pr_status == "flaky":
+                return (
+                    DriftClassification.FIXED_REGRESSION,
+                    f"Partially recovered: Test was failing on base commit and passed on retry on PR.{drift_note}",
+                    test_def_drift,
+                )
+            if pr_status == "passed":
                 return (
                     DriftClassification.FIXED_REGRESSION,
                     f"Fixed regression: Test was failing on base commit and has been fixed by this PR!{drift_note}",
@@ -125,7 +152,7 @@ class RegressionDriftClassifier:
         if base_st == "error":
             if pr_status == "passed":
                 return (
-                    DriftClassification.FIXED_REGRESSION,
+                    DriftClassification.NEW_TEST_PASS,
                     f"Recovered from previous infrastructure error on base commit.{drift_note}",
                     test_def_drift,
                 )

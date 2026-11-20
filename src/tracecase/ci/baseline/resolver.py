@@ -49,6 +49,58 @@ class BaselineResolver:
     def __init__(self, manager: BaselineManager) -> None:
         self.manager = manager
 
+    def _check_environment_parity(
+        self,
+        snapshot: BaselineSnapshot,
+        expected_env: dict[str, Any] | None,
+    ) -> tuple[bool, str]:
+        """Verify environment compatibility between requested CI run and snapshot."""
+        if not expected_env or not snapshot.environment:
+            return True, ""
+
+        # Check browser major version parity if specified
+        if "browser_version" in expected_env and "browser_version" in snapshot.environment:
+            exp_ver = str(expected_env["browser_version"]).split(".")[0]
+            snap_ver = str(snapshot.environment["browser_version"]).split(".")[0]
+            if exp_ver != snap_ver:
+                return (
+                    False,
+                    f"Browser major version mismatch: baseline used {snap_ver}, current run uses {exp_ver}.",
+                )
+
+        # Check OS platform parity if strict platform checking enabled
+        if expected_env.get("require_same_os"):
+            exp_os = expected_env.get("os")
+            snap_os = snapshot.environment.get("os")
+            if exp_os and snap_os and exp_os != snap_os:
+                return (
+                    False,
+                    f"OS platform mismatch: baseline ran on {snap_os}, current run is on {exp_os}.",
+                )
+
+        return True, ""
+
+    def _is_git_ancestor(
+        self,
+        repo_path: Path | str,
+        ancestor_sha: str,
+        descendant_ref: str,
+    ) -> bool:
+        """Check whether ancestor_sha is a git ancestor of descendant_ref."""
+        import subprocess
+
+        try:
+            res = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", ancestor_sha, descendant_ref],
+                cwd=str(repo_path),
+                capture_output=True,
+                check=False,
+            )
+            return res.returncode == 0
+        except Exception as exc:
+            logger.warning("Failed to evaluate git merge-base ancestry: %s", exc)
+            return True
+
     def resolve(
         self,
         project_id: str,
@@ -56,6 +108,8 @@ class BaselineResolver:
         base_commit: str | None = None,
         browser: str = "chromium",
         require_exact_commit: bool = False,
+        repo_path: Path | str | None = None,
+        environment: dict[str, Any] | None = None,
     ) -> BaselineResolutionResult:
         """Resolve the best matching baseline snapshot for the base reference."""
         # 1. Check exact base commit SHA if provided
@@ -66,6 +120,23 @@ class BaselineResolver:
                 browser=browser,
             )
             if snap:
+                # Incomplete baseline execution check
+                if snap.status in ("cancelled", "crashed", "aborted") or snap.total_tests == 0:
+                    return BaselineResolutionResult(
+                        status=BaselineMatchStatus.NOT_FOUND,
+                        snapshot=None,
+                        reason=f"Baseline snapshot for commit {base_commit[:8]} was incomplete (status: {snap.status}).",
+                    )
+
+                # Environment parity check
+                env_ok, env_msg = self._check_environment_parity(snap, environment)
+                if not env_ok:
+                    return BaselineResolutionResult(
+                        status=BaselineMatchStatus.INCOMPATIBLE_ENVIRONMENT,
+                        snapshot=snap,
+                        reason=env_msg,
+                    )
+
                 return BaselineResolutionResult(
                     status=BaselineMatchStatus.FOUND_EXACT_COMMIT,
                     snapshot=snap,
@@ -87,6 +158,41 @@ class BaselineResolver:
                 browser=browser,
             )
             if snap:
+                # Incomplete execution check
+                if snap.status in ("cancelled", "crashed", "aborted") or snap.total_tests == 0:
+                    return BaselineResolutionResult(
+                        status=BaselineMatchStatus.NOT_FOUND,
+                        snapshot=None,
+                        reason=f"Branch snapshot from '{base_ref}' was incomplete (status: {snap.status}).",
+                    )
+
+                # Ancestry validation: verify candidate snapshot is ancestor of target/base
+                target_ancestor_ref = base_commit or base_ref
+                if repo_path and target_ancestor_ref:
+                    is_ancestor = self._is_git_ancestor(
+                        repo_path=repo_path,
+                        ancestor_sha=snap.commit_hash,
+                        descendant_ref=target_ancestor_ref,
+                    )
+                    if not is_ancestor:
+                        return BaselineResolutionResult(
+                            status=BaselineMatchStatus.NOT_FOUND,
+                            snapshot=None,
+                            reason=(
+                                f"Branch snapshot commit {snap.commit_hash[:8]} from '{base_ref}' "
+                                f"is not an ancestor of '{target_ancestor_ref}'."
+                            ),
+                        )
+
+                # Environment parity check
+                env_ok, env_msg = self._check_environment_parity(snap, environment)
+                if not env_ok:
+                    return BaselineResolutionResult(
+                        status=BaselineMatchStatus.INCOMPATIBLE_ENVIRONMENT,
+                        snapshot=snap,
+                        reason=env_msg,
+                    )
+
                 return BaselineResolutionResult(
                     status=BaselineMatchStatus.FOUND_BRANCH_SNAPSHOT,
                     snapshot=snap,

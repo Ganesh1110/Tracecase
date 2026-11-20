@@ -687,3 +687,143 @@ def test_cli_baseline_drift_integration(temp_git_repo: Path, tmp_path: Path):
 
     assert res.exit_code == 0
     assert "QUALITY GATE PASSED" in res.output
+
+
+def test_baseline_ancestry_validation(temp_git_repo: Path, tmp_path: Path):
+    """Scenario 13: Resolver verifies commit ancestry when resolving branch snapshots."""
+    db_file = tmp_path / "ancestry.db"
+    mgr = BaselineManager(db_path=db_file)
+    resolver = BaselineResolver(mgr)
+
+    # Commit 1
+    sha1 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(temp_git_repo), capture_output=True, text=True).stdout.strip()
+
+    # Commit 2
+    f2 = temp_git_repo / "new_file.txt"
+    f2.write_text("commit 2")
+    subprocess.run(["git", "add", "."], cwd=str(temp_git_repo), check=True)
+    subprocess.run(["git", "commit", "-m", "Commit 2"], cwd=str(temp_git_repo), check=True)
+    sha2 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(temp_git_repo), capture_output=True, text=True).stdout.strip()
+
+    # Save snapshot for sha2
+    snap2 = BaselineSnapshot(
+        id=f"snap_{sha2[:8]}_chromium",
+        commit_hash=sha2,
+        branch="main",
+        browser="chromium",
+        outcomes={"tc_1": BaselineTestOutcome(testcase_id="tc_1", testcase_name="T1", status="passed")},
+    )
+    mgr.save_snapshot(snap2)
+
+    # When PR is based on sha1 (older commit), sha2 is NOT an ancestor of sha1!
+    res = resolver.resolve(
+        project_id="default_project",
+        base_ref="main",
+        base_commit=sha1,
+        repo_path=temp_git_repo,
+    )
+    # Must reject sha2 because it's newer than the PR's base commit (sha1)
+    assert res.status == BaselineMatchStatus.NOT_FOUND
+    assert "is not an ancestor" in res.reason
+
+
+def test_baseline_environment_parity(tmp_path: Path):
+    """Scenario 14: Resolver flags incompatible environment when browser version or OS mismatches."""
+    db_file = tmp_path / "env_parity.db"
+    mgr = BaselineManager(db_path=db_file)
+    resolver = BaselineResolver(mgr)
+
+    snap = BaselineSnapshot(
+        id="snap_env_chrome120",
+        commit_hash="deadbeef1234",
+        browser="chromium",
+        environment={"browser_version": "120.0.6099.109", "os": "Linux"},
+        outcomes={"tc_1": BaselineTestOutcome(testcase_id="tc_1", testcase_name="T1", status="passed")},
+    )
+    mgr.save_snapshot(snap)
+
+    # Mismatched browser version (130 vs 120)
+    res_ver = resolver.resolve(
+        project_id="default_project",
+        base_commit="deadbeef1234",
+        browser="chromium",
+        environment={"browser_version": "130.0.0.0"},
+    )
+    assert res_ver.status == BaselineMatchStatus.INCOMPATIBLE_ENVIRONMENT
+    assert "Browser major version mismatch" in res_ver.reason
+
+    # Matching browser version (120 vs 120)
+    res_ok = resolver.resolve(
+        project_id="default_project",
+        base_commit="deadbeef1234",
+        browser="chromium",
+        environment={"browser_version": "120.0.6099.200"},
+    )
+    assert res_ok.status == BaselineMatchStatus.FOUND_EXACT_COMMIT
+
+
+def test_incomplete_baseline_rejected(tmp_path: Path):
+    """Scenario 15: Incomplete or cancelled baseline snapshots are rejected."""
+    db_file = tmp_path / "incomplete.db"
+    mgr = BaselineManager(db_path=db_file)
+    resolver = BaselineResolver(mgr)
+
+    snap_cancelled = BaselineSnapshot(
+        id="snap_cancelled",
+        commit_hash="c0ffee112233",
+        browser="chromium",
+        status="cancelled",
+        outcomes={"tc_1": BaselineTestOutcome(testcase_id="tc_1", testcase_name="T1", status="passed")},
+    )
+    mgr.save_snapshot(snap_cancelled)
+
+    res = resolver.resolve(
+        project_id="default_project",
+        base_commit="c0ffee112233",
+        browser="chromium",
+    )
+    assert res.status == BaselineMatchStatus.NOT_FOUND
+    assert "incomplete" in res.reason
+
+
+def test_extended_drift_transitions_and_definition_drift():
+    """Scenario 16: Extended drift transitions including flaky, cancelled, and test definition drift."""
+    # 1. Flaky on base -> Failed on PR: Degradation to regression
+    base_flaky = BaselineTestOutcome(testcase_id="tc_flaky", testcase_name="Flaky Test", status="flaky")
+    clf, expl, _ = RegressionDriftClassifier.classify(pr_status="failed", base_outcome=base_flaky)
+    assert clf == DriftClassification.NEW_REGRESSION
+    assert "Previously flaky test has now degraded to complete failure" in expl
+
+    # 2. Failed on base -> Flaky on PR: Partial recovery
+    base_failed = BaselineTestOutcome(testcase_id="tc_fail", testcase_name="Fail Test", status="failed")
+    clf2, expl2, _ = RegressionDriftClassifier.classify(pr_status="flaky", base_outcome=base_failed)
+    assert clf2 == DriftClassification.FIXED_REGRESSION
+    assert "Partially recovered" in expl2
+
+    # 3. Cancelled on base -> Failed on PR: Baseline invalid -> Unknown baseline failure
+    base_cancelled = BaselineTestOutcome(testcase_id="tc_canc", testcase_name="Cancelled Test", status="cancelled")
+    clf3, expl3, _ = RegressionDriftClassifier.classify(pr_status="failed", base_outcome=base_cancelled)
+    assert clf3 == DriftClassification.UNKNOWN_BASELINE_FAILURE
+    assert "baseline outcome is invalid" in expl3
+
+    # 4. Passed on base -> Skipped on PR: Skipped
+    base_passed = BaselineTestOutcome(testcase_id="tc_skip", testcase_name="Pass Test", status="passed")
+    clf4, _, _ = RegressionDriftClassifier.classify(pr_status="skipped", base_outcome=base_passed)
+    assert clf4 == DriftClassification.SKIPPED
+
+    # 5. Passed on base and PR, but locators changed (Test Definition Drift)
+    base_tc = BaselineTestOutcome(
+        testcase_id="tc_drift",
+        testcase_name="Locator Drift",
+        status="passed",
+        test_revision_hash="hash_base_v1",
+    )
+    clf5, expl5, def_drift = RegressionDriftClassifier.classify(
+        pr_status="passed",
+        base_outcome=base_tc,
+        pr_test_revision_hash="hash_pr_v2",
+    )
+    assert clf5 == DriftClassification.STABLE_PASS
+    assert def_drift is True
+    assert "test definition drift" in expl5
+

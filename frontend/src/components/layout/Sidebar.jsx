@@ -44,6 +44,7 @@ const navSections = [
       { name: 'Execution History', to: '/history', icon: History },
       { name: 'Reports', to: '/reports', icon: FileSpreadsheet },
       { name: 'Visual Regression', to: '/visual-diff', icon: Images },
+      { name: 'CI Quality Gate', to: '/ci', icon: ShieldCheck, badge: 'Gate' },
     ],
   },
   {

@@ -349,4 +349,18 @@ export const api = {
   getSettings: () => request('/settings'),
   updateSettings: (settings) =>
     request('/settings', { method: 'PUT', body: JSON.stringify({ settings }) }),
+
+  // CI Quality Gate & Regression Drift Dashboard (Phase 8.4)
+  getCIRuns: (params = {}) => {
+    const q = new URLSearchParams(params);
+    return request(`/ci/runs?${q.toString()}`);
+  },
+  getCIRunById: (runId) => request(`/ci/runs/${runId}`),
+  getCIRunDrift: (runId) => request(`/ci/runs/${runId}/drift`),
+  getCIVisualDiff: (runId, testcaseId) =>
+    request(`/ci/runs/${runId}/visual-diff/${testcaseId}`),
+  getCIAnalytics: (params = {}) => {
+    const q = new URLSearchParams(params);
+    return request(`/ci/analytics?${q.toString()}`);
+  },
 };

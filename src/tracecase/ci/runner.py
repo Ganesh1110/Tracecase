@@ -37,7 +37,7 @@ from tracecase.intelligence.git_analyzer import GitChangeAnalyzer
 from tracecase.intelligence.risk_scorer import PredictiveRiskScorer
 from tracecase.intelligence.selector import IntelligentRegressionSelector
 from tracecase.models import TestCase
-from tracecase.ui.db import get_execution_batch, init_studio_db
+from tracecase.ui.db import get_execution_batch, init_studio_db, save_ci_run
 from tracecase.ui.executor import ExecutionOrchestrator
 from tracecase.ui.service import find_testcase_files, resolve_testcase_file
 
@@ -219,6 +219,11 @@ class CIRunner:
                 selected_count=0,
                 executed_count=0,
             )
+            try:
+                save_ci_run(run_res, db_path=self.db_path)
+            except Exception as db_exc:
+                logger.warning("Failed to persist CI run record to SQLite: %s", db_exc)
+
             self._write_reports(run_res, gate_res, runs=[])
             return run_res
 
@@ -281,6 +286,8 @@ class CIRunner:
                 base_commit=base_commit_sha,
                 browser=self.config.browser,
                 require_exact_commit=self.config.require_exact_baseline,
+                repo_path=self.config.repo_path,
+                environment=self.config.environment,
             )
             if resolution.is_valid:
                 baseline_snap = resolution.snapshot
@@ -421,7 +428,13 @@ class CIRunner:
             error_detail=error_det,
         )
 
-        # 12. Generate and write reports
+        # 12. Persist CI Run record in SQLite
+        try:
+            save_ci_run(run_res, db_path=self.db_path)
+        except Exception as db_exc:
+            logger.warning("Failed to persist CI run record to SQLite: %s", db_exc)
+
+        # 13. Generate and write reports
         self._write_reports(
             run_res=run_res,
             gate_res=gate_res,

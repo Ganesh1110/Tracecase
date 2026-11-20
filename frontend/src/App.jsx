@@ -22,6 +22,7 @@ import { MCPIntegrations } from './pages/MCPIntegrations';
 import { Settings } from './pages/Settings';
 import { StorageManagement } from './pages/StorageManagement';
 import { RegressionSelection } from './pages/RegressionSelection';
+import { CIDashboard } from './pages/CIDashboard';
 
 export function App() {
   return (
@@ -42,6 +43,8 @@ export function App() {
         <Route path="visual-diff" element={<VisualRegression />} />
 
         {/* Intelligence */}
+        <Route path="ci" element={<CIDashboard />} />
+        <Route path="ci/:runId" element={<CIDashboard />} />
         <Route path="regression-selection" element={<RegressionSelection />} />
         <Route path="explore" element={<AutonomousExploration />} />
         <Route path="ai-assistant" element={<AIAssistant />} />
