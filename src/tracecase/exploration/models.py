@@ -195,8 +195,8 @@ class SynthesizedStep(BaseModel):
     selector: str | None = None
     url: str | None = None
     input_value: str | None = None
-    description_short: str
-    description_detailed: str
+    description_short: str = ""
+    description_detailed: str = ""
     source_node_id: str | None = None
     screenshot_path: str | None = None
     assertions: list[SynthesizedAssertion] = Field(default_factory=list)

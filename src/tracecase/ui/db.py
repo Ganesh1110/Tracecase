@@ -667,6 +667,54 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             "CREATE INDEX IF NOT EXISTS idx_ci_drift_tc ON ci_drift_records(testcase_id)"
         )
 
+        # Phase 9.1.3: Draft Validations Table and Synthesized Drafts Versioning
+        try:
+            cursor = conn.execute("PRAGMA table_info(synthesized_drafts)")
+            draft_cols = [row["name"] for row in cursor.fetchall()]
+            if "version" not in draft_cols:
+                conn.execute(
+                    "ALTER TABLE synthesized_drafts ADD COLUMN version INTEGER NOT NULL DEFAULT 1"
+                )
+            if "validation_status" not in draft_cols:
+                conn.execute(
+                    "ALTER TABLE synthesized_drafts ADD COLUMN validation_status TEXT NOT NULL DEFAULT 'not_run'"
+                )
+            if "validation_details_json" not in draft_cols:
+                conn.execute(
+                    "ALTER TABLE synthesized_drafts ADD COLUMN validation_details_json TEXT NOT NULL DEFAULT '{}'"
+                )
+        except Exception:
+            pass
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS draft_validations (
+                id TEXT PRIMARY KEY,
+                draft_id TEXT NOT NULL,
+                draft_version INTEGER NOT NULL DEFAULT 1,
+                browser TEXT NOT NULL DEFAULT 'chromium',
+                headless INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'NOT_RUN',
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                step_results_json TEXT NOT NULL DEFAULT '[]',
+                assertion_results_json TEXT NOT NULL DEFAULT '[]',
+                artifacts_json TEXT NOT NULL DEFAULT '{}',
+                failure_summary TEXT,
+                environment_json TEXT NOT NULL DEFAULT '{}',
+                safety_policy_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (draft_id) REFERENCES synthesized_drafts(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_draft_validations_draft ON draft_validations(draft_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_draft_validations_version ON draft_validations(draft_id, draft_version)"
+        )
+
         # Ensure default project exists
         default_proj = conn.execute(
             "SELECT id FROM projects WHERE id = 'default_project'"
@@ -2805,6 +2853,9 @@ def get_synthesized_draft(
         d = dict(row)
         d["steps"] = json.loads(d.get("steps_json") or "[]")
         d["requires_human_input"] = bool(d.get("requires_human_input", 0))
+        d["version"] = int(d.get("version") or 1)
+        d["validation_status"] = d.get("validation_status") or "not_run"
+        d["validation_details"] = json.loads(d.get("validation_details_json") or "{}")
         return d
     finally:
         conn.close()
@@ -2882,6 +2933,9 @@ def update_synthesized_draft(
             if steps is not None:
                 updates.append("steps_json = ?")
                 params.append(json.dumps(steps))
+
+            if steps is not None or name is not None:
+                updates.append("version = COALESCE(version, 1) + 1")
 
             if was_approved and (steps is not None or name is not None):
                 # Security invalidation: reset approval status
@@ -3056,6 +3110,158 @@ def reject_synthesized_draft(
                 (reason or "Rejected by reviewer", now, draft_id),
             )
             return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase 9.1.3: Draft Validations Persistence
+# ---------------------------------------------------------------------------
+
+def save_draft_validation(
+    report: dict[str, Any],
+    db_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Persist a draft validation run and update parent draft validation summary."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO draft_validations (
+                    id, draft_id, draft_version, browser, headless, status,
+                    started_at, completed_at, step_results_json,
+                    assertion_results_json, artifacts_json, failure_summary,
+                    environment_json, safety_policy_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    report["validation_id"],
+                    report["draft_id"],
+                    report.get("draft_version", 1),
+                    report.get("browser", "chromium"),
+                    1 if report.get("headless", True) else 0,
+                    report.get("overall_status", "NOT_RUN"),
+                    str(report.get("started_at")),
+                    str(report.get("completed_at")) if report.get("completed_at") else None,
+                    json.dumps(report.get("step_results", [])),
+                    json.dumps(report.get("assertion_results", [])),
+                    json.dumps(report.get("artifacts", {})),
+                    report.get("failure_summary"),
+                    json.dumps(report.get("environment", {})),
+                    json.dumps(report.get("safety_policy", {})),
+                    str(report.get("started_at")),
+                ),
+            )
+
+            # Update parent synthesized draft's validation summary
+            step_res = report.get("step_results", [])
+            passed_steps = sum(1 for s in step_res if s.get("status") == "PASSED")
+            failed_steps = sum(1 for s in step_res if s.get("status") == "FAILED")
+            blocked_steps = sum(1 for s in step_res if s.get("status") == "BLOCKED")
+
+            summary_details = {
+                "validation_id": report["validation_id"],
+                "draft_version": report.get("draft_version", 1),
+                "overall_status": report.get("overall_status"),
+                "failure_summary": report.get("failure_summary"),
+                "passed_steps": passed_steps,
+                "failed_steps": failed_steps,
+                "blocked_steps": blocked_steps,
+            }
+
+            conn.execute(
+                """
+                UPDATE synthesized_drafts
+                SET validation_status = ?,
+                    validation_details_json = ?
+                WHERE id = ?
+                """,
+                (
+                    str(report.get("overall_status", "NOT_RUN")).lower(),
+                    json.dumps(summary_details),
+                    report["draft_id"],
+                ),
+            )
+        return get_draft_validation(report["validation_id"], db_path) or report
+    finally:
+        conn.close()
+
+
+def get_draft_validation(
+    validation_id: str,
+    db_path: Path | str | None = None,
+) -> dict[str, Any] | None:
+    """Retrieve a single draft validation record by validation ID."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM draft_validations WHERE id = ?", (validation_id,)
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["validation_id"] = d["id"]
+        d["step_results"] = json.loads(d.get("step_results_json") or "[]")
+        d["assertion_results"] = json.loads(d.get("assertion_results_json") or "[]")
+        d["artifacts"] = json.loads(d.get("artifacts_json") or "{}")
+        d["environment"] = json.loads(d.get("environment_json") or "{}")
+        d["safety_policy"] = json.loads(d.get("safety_policy_json") or "{}")
+        d["headless"] = bool(d.get("headless", 1))
+        return d
+    finally:
+        conn.close()
+
+
+def get_latest_draft_validation(
+    draft_id: str,
+    db_path: Path | str | None = None,
+) -> dict[str, Any] | None:
+    """Retrieve the most recent validation for a draft and verify version alignment."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT id FROM draft_validations WHERE draft_id = ? ORDER BY started_at DESC LIMIT 1",
+            (draft_id,),
+        ).fetchone()
+        if not row:
+            return None
+        val_data = get_draft_validation(row["id"], db_path)
+        if not val_data:
+            return None
+
+        # Check whether validation aligns with current draft version
+        draft_row = conn.execute(
+            "SELECT version FROM synthesized_drafts WHERE id = ?", (draft_id,)
+        ).fetchone()
+        current_version = int(draft_row["version"]) if draft_row and draft_row["version"] else 1
+        val_data["is_current_version"] = bool(val_data.get("draft_version") == current_version)
+        return val_data
+    finally:
+        conn.close()
+
+
+def list_draft_validations(
+    draft_id: str,
+    db_path: Path | str | None = None,
+) -> list[dict[str, Any]]:
+    """List all historical validation records for a draft."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT id FROM draft_validations WHERE draft_id = ? ORDER BY started_at DESC",
+            (draft_id,),
+        ).fetchall()
+        results = []
+        for r in rows:
+            v = get_draft_validation(r["id"], db_path)
+            if v:
+                results.append(v)
+        return results
     finally:
         conn.close()
 

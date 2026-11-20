@@ -146,3 +146,22 @@ async def broadcast_matrix_event(
     }
     await manager.broadcast(msg, channel=f"matrix:{matrix_id}")
     await manager.broadcast(msg, channel="executions")
+
+
+async def broadcast_draft_validation_event(
+    draft_id: str,
+    validation_id: str,
+    event_type: str,
+    data: dict[str, Any],
+) -> None:
+    """Convenience helper to broadcast draft validation progress."""
+    msg = {
+        "channel": f"draft:{draft_id}",
+        "type": event_type,
+        "draft_id": draft_id,
+        "validation_id": validation_id,
+        "data": data,
+    }
+    await manager.broadcast(msg, channel=f"draft:{draft_id}")
+    await manager.broadcast(msg, channel="draft_validations")
+

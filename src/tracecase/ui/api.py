@@ -2493,6 +2493,87 @@ async def update_draft_endpoint(
     return updated
 
 
+class DraftValidateRequest(BaseModel):
+    browser: str = "chromium"
+    headless: bool = True
+    allow_destructive: bool = False
+    action_timeout_ms: int = 10000
+
+
+@router.post("/autonomous/drafts/{draft_id}/validate")
+async def validate_draft_endpoint(
+    draft_id: str,
+    req: DraftValidateRequest = DraftValidateRequest(),
+) -> dict[str, Any]:
+    """
+    Validate a synthesized draft journey inside an isolated Playwright sandbox.
+    
+    Guarantees:
+    - Dedicated browser context per execution.
+    - Deterministic pre-execution selector and visibility validation.
+    - Safety boundaries block destructive actions unless explicitly authorized.
+    - Traces, screenshots, and logs collected safely.
+    - Never automatically approves or promotes the draft.
+    """
+    from tracecase.requirements.validation import (
+        SandboxSafetyPolicy,
+        get_validation_orchestrator,
+    )
+
+    draft = get_synthesized_draft(draft_id)
+    if not draft:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Draft '{draft_id}' not found",
+        )
+
+    policy = SandboxSafetyPolicy(
+        allow_destructive=req.allow_destructive,
+        action_timeout_ms=req.action_timeout_ms,
+    )
+    orchestrator = get_validation_orchestrator()
+    report = await orchestrator.validate_draft(
+        draft_or_id=draft_id,
+        policy=policy,
+        browser=req.browser,
+        headless=req.headless,
+    )
+    return report.model_dump(mode="json")
+
+
+@router.get("/autonomous/drafts/{draft_id}/validation")
+async def get_latest_draft_validation_endpoint(draft_id: str) -> dict[str, Any]:
+    """Get the latest sandbox validation report for a draft."""
+    from tracecase.ui.db import get_latest_draft_validation
+
+    res = get_latest_draft_validation(draft_id)
+    if not res:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No validation reports found for draft '{draft_id}'.",
+        )
+    return res
+
+
+@router.get("/autonomous/drafts/{draft_id}/validations")
+async def list_draft_validations_endpoint(draft_id: str) -> list[dict[str, Any]]:
+    """List all historical validation reports for a draft."""
+    from tracecase.ui.db import list_draft_validations
+
+    return list_draft_validations(draft_id)
+
+
+@router.post("/autonomous/drafts/{draft_id}/validation/cancel")
+async def cancel_draft_validation_endpoint(draft_id: str) -> dict[str, Any]:
+    """Cancel an active background sandbox validation for a draft."""
+    from tracecase.requirements.validation import get_validation_orchestrator
+
+    orchestrator = get_validation_orchestrator()
+    cancelled = orchestrator.cancel_validation(draft_id)
+    return {"draft_id": draft_id, "cancelled": cancelled}
+
+
+
 @router.post("/autonomous/requirements/plan")
 async def plan_requirement_endpoint(req: RequirementsPlanRequest) -> dict[str, Any]:
     """
