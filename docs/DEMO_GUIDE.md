@@ -159,8 +159,8 @@ Leave the terminal running during the demo. Press `Ctrl+C` to stop the server.
 
 ## 5. Connect the AI model (one-time setup)
 
-Tracecase works without AI, but the AI features are more impressive. The application is already
-configured to use the hosted OpenAI-compatible endpoint.
+Tracecase works without AI, but the AI features are more impressive. If your team already has an
+OpenAI-compatible endpoint, configure it here. Otherwise, skip to the offline fallback.
 
 ### 5.1 Configure in the UI
 
@@ -171,26 +171,29 @@ configured to use the hosted OpenAI-compatible endpoint.
 | Field | Value |
 |-------|-------|
 | Provider Type | `OpenAI / Compatible Endpoint (vLLM, LMStudio)` |
-| Model Identifier | `gemma-4-12b-it` |
-| API Endpoint Base URL | `https://chatbot.infospica.in/v1` |
-| API Key | leave blank |
+| Model Identifier | `<your-model-name>` |
+| API Endpoint Base URL | `https://<your-llm-host>/v1` |
+| API Key | `<your-api-key, or blank if not required>` |
 
 4. Click **Save Settings**.
+
+Get the exact endpoint and model name from your platform or infrastructure team. Do not commit
+internal endpoints or keys to the repository.
 
 ### 5.2 Verify the endpoint before the demo
 
 ```bash
-curl -s https://chatbot.infospica.in/v1/models
+curl -s https://<your-llm-host>/v1/models
 ```
 
-You should see `gemma-4-12b-it` in the response.
+You should see your model in the response.
 
 Quick chat test:
 
 ```bash
-curl -s https://chatbot.infospica.in/v1/chat/completions \
+curl -s https://<your-llm-host>/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"gemma-4-12b-it","messages":[{"role":"user","content":"Say OK"}]}'
+  -d '{"model":"<your-model-name>","messages":[{"role":"user","content":"Say OK"}]}'
 ```
 
 ### 5.3 Offline fallback
@@ -442,11 +445,11 @@ tracecase codegen ./recordings/example/testcase.json
 # Analyze a flow with heuristics only (offline)
 tracecase analyze ./recordings/example/testcase.json
 
-# Analyze with the hosted OpenAI-compatible endpoint
+# Analyze with an OpenAI-compatible endpoint
 tracecase analyze ./recordings/example/testcase.json --ai \
   --provider openai \
-  --base-url https://chatbot.infospica.in/v1 \
-  --model gemma-4-12b-it
+  --base-url https://<your-llm-host>/v1 \
+  --model <your-model-name>
 
 # Generate negative tests
 tracecase mutate ./recordings/example/testcase.json -o ./mutations/
@@ -545,13 +548,13 @@ On macOS, `playwright install chromium` is usually enough.
 1. Confirm the endpoint is reachable:
 
    ```bash
-   curl -s https://chatbot.infospica.in/v1/models
+   curl -s https://<your-llm-host>/v1/models
    ```
 
 2. In **Settings**, confirm:
    - Provider Type is `OpenAI / Compatible Endpoint (vLLM, LMStudio)`
    - Base URL ends with `/v1`
-   - Model is `gemma-4-12b-it`
+   - Model matches the value provided by your platform team
 
 3. If the network is restricted, switch to `Deterministic Heuristics Only (Offline)` and continue
    the demo. All non-chat features still work.
@@ -621,8 +624,8 @@ Start Studio:      tracecase ui
 Studio URL:        http://127.0.0.1:8000
 Demo site:         https://demo.playwright.dev/todomvc/
 AI provider:       OpenAI / Compatible Endpoint
-AI base URL:       https://chatbot.infospica.in/v1
-AI model:          gemma-4-12b-it
+AI base URL:       https://<your-llm-host>/v1
+AI model:          <your-model-name>
 Offline mode:      Deterministic Heuristics Only
 Docs:              docs/USER_GUIDE.md and README.md
 ```

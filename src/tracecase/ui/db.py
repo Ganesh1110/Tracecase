@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -831,8 +832,8 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             "default_browser": "chromium",
             "default_timeout": "30000",
             "ai_provider": "openai",
-            "ai_model": "gemma-4-12b-it",
-            "ai_api_base": "https://chatbot.infospica.in/v1",
+            "ai_model": os.getenv("TRACECASE_AI_MODEL", "default"),
+            "ai_api_base": os.getenv("TRACECASE_AI_BASE_URL", "http://127.0.0.1:8000/v1"),
             "ai_api_key": "",
             "theme": "dark",
             "artifact_retention_mode": "all",

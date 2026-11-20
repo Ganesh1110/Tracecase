@@ -235,19 +235,20 @@ Configure the provider in **Settings → AI Intelligence Provider**:
 | `ollama` | Local Ollama server | `http://127.0.0.1:11434` | `llama3` |
 | `null` | Deterministic heuristics only | — | — |
 
-For an OpenAI-compatible endpoint, the base URL must include `/v1`, for example:
+For an OpenAI-compatible endpoint, the base URL must include `/v1`. Use the endpoint and model
+provided by your platform or infrastructure team:
 
 ```text
 Provider Type:  OpenAI / Compatible Endpoint (vLLM, LMStudio)
-Model:          gemma-4-12b-it
-Base URL:       https://chatbot.infospica.in/v1
-API Key:        leave blank if the server does not require one
+Model:          <your-model-name>
+Base URL:       https://<your-llm-host>/v1
+API Key:        <your-api-key, or blank if not required>
 ```
 
 Verify the endpoint:
 
 ```bash
-curl -s https://chatbot.infospica.in/v1/models
+curl -s https://<your-llm-host>/v1/models
 ```
 
 Privacy: heuristic analysis is local. When a hosted provider is enabled, test metadata such as
@@ -444,8 +445,8 @@ tracecase analyze ./recordings/example/testcase.json --ai
 # OpenAI-compatible endpoint
 tracecase analyze ./recordings/example/testcase.json --ai \
   --provider openai \
-  --base-url https://chatbot.infospica.in/v1 \
-  --model gemma-4-12b-it
+  --base-url https://<your-llm-host>/v1 \
+  --model <your-model-name>
 ```
 
 ### Corpus and integrations

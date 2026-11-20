@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -11,8 +12,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from tracecase.ai.models import Message
 
-DEFAULT_HOSTED_BASE_URL = "https://chatbot.infospica.in/v1"
-DEFAULT_HOSTED_MODEL = "gemma-4-12b-it"
+DEFAULT_AI_BASE_URL = os.getenv("TRACECASE_AI_BASE_URL", "http://127.0.0.1:8000/v1")
+DEFAULT_AI_MODEL = os.getenv("TRACECASE_AI_MODEL", "default")
 
 STRUCTURED_JSON_SYSTEM_PROMPT = (
     "You are a precise QA analysis engine. Respond with a single valid JSON object only. "
