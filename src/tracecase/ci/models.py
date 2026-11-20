@@ -61,5 +61,6 @@ class CIRunResult(BaseModel):
     executed_test_ids: list[str] = Field(default_factory=list)
     test_results: list[dict[str, Any]] = Field(default_factory=list)
     reports: dict[str, str] = Field(default_factory=dict)
+    drift_summary: dict[str, Any] | None = None
     error_category: Literal["quality_gate", "config", "infrastructure", "none"] = "none"
     error_detail: str | None = None

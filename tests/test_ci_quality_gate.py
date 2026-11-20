@@ -424,7 +424,7 @@ def test_ci_sarif_210_generation_and_schema():
 
     driver = sarif["runs"][0]["tool"]["driver"]
     assert driver["name"] == "Tracecase Continuous Quality Gate"
-    assert len(driver["rules"]) == 5
+    assert len(driver["rules"]) == 7
     assert any(r["id"] == "TRACECASE-INFRA-ERROR" for r in driver["rules"])
 
     results = sarif["runs"][0]["results"]
@@ -502,7 +502,7 @@ def test_ci_json_manifest_generation():
     )
 
     manifest = generate_ci_json_manifest(run_result=run_res, gate_result=gate_res)
-    assert manifest["schema_version"] == "1.0.0"
+    assert manifest["schema_version"] == "1.1.0"
     assert manifest["generator"] == "Tracecase CI Execution Engine & Quality Gate"
     assert manifest["run_id"] == "ci_run_json"
     assert manifest["exit_code"] == 0

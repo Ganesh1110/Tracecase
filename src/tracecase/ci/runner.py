@@ -2,7 +2,7 @@
 
 Provides the standalone CIRunner that connects Git analysis, code mapping,
 predictive risk scoring, intelligent regression selection, batch execution,
-quality gate policy enforcement, and multi-format reporting.
+baseline snapshot resolution, regression drift detection, and multi-format reporting.
 """
 
 from __future__ import annotations
@@ -17,7 +17,14 @@ import time
 from typing import Any
 import uuid
 
+from tracecase.ci.baseline.executor import BaselineExecutor
+from tracecase.ci.baseline.manager import BaselineManager
+from tracecase.ci.baseline.models import BaselineSnapshot
+from tracecase.ci.baseline.resolver import BaselineMatchStatus, BaselineResolutionResult, BaselineResolver
 from tracecase.ci.config import CIRunnerConfig
+from tracecase.ci.drift.analytics import DriftAnalytics
+from tracecase.ci.drift.comparator import RegressionDriftComparator
+from tracecase.ci.drift.models import DriftAnalysisResult
 from tracecase.ci.gate import QualityGateEvaluator
 from tracecase.ci.models import CIExitCode, CIRunResult, QualityGateResult, QualityGateRuleViolation
 from tracecase.ci.reporters.json import generate_ci_json_manifest
@@ -30,9 +37,9 @@ from tracecase.intelligence.git_analyzer import GitChangeAnalyzer
 from tracecase.intelligence.risk_scorer import PredictiveRiskScorer
 from tracecase.intelligence.selector import IntelligentRegressionSelector
 from tracecase.models import TestCase
-from tracecase.ui.service import find_testcase_files, resolve_testcase_file
 from tracecase.ui.db import get_execution_batch, init_studio_db
 from tracecase.ui.executor import ExecutionOrchestrator
+from tracecase.ui.service import find_testcase_files, resolve_testcase_file
 
 logger = logging.getLogger("tracecase.ci.runner")
 
@@ -49,6 +56,14 @@ class CIRunner:
         self.config = config
         self.db_path = db_path
         self._orchestrator = orchestrator
+        self.baseline_manager = BaselineManager(self.db_path)
+        self.baseline_resolver = BaselineResolver(self.baseline_manager)
+        self.baseline_executor = BaselineExecutor(
+            self.baseline_manager,
+            orchestrator=self._orchestrator,
+            db_path=self.db_path,
+        )
+        self.drift_analytics = DriftAnalytics(self.db_path)
 
     def _verify_git_env(self) -> None:
         """Validate repository and git references before running."""
@@ -128,6 +143,22 @@ class CIRunner:
         # 2. Git Diff Analysis
         analyzer = GitChangeAnalyzer(repo_path=self.config.repo_path)
         commit_hash, branch, _ = analyzer.get_repo_info()
+
+        # Resolve exact base commit SHA if base_ref provided
+        base_commit_sha: str | None = None
+        if self.config.base_ref:
+            try:
+                res_sha = subprocess.run(
+                    ["git", "rev-parse", self.config.base_ref],
+                    cwd=str(self.config.repo_path),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if res_sha.returncode == 0:
+                    base_commit_sha = res_sha.stdout.strip()
+            except Exception:
+                pass
 
         try:
             changeset = analyzer.analyze_repo(
@@ -241,7 +272,35 @@ class CIRunner:
                 if be not in test_ids_to_run:
                     test_ids_to_run.append(be)
 
-        # 7. Execute Tests via Orchestrator
+        # 7. Baseline Snapshot Resolution (Phase 8.3)
+        baseline_snap: BaselineSnapshot | None = None
+        if self.config.gate_policy.baseline_enabled:
+            resolution = self.baseline_resolver.resolve(
+                project_id=self.config.project_id,
+                base_ref=self.config.baseline_ref or self.config.base_ref,
+                base_commit=base_commit_sha,
+                browser=self.config.browser,
+                require_exact_commit=self.config.require_exact_baseline,
+            )
+            if resolution.is_valid:
+                baseline_snap = resolution.snapshot
+            elif self.config.auto_run_baseline and base_commit_sha:
+                try:
+                    logger.info("Executing baseline in isolated worktree for base commit %s", base_commit_sha)
+                    baseline_snap = await self.baseline_executor.execute_baseline_in_worktree(
+                        repo_path=self.config.repo_path,
+                        base_commit=base_commit_sha,
+                        project_id=self.config.project_id,
+                        branch=self.config.base_ref,
+                        browser=self.config.browser,
+                        concurrency=self.config.concurrency,
+                        retries=self.config.retries,
+                        testcase_ids=test_ids_to_run,
+                    )
+                except Exception as base_exc:
+                    logger.warning("Failed to auto-execute baseline in worktree: %s", base_exc)
+
+        # 8. Execute Tests via Orchestrator
         batch_id: str | None = None
         batch_record: dict[str, Any] | None = None
         execution_runs: list[dict[str, Any]] = []
@@ -290,16 +349,37 @@ class CIRunner:
                     except Exception:
                         pass
 
-        # 8. Evaluate Quality Gate
+        # 9. Regression Drift Analysis (Phase 8.3)
+        drift_result: DriftAnalysisResult | None = None
+        if self.config.gate_policy.baseline_enabled or baseline_snap:
+            tc_map = {tc.id: tc for tc in testcases}
+            drift_result = RegressionDriftComparator.compare_batch(
+                runs=execution_runs,
+                baseline=baseline_snap,
+                run_id=run_id,
+                project_id=self.config.project_id,
+                base_commit=base_commit_sha,
+                pr_commit=commit_hash,
+                browser=self.config.browser,
+                testcases_map=tc_map,
+            )
+            if drift_result and len(drift_result.items) > 0:
+                try:
+                    self.drift_analytics.save_drift_result(drift_result)
+                except Exception as exc:
+                    logger.warning("Failed to persist drift result: %s", exc)
+
+        # 10. Evaluate Quality Gate
         gate_res = evaluator.evaluate(
             selection=selection,
             report=prioritization_report,
             batch_record=batch_record,
             execution_runs=execution_runs,
             changeset=changeset,
+            drift_result=drift_result,
         )
 
-        # 9. Determine Exit Code
+        # 11. Determine Exit Code
         duration = time.monotonic() - start_mono
         has_run_errors = any(r.get("status") == "error" for r in execution_runs)
 
@@ -336,17 +416,19 @@ class CIRunner:
             selected_test_ids=selection.selected_test_ids,
             executed_test_ids=[r.get("testcase_id") for r in execution_runs if r.get("testcase_id")],
             test_results=execution_runs,
+            drift_summary=drift_result.model_dump() if drift_result else None,
             error_category=error_cat,
             error_detail=error_det,
         )
 
-        # 10. Generate and write reports
+        # 12. Generate and write reports
         self._write_reports(
             run_res=run_res,
             gate_res=gate_res,
             runs=execution_runs,
             selection=selection,
             report=prioritization_report,
+            drift_result=drift_result,
         )
 
         return run_res
@@ -358,6 +440,7 @@ class CIRunner:
         runs: list[dict[str, Any]],
         selection: Any = None,
         report: Any = None,
+        drift_result: DriftAnalysisResult | None = None,
     ) -> None:
         """Generate and serialize requested report artifacts."""
         reports: dict[str, str] = {}
@@ -379,6 +462,7 @@ class CIRunner:
             runs=runs,
             selection=selection,
             repo_path=self.config.repo_path,
+            drift_result=drift_result,
         )
         sarif_json = json.dumps(sarif_dict, indent=2)
         reports["sarif"] = sarif_json
@@ -393,6 +477,7 @@ class CIRunner:
             gate_result=gate_res,
             selection=selection,
             report=report,
+            drift_result=drift_result,
         )
         reports["markdown"] = md_text
         if self.config.markdown_path:
@@ -404,6 +489,7 @@ class CIRunner:
         json_dict = generate_ci_json_manifest(
             run_result=run_res,
             gate_result=gate_res,
+            drift_result=drift_result,
         )
         json_str = json.dumps(json_dict, indent=2)
         reports["json"] = json_str

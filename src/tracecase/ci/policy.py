@@ -16,6 +16,14 @@ class QualityGatePolicy(BaseModel):
     min_surface_coverage_pct: float = Field(default=70.0, ge=0.0, le=100.0)
     fail_on_execution_errors: bool = True
     fail_on_unmapped_changes: bool = False
+    # Baseline comparison & regression drift policies (Phase 8.3)
+    baseline_enabled: bool = False
+    require_valid_baseline: bool = False
+    max_new_failures: int = 0
+    max_new_flakiness_pct: float = Field(default=5.0, ge=0.0, le=100.0)
+    allow_pre_existing_failures: bool = True
+    block_on_unknown_baseline: bool = False
+    compare_same_browser: bool = True
 
 
 # Predefined named policy profiles
@@ -28,6 +36,13 @@ STRICT_POLICY = QualityGatePolicy(
     min_surface_coverage_pct=85.0,
     fail_on_execution_errors=True,
     fail_on_unmapped_changes=True,
+    baseline_enabled=True,
+    require_valid_baseline=True,
+    max_new_failures=0,
+    max_new_flakiness_pct=0.0,
+    allow_pre_existing_failures=False,
+    block_on_unknown_baseline=True,
+    compare_same_browser=True,
 )
 
 STANDARD_POLICY = QualityGatePolicy(
@@ -39,6 +54,13 @@ STANDARD_POLICY = QualityGatePolicy(
     min_surface_coverage_pct=70.0,
     fail_on_execution_errors=True,
     fail_on_unmapped_changes=False,
+    baseline_enabled=True,
+    require_valid_baseline=False,
+    max_new_failures=0,
+    max_new_flakiness_pct=5.0,
+    allow_pre_existing_failures=True,
+    block_on_unknown_baseline=False,
+    compare_same_browser=True,
 )
 
 LENIENT_POLICY = QualityGatePolicy(
@@ -50,6 +72,13 @@ LENIENT_POLICY = QualityGatePolicy(
     min_surface_coverage_pct=50.0,
     fail_on_execution_errors=True,
     fail_on_unmapped_changes=False,
+    baseline_enabled=True,
+    require_valid_baseline=False,
+    max_new_failures=1,
+    max_new_flakiness_pct=15.0,
+    allow_pre_existing_failures=True,
+    block_on_unknown_baseline=False,
+    compare_same_browser=True,
 )
 
 PERMISSIVE_POLICY = QualityGatePolicy(
@@ -61,6 +90,8 @@ PERMISSIVE_POLICY = QualityGatePolicy(
     min_surface_coverage_pct=0.0,
     fail_on_execution_errors=False,
     fail_on_unmapped_changes=False,
+    baseline_enabled=False,
+    allow_pre_existing_failures=True,
 )
 
 NAMED_POLICIES: dict[str, QualityGatePolicy] = {

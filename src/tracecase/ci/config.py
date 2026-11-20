@@ -26,6 +26,9 @@ class CIRunnerConfig(BaseModel):
     retries: int = Field(default=1, ge=0, le=3)
     headed: bool = False
     include_critical_exceptions: bool = False
+    baseline_ref: str | None = None
+    auto_run_baseline: bool = False
+    require_exact_baseline: bool = False
     gate_policy: QualityGatePolicy = Field(default_factory=QualityGatePolicy)
     junit_path: str | None = None
     sarif_path: str | None = None
@@ -69,6 +72,9 @@ class CIRunnerConfig(BaseModel):
             retries=int(ci_section.get("retries", 1)),
             headed=bool(ci_section.get("headed", False)),
             include_critical_exceptions=bool(ci_section.get("include_critical_exceptions", False)),
+            baseline_ref=ci_section.get("baseline_ref") or ci_section.get("baseline_branch"),
+            auto_run_baseline=bool(ci_section.get("auto_run_baseline", False)),
+            require_exact_baseline=bool(ci_section.get("require_exact_baseline", False)),
             gate_policy=final_policy,
             junit_path=reports_section.get("junit"),
             sarif_path=reports_section.get("sarif"),

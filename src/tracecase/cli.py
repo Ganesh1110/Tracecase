@@ -2121,6 +2121,18 @@ def ci_command(
         bool,
         typer.Option("--include-critical-exceptions", help="Force execution of critical tests exceeding time budget"),
     ] = False,
+    baseline_ref: Annotated[
+        str | None,
+        typer.Option("--baseline-ref", help="Explicit base branch/ref to resolve baseline snapshot from"),
+    ] = None,
+    auto_run_baseline: Annotated[
+        bool,
+        typer.Option("--auto-run-baseline", help="Auto-execute baseline in isolated worktree if snapshot not found"),
+    ] = False,
+    allow_preexisting: Annotated[
+        bool | None,
+        typer.Option("--allow-preexisting/--no-allow-preexisting", help="Allow pre-existing baseline failures"),
+    ] = None,
     junit: Annotated[
         Path | None,
         typer.Option("--junit", help="Path to write JUnit XML report"),
@@ -2196,6 +2208,12 @@ def ci_command(
         ci_config.markdown_path = str(report)
     if manifest:
         ci_config.json_path = str(manifest)
+    if baseline_ref:
+        ci_config.baseline_ref = baseline_ref
+    if auto_run_baseline:
+        ci_config.auto_run_baseline = auto_run_baseline
+    if allow_preexisting is not None:
+        ci_config.gate_policy.allow_pre_existing_failures = allow_preexisting
 
     if not json_out:
         print_banner()
@@ -2258,6 +2276,42 @@ def ci_command(
 
     console.print(table)
     console.print("[dim]ℹ Note: Surface file coverage measures changed files mapped to tests, not dynamic runtime branch coverage.[/dim]")
+
+    if result.drift_summary and result.drift_summary.get("baseline_found"):
+        d = result.drift_summary
+        drift_table = Table(title="Regression Drift & Attribution (Phase 8.3)", border_style="cyan")
+        drift_table.add_column("Classification", style="bold")
+        drift_table.add_column("Count")
+        drift_table.add_column("Attribution & Impact")
+
+        new_regs = d.get("new_regressions_count", 0)
+        drift_table.add_row(
+            "New Regressions",
+            str(new_regs),
+            "[red]❌ Introduced by this PR (blocking)[/red]" if new_regs > 0 else "[green]✓ None[/green]",
+        )
+        drift_table.add_row(
+            "Fixed Regressions",
+            str(d.get("fixed_regressions_count", 0)),
+            "[green]🎉 Fixed by this PR[/green]" if d.get("fixed_regressions_count", 0) > 0 else "—",
+        )
+        drift_table.add_row(
+            "Pre-Existing Failures",
+            str(d.get("pre_existing_failures_count", 0)),
+            "[yellow]⏳ Technical debt on base commit[/yellow]" if d.get("pre_existing_failures_count", 0) > 0 else "✓ None",
+        )
+        drift_table.add_row(
+            "Newly Flaky Tests",
+            str(d.get("newly_flaky_count", 0)),
+            "[yellow]⚡ Required retry on PR[/yellow]" if d.get("newly_flaky_count", 0) > 0 else "✓ None",
+        )
+        dur_delta = (d.get("duration_delta_ms") or 0.0) / 1000.0
+        drift_table.add_row(
+            "Duration Drift (Δ)",
+            f"{dur_delta:+.2f}s ({d.get('duration_drift_pct', 0.0):+.1f}%)",
+            "Execution duration vs baseline",
+        )
+        console.print(drift_table)
 
     if result.gate_result.violations:
         console.print("\n[bold red]Quality Gate Policy Violations:[/bold red]")

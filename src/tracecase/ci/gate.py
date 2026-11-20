@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from tracecase.ci.drift.models import DriftAnalysisResult, DriftClassification
 from tracecase.ci.models import (
     QualityGateResult,
     QualityGateRuleViolation,
@@ -29,8 +30,9 @@ class QualityGateEvaluator:
         batch_record: dict[str, Any] | None = None,
         execution_runs: list[dict[str, Any]] | None = None,
         changeset: GitChangeSet | None = None,
+        drift_result: DriftAnalysisResult | None = None,
     ) -> QualityGateResult:
-        """Evaluate all policy rules against the test execution and selection metrics."""
+        """Evaluate all policy rules against the test execution, selection, and regression drift metrics."""
         violations: list[QualityGateRuleViolation] = []
         policy = self.policy
 
@@ -55,6 +57,13 @@ class QualityGateEvaluator:
             for t in selection.tests:
                 risk_tier_map[t.testcase_id] = t.risk_tier.lower()
 
+        # Map pre-existing failures from drift result if baseline is active
+        pre_existing_set = set()
+        if drift_result and policy.baseline_enabled:
+            for it in drift_result.items:
+                if it.classification == DriftClassification.PRE_EXISTING_FAILURE:
+                    pre_existing_set.add(it.testcase_id)
+
         # Rule 1: Critical Breakage Check
         critical_failures: list[dict[str, Any]] = []
         if policy.fail_on_critical_breakage:
@@ -62,29 +71,36 @@ class QualityGateEvaluator:
                 tid = r.get("testcase_id", "")
                 tier = risk_tier_map.get(tid, "low")
                 if tier == "critical":
-                    critical_failures.append(r)
-                    violations.append(
-                        QualityGateRuleViolation(
-                            rule_name="critical_breakage",
-                            severity="critical",
-                            message=(
-                                f"Critical-risk test '{r.get('testcase_name') or tid}' ({tid}) "
-                                f"failed execution with status '{r.get('status')}': {r.get('error_message') or 'Test assertions failed.'}"
-                            ),
-                            actual_value=r.get("status"),
-                            threshold_value="passed",
+                    is_preexisting = tid in pre_existing_set and policy.allow_pre_existing_failures
+                    if not is_preexisting:
+                        critical_failures.append(r)
+                        violations.append(
+                            QualityGateRuleViolation(
+                                rule_name="critical_breakage",
+                                severity="critical",
+                                message=(
+                                    f"Critical-risk test '{r.get('testcase_name') or tid}' ({tid}) "
+                                    f"failed execution with status '{r.get('status')}': {r.get('error_message') or 'Test assertions failed.'}"
+                                ),
+                                actual_value=r.get("status"),
+                                threshold_value="passed",
+                            )
                         )
-                    )
 
         # Rule 2: Maximum Failure Rate
-        failure_rate = (len(failed_runs) / max(1, completed_count)) * 100.0 if completed_count > 0 else 0.0
+        # If baseline enabled and pre-existing failures are allowed, calculate failure rate on newly introduced failures
+        countable_failures = [r for r in failed_runs if r.get("testcase_id") not in pre_existing_set] if (
+            policy.baseline_enabled and policy.allow_pre_existing_failures
+        ) else failed_runs
+
+        failure_rate = (len(countable_failures) / max(1, completed_count)) * 100.0 if completed_count > 0 else 0.0
         if completed_count > 0 and failure_rate > policy.max_failure_rate_pct:
             violations.append(
                 QualityGateRuleViolation(
                     rule_name="max_failure_rate",
                     severity="high",
                     message=(
-                        f"Execution failure rate {failure_rate:.1f}% ({len(failed_runs)}/{completed_count} tests) "
+                        f"Execution failure rate {failure_rate:.1f}% ({len(countable_failures)}/{completed_count} tests) "
                         f"exceeds policy limit of {policy.max_failure_rate_pct:.1f}%."
                     ),
                     actual_value=round(failure_rate, 1),
@@ -108,19 +124,19 @@ class QualityGateEvaluator:
                 )
             )
 
-        # Rule 4: Execution / Infrastructure Errors
-        if policy.fail_on_execution_errors and error_runs:
-            for err_r in error_runs:
+        # Rule 4: Execution & Infrastructure Errors
+        if policy.fail_on_execution_errors and len(error_runs) > 0:
+            for r in error_runs:
                 violations.append(
                     QualityGateRuleViolation(
                         rule_name="execution_errors",
                         severity="critical",
                         message=(
-                            f"Infrastructure or runtime execution error in '{err_r.get('testcase_id')}': "
-                            f"{err_r.get('error_message') or 'Worker error'}"
+                            f"Runner or browser crashed executing '{r.get('testcase_name') or r.get('testcase_id')}': "
+                            f"{r.get('error_message') or 'Unknown execution fault'}"
                         ),
                         actual_value="error",
-                        threshold_value="none",
+                        threshold_value="passed",
                     )
                 )
 
@@ -183,6 +199,82 @@ class QualityGateEvaluator:
                     )
                 )
 
+        # Rule 8: Baseline Comparison & Regression Drift (Phase 8.3)
+        if policy.baseline_enabled:
+            # Check if baseline was required but missing
+            if policy.require_valid_baseline and (not drift_result or not drift_result.baseline_found):
+                violations.append(
+                    QualityGateRuleViolation(
+                        rule_name="missing_baseline",
+                        severity="critical",
+                        message=(
+                            "Policy requires verified baseline comparison, but no baseline snapshot "
+                            "was found for this base branch/commit."
+                        ),
+                    )
+                )
+
+            if drift_result:
+                # 8a: New Regressions Check
+                if drift_result.new_regressions_count > policy.max_new_failures:
+                    violations.append(
+                        QualityGateRuleViolation(
+                            rule_name="new_regressions",
+                            severity="critical",
+                            message=(
+                                f"{drift_result.new_regressions_count} new regression failure(s) introduced by this PR "
+                                f"(threshold: {policy.max_new_failures} allowed)."
+                            ),
+                            actual_value=drift_result.new_regressions_count,
+                            threshold_value=policy.max_new_failures,
+                        )
+                    )
+
+                # 8b: Pre-Existing Failures Check (when not allowed)
+                if not policy.allow_pre_existing_failures and drift_result.pre_existing_failures_count > 0:
+                    violations.append(
+                        QualityGateRuleViolation(
+                            rule_name="pre_existing_failures",
+                            severity="high",
+                            message=(
+                                f"{drift_result.pre_existing_failures_count} pre-existing failure(s) detected. "
+                                "Policy requires all tests to pass, disallowing pre-existing failures."
+                            ),
+                            actual_value=drift_result.pre_existing_failures_count,
+                            threshold_value=0,
+                        )
+                    )
+
+                # 8c: Newly Introduced Flakiness Check
+                if drift_result.newly_flaky_pct > policy.max_new_flakiness_pct:
+                    violations.append(
+                        QualityGateRuleViolation(
+                            rule_name="newly_flaky_rate",
+                            severity="high",
+                            message=(
+                                f"Newly introduced flakiness rate {drift_result.newly_flaky_pct}% "
+                                f"exceeds allowed limit of {policy.max_new_flakiness_pct}%."
+                            ),
+                            actual_value=drift_result.newly_flaky_pct,
+                            threshold_value=policy.max_new_flakiness_pct,
+                        )
+                    )
+
+                # 8d: Unknown Baseline Failures Check
+                if policy.block_on_unknown_baseline and drift_result.unknown_baseline_failures_count > 0:
+                    violations.append(
+                        QualityGateRuleViolation(
+                            rule_name="unknown_baseline_failures",
+                            severity="high",
+                            message=(
+                                f"{drift_result.unknown_baseline_failures_count} test(s) failed without baseline verification. "
+                                "Policy blocks unverified test failures."
+                            ),
+                            actual_value=drift_result.unknown_baseline_failures_count,
+                            threshold_value=0,
+                        )
+                    )
+
         # Determine Gate Status
         if not violations:
             status: QualityGateStatus = "PASSED"
@@ -221,6 +313,14 @@ class QualityGateEvaluator:
             "flakiness_rate_pct": round(flakiness_rate, 1),
             "surface_coverage_pct": round(surface_coverage, 1),
             "budget_exceptions_count": budget_exceptions_count,
+            # Drift metrics (Phase 8.3)
+            "baseline_enabled": policy.baseline_enabled,
+            "baseline_found": drift_result.baseline_found if drift_result else False,
+            "new_regressions_count": drift_result.new_regressions_count if drift_result else 0,
+            "pre_existing_failures_count": drift_result.pre_existing_failures_count if drift_result else 0,
+            "fixed_regressions_count": drift_result.fixed_regressions_count if drift_result else 0,
+            "newly_flaky_count": drift_result.newly_flaky_count if drift_result else 0,
+            "duration_delta_ms": drift_result.duration_delta_ms if drift_result else 0.0,
         }
 
         return QualityGateResult(

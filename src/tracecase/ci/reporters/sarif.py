@@ -4,13 +4,14 @@ Compliant with GitHub Code Scanning SARIF ingestion specifications:
 - OASIS SARIF 2.1.0 JSON schema
 - Unique rule IDs with markdown-formatted help descriptions
 - %SRCROOT% base URI identifier and normalized relative file paths
-- Strict distinction between application test failures and infrastructure errors
+- Strict distinction between application test failures, new regressions, and pre-existing failures
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from tracecase.ci.drift.models import DriftAnalysisResult, DriftClassification
 from tracecase.ci.models import QualityGateResult
 from tracecase.intelligence.models import RegressionSelectionResult
 
@@ -20,7 +21,7 @@ def normalize_repo_relative_path(file_path: str, repo_path: str = ".") -> str:
     clean = file_path.replace("\\", "/").strip()
     if clean.startswith("file://"):
         clean = clean[len("file://"):]
-    
+
     p = Path(clean)
     repo_p = Path(repo_path).resolve()
     try:
@@ -29,7 +30,6 @@ def normalize_repo_relative_path(file_path: str, repo_path: str = ".") -> str:
     except Exception:
         pass
 
-    # Strip leading ./ or /
     clean = clean.lstrip("./").lstrip("/")
     return clean or "unknown"
 
@@ -39,9 +39,34 @@ def generate_sarif_report(
     runs: list[dict[str, Any]],
     selection: RegressionSelectionResult | None = None,
     repo_path: str = ".",
+    drift_result: DriftAnalysisResult | None = None,
 ) -> dict[str, Any]:
     """Generate SARIF 2.1.0 compliant JSON report for GitHub Code Scanning / GitLab SAST widgets."""
     rules = [
+        {
+            "id": "TRACECASE-NEW-REGRESSION",
+            "name": "NewRegressionIntroduced",
+            "shortDescription": {"text": "A new regression was introduced by this change (passed on base, failed on PR)."},
+            "fullDescription": {"text": "Test was passing reliably on the base commit but failed on this pull request."},
+            "help": {
+                "text": "This failure was introduced by the current code modifications. Inspect recent diffs and step logs.",
+                "markdown": "### New Regression Introduced\nThis test was **passing on the base branch** and broke as a direct result of changes in this PR.\n\n**Action:** Inspect step failure logs, locators, and recent component changes.",
+            },
+            "defaultConfiguration": {"level": "error"},
+            "properties": {"tags": ["quality-gate", "regression", "new-failure"]},
+        },
+        {
+            "id": "TRACECASE-PREEXISTING-FAIL",
+            "name": "PreExistingRegressionFailure",
+            "shortDescription": {"text": "Pre-existing failure: Test was already failing on the base branch."},
+            "fullDescription": {"text": "Test failed on this PR, but was already failing on the base commit prior to these changes."},
+            "help": {
+                "text": "Technical debt: Test was already failing on the base branch.",
+                "markdown": "### Pre-Existing Test Failure\nThis failure was **not introduced by this PR**. The test was already failing on the base branch.\n\n**Action:** Address pre-existing technical debt or coordinate with team.",
+            },
+            "defaultConfiguration": {"level": "warning"},
+            "properties": {"tags": ["quality-gate", "technical-debt"]},
+        },
         {
             "id": "TRACECASE-CRITICAL-FAIL",
             "name": "CriticalRegressionFailure",
@@ -114,6 +139,8 @@ def generate_sarif_report(
             affected_file_map[t.testcase_id] = t.affected_files
             risk_tier_map[t.testcase_id] = t.risk_tier.lower()
 
+    drift_item_map = {item.testcase_id: item for item in (drift_result.items if drift_result else [])}
+
     for r in runs:
         tid = r.get("testcase_id", "")
         status = r.get("status")
@@ -121,9 +148,9 @@ def generate_sarif_report(
         raw_file = aff_files[0] if aff_files else "tests"
         primary_file = normalize_repo_relative_path(raw_file, repo_path=repo_path)
         tier = risk_tier_map.get(tid, "low")
+        drift_item = drift_item_map.get(tid)
 
         if status == "error":
-            # Infrastructure / browser crash error
             results.append({
                 "ruleId": "TRACECASE-INFRA-ERROR",
                 "level": "error",
@@ -147,18 +174,23 @@ def generate_sarif_report(
             })
 
         elif status == "failed":
-            # Application test failure
-            rule_id = "TRACECASE-CRITICAL-FAIL" if tier == "critical" else "TRACECASE-TEST-FAIL"
-            level = "error" if tier == "critical" else "warning"
+            if drift_item and drift_item.classification == DriftClassification.NEW_REGRESSION:
+                rule_id = "TRACECASE-NEW-REGRESSION"
+                level = "error"
+                msg = f"New regression introduced by PR: '{r.get('testcase_name') or tid}' passed on base but failed on PR: {r.get('error_message') or 'Step failure.'}"
+            elif drift_item and drift_item.classification == DriftClassification.PRE_EXISTING_FAILURE:
+                rule_id = "TRACECASE-PREEXISTING-FAIL"
+                level = "warning"
+                msg = f"Pre-existing failure: '{r.get('testcase_name') or tid}' was already failing on base commit: {r.get('error_message') or 'Step failure.'}"
+            else:
+                rule_id = "TRACECASE-CRITICAL-FAIL" if tier == "critical" else "TRACECASE-TEST-FAIL"
+                level = "error" if tier == "critical" else "warning"
+                msg = f"Regression failure in test '{r.get('testcase_name') or tid}' ({tid}) targeting affected file '{primary_file}': {r.get('error_message') or 'Step failure.'}"
+
             results.append({
                 "ruleId": rule_id,
                 "level": level,
-                "message": {
-                    "text": (
-                        f"Regression failure in test '{r.get('testcase_name') or tid}' ({tid}) "
-                        f"targeting affected file '{primary_file}': {r.get('error_message') or 'Step failure.'}"
-                    )
-                },
+                "message": {"text": msg},
                 "locations": [
                     {
                         "physicalLocation": {
