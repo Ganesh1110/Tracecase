@@ -19,6 +19,7 @@ The generated reports are readable by QA engineers, developers, and AI agents, a
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Comprehensive User Guide](docs/USER_GUIDE.md)
+- [QA Demo Guide](docs/DEMO_GUIDE.md)
 - [How it works](#how-it-works)
 - [Output](#output)
 - [CLI reference](#cli-reference)
