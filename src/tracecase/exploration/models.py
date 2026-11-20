@@ -183,6 +183,8 @@ class SynthesizedAssertion(BaseModel):
     requires_human_input: bool = False
     evidence_provenance: dict[str, Any] = Field(default_factory=dict)
     review_prompt: str | None = None
+    assertion_confidence: float = 1.0
+    validation_outcome: Literal["passed", "failed", "untested"] = "untested"
 
 
 class SynthesizedStep(BaseModel):
@@ -198,10 +200,16 @@ class SynthesizedStep(BaseModel):
     source_node_id: str | None = None
     screenshot_path: str | None = None
     assertions: list[SynthesizedAssertion] = Field(default_factory=list)
+    target_status: Literal["resolved", "unresolved", "ambiguous"] = "resolved"
+    selector_confidence: float = 1.0
+    intent_id: str | None = None
+    criterion_id: str | None = None
 
 
 class TestJourneyDraft(BaseModel):
     """Test journey synthesized from navigation graph, pending human review and approval."""
+
+    __test__ = False
 
     id: str
     exploration_id: str
@@ -218,3 +226,7 @@ class TestJourneyDraft(BaseModel):
     requires_human_input: bool = False
     created_at: datetime = Field(default_factory=datetime.now)
     reviewed_at: datetime | None = None
+    requirement_id: str | None = None
+    validation_status: Literal["verified", "partially_verified", "failed", "blocked", "not_run"] = "not_run"
+    validation_details: dict[str, Any] = Field(default_factory=dict)
+    version: int = 1
