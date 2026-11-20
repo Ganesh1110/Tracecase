@@ -922,6 +922,42 @@ async def run_replay(req: ReplayRequest) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Multi-Engine Capabilities (Phase 9.1.4)
+# ---------------------------------------------------------------------------
+
+@router.get("/engines/capabilities")
+async def get_engine_capabilities() -> dict[str, Any]:
+    """
+    Return system-level capabilities and verified status for all cataloged automation engines.
+    
+    Exposes explicit capability statuses:
+    - SUPPORTED: Operational on current host
+    - UNSUPPORTED: Architecturally unsupported by engine or platform
+    - AVAILABLE_BUT_NOT_INSTALLED: Missing binary/driver on host
+    - REQUIRES_EXTERNAL_INFRASTRUCTURE: Needs external setup (macOS/Xcode, Android SDK)
+    - NOT_YET_IMPLEMENTED: Planned for future expansion phases
+    """
+    from tracecase.engines.registry import get_engine_registry
+
+    registry = get_engine_registry()
+    host_caps = await registry.get_host_capabilities()
+    return host_caps.model_dump(mode="json")
+
+
+@router.get("/engines/{engine_id}")
+async def get_engine_profile_endpoint(engine_id: str) -> dict[str, Any]:
+    """Retrieve capability profile for a single engine."""
+    from tracecase.engines.registry import get_engine_registry
+
+    registry = get_engine_registry()
+    try:
+        profile = await registry.get_engine_profile(engine_id)
+        return profile.model_dump(mode="json")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
 # Browser Recording
 # ---------------------------------------------------------------------------
 
