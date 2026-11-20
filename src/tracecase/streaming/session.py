@@ -55,6 +55,12 @@ class ManagedChromiumSession:
     def screencast(self) -> CDPScreencastManager | None:
         return self._screencast
 
+    @property
+    def latest_frame(self) -> Any:
+        if self._screencast:
+            return self._screencast.latest_frame
+        return None
+
     def add_frame_listener(self, callback: FrameCallback) -> None:
         """Register a callback to receive live screencast frames."""
         if callback not in self._listeners:

@@ -3258,6 +3258,8 @@ async def record_stream_websocket(
                 payload=init_info.model_dump(mode="json"),
             ).model_dump_json()
         )
+        if session.latest_frame:
+            await frame_sender(session.latest_frame)
     except Exception:
         pass
 

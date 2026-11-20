@@ -47,6 +47,7 @@ class CDPScreencastManager:
         self._frame_index = 0
         self._total_bytes = 0
         self._last_frame_at: datetime | None = None
+        self._latest_frame: ScreencastFrame | None = None
         self._listeners: list[FrameCallback] = []
         self._lock = asyncio.Lock()
 
@@ -65,6 +66,10 @@ class CDPScreencastManager:
     @property
     def last_frame_at(self) -> datetime | None:
         return self._last_frame_at
+
+    @property
+    def latest_frame(self) -> ScreencastFrame | None:
+        return self._latest_frame
 
     def add_listener(self, callback: FrameCallback) -> None:
         """Register an async callback to receive new screencast frames."""
@@ -141,6 +146,7 @@ class CDPScreencastManager:
             timestamp=now,
             byte_size=byte_size,
         )
+        self._latest_frame = frame
 
         # Broadcast to listeners safely
         for listener in list(self._listeners):
