@@ -1,0 +1,74 @@
+# Tracecase Continuous Quality Gate — GitLab CI Reusable Template
+#
+# Include this template in your .gitlab-ci.yml to integrate predictive
+# regression testing and continuous quality gates into your GitLab pipelines.
+#
+# Usage:
+#   include:
+#     - local: '.gitlab/ci/tracecase.gitlab-ci.yml'
+#
+#   tracecase-gate:
+#     extends: .tracecase-quality-gate
+#     variables:
+#       TRACETEST_GATE_POLICY: "standard"
+#       TRACETEST_BUDGET: "180s"
+
+.tracecase-quality-gate:
+  stage: test
+  image: python:3.13-slim
+  variables:
+    TRACETEST_BASE_REF: "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    TRACETEST_TARGET_REF: "HEAD"
+    TRACETEST_GATE_POLICY: "standard"
+    TRACETEST_BUDGET: "180s"
+    TRACETEST_CONCURRENCY: "2"
+    TRACETEST_BROWSER: "chromium"
+    TRACETEST_RETRIES: "1"
+    TRACETEST_PROJECT_ID: "default_project"
+    REPORTS_DIR: "tracecase-reports"
+
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends git
+    - python -m pip install --upgrade pip
+    - pip install tracecase playwright
+    - playwright install --with-deps chromium
+
+  script:
+    - mkdir -p "$REPORTS_DIR"
+    - |
+      BASE_ARG=""
+      if [ -n "$TRACETEST_BASE_REF" ]; then
+        BASE_ARG="--base origin/$TRACETEST_BASE_REF"
+      elif [ -n "$CI_DEFAULT_BRANCH" ]; then
+        BASE_ARG="--base origin/$CI_DEFAULT_BRANCH"
+      fi
+
+      tracecase ci \
+        $BASE_ARG \
+        --target "$TRACETEST_TARGET_REF" \
+        --gate "$TRACETEST_GATE_POLICY" \
+        --budget "$TRACETEST_BUDGET" \
+        --concurrency "$TRACETEST_CONCURRENCY" \
+        --browser "$TRACETEST_BROWSER" \
+        --retries "$TRACETEST_RETRIES" \
+        --project "$TRACETEST_PROJECT_ID" \
+        --junit "$REPORTS_DIR/junit.xml" \
+        --sarif "$REPORTS_DIR/sarif.json" \
+        --report "$REPORTS_DIR/summary.md" \
+        --manifest "$REPORTS_DIR/manifest.json"
+
+  artifacts:
+    when: always
+    expire_in: 14 days
+    paths:
+      - "$REPORTS_DIR/junit.xml"
+      - "$REPORTS_DIR/sarif.json"
+      - "$REPORTS_DIR/summary.md"
+      - "$REPORTS_DIR/manifest.json"
+    reports:
+      junit: "$REPORTS_DIR/junit.xml"
+      sast: "$REPORTS_DIR/sarif.json"
+
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

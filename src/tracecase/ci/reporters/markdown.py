@@ -33,16 +33,28 @@ def generate_ci_markdown_report(
 
     # Summary Table
     m = gate_result.metrics
+    failed_cnt = m.get("failed_count", 0)
+    error_cnt = m.get("error_count", 0)
+    critical_cnt = m.get("critical_failures_count", 0)
+    flaky_cnt = m.get("flaky_count", 0)
+    surface_pct = m.get("surface_coverage_pct", 0.0)
+    budget_exc_cnt = m.get("budget_exceptions_count", 0)
+
     lines.append("## Executive Summary")
     lines.append("")
     lines.append("| Metric | Result | Target / Threshold | Status |")
     lines.append("| :--- | :--- | :--- | :---: |")
     lines.append(f"| **Tests Executed** | `{m.get('completed_runs', 0)} / {run_result.total_considered}` | Bounded Worker Pool | ℹ |")
-    lines.append(f"| **Test Failures** | `{m.get('failed_count', 0)}` ({m.get('failure_rate_pct', 0.0)}%) | `0.0%` max | {'✓' if m.get('failed_count', 0) == 0 else '❌'} |")
-    lines.append(f"| **Critical Breakages** | `{m.get('critical_failures_count', 0)}` | `0` allowed | {'✓' if m.get('critical_failures_count', 0) == 0 else '❌'} |")
-    lines.append(f"| **Flaky Tests** | `{m.get('flaky_count', 0)}` ({m.get('flakiness_rate_pct', 0.0)}%) | Allowed retry recoveries | {'✓' if m.get('flaky_count', 0) == 0 else '⚡'} |")
-    lines.append(f"| **Surface Coverage** | `{m.get('surface_coverage_pct', 0.0)}%` | Modified code surface | {'✓' if m.get('surface_coverage_pct', 0.0) >= 70.0 else '⚠'} |")
-    lines.append(f"| **Budget Exceptions** | `{m.get('budget_exceptions_count', 0)}` | Skipped critical tests | {'✓' if m.get('budget_exceptions_count', 0) == 0 else '⚠️'} |")
+    lines.append(f"| **Application Failures** | `{failed_cnt}` ({m.get('failure_rate_pct', 0.0)}%) | `0.0%` max | {'✓' if failed_cnt == 0 else '❌'} |")
+    if error_cnt > 0:
+        lines.append(f"| **Infrastructure Errors** | `{error_cnt}` | `0` allowed (browser/runner crashes) | 💥 |")
+    lines.append(f"| **Critical Breakages** | `{critical_cnt}` | `0` allowed (modified routes/selectors) | {'✓' if critical_cnt == 0 else '❌'} |")
+    lines.append(f"| **Flaky Tests** | `{flaky_cnt}` ({m.get('flakiness_rate_pct', 0.0)}%) | Retry recoveries (not counted as failure) | {'✓' if flaky_cnt == 0 else '⚡'} |")
+    lines.append(f"| **Surface File Coverage** | `{surface_pct}%` | Static file mapping threshold | {'✓' if surface_pct >= 70.0 else '⚠'} |")
+    lines.append(f"| **Budget Exceptions** | `{budget_exc_cnt}` | Skipped critical tests | {'✓' if budget_exc_cnt == 0 else '⚠️'} |")
+    lines.append("")
+
+    lines.append("> ℹ️ **Note on Surface Coverage:** Surface coverage measures the percentage of changed application files that have at least one mapped regression test in Tracecase. It is a static test-to-code mapping metric, distinct from dynamic line or branch behavioral coverage.")
     lines.append("")
 
     # Gate Violations Callout
@@ -50,33 +62,34 @@ def generate_ci_markdown_report(
         lines.append("### ⚠️ Quality Gate Violations")
         lines.append("")
         for v in gate_result.violations:
-            sev_icon = "🔴" if v.severity in ("critical", "high") else "🟡"
-            lines.append(f"- {sev_icon} **[{v.rule_name.upper()}]:** {v.message}")
+            sev_badge = "🔴" if v.severity == "critical" else "🟠" if v.severity == "high" else "🟡"
+            lines.append(f"- {sev_badge} **[{v.severity.upper()}] {v.rule_name}**: {v.message}")
         lines.append("")
 
-    # Executed Test Details
-    if run_result.test_results:
-        lines.append("## Executed Regression Test Results")
+    # Test Results Breakdown
+    runs = run_result.test_results
+    if runs:
+        lines.append("## Test Results Breakdown")
         lines.append("")
-        lines.append("| Test Case | Risk Tier | Outcome | Duration | Attempts | Error / Details |")
-        lines.append("| :--- | :---: | :---: | :---: | :---: | :--- |")
-        for tr in run_result.test_results:
-            st = tr.get("status", "unknown").upper()
-            st_badge = (
-                f"`PASSED`" if st == "PASSED" else
-                f"**`FAILED`**" if st == "FAILED" else
-                f"`FLAKY`" if st == "FLAKY" else
-                f"`{st}`"
+        lines.append("| Test Case | Status | Duration | Retries | Message |")
+        lines.append("| :--- | :---: | :---: | :---: | :--- |")
+        for r in runs:
+            st = r.get("status", "unknown")
+            st_icon = (
+                "✅ Pass" if st == "passed" else
+                "❌ Fail" if st == "failed" else
+                "⚡ Flaky" if st == "flaky" else
+                "💥 Error" if st == "error" else
+                "⚪ Skipped"
             )
-            tier = tr.get("risk_tier", "LOW").upper()
-            dur = f"{float(tr.get('duration_ms') or 0.0) / 1000.0:.1f}s"
-            att = tr.get("attempt_count") or 1
-            err = tr.get("error_message") or "-"
-            if len(err) > 80:
-                err = err[:77] + "..."
-            lines.append(f"| `{tr.get('testcase_name') or tr.get('testcase_id')}` | {tier} | {st_badge} | {dur} | {att} | {err} |")
+            t_name = r.get("testcase_name") or r.get("testcase_id")
+            dur = f"{float(r.get('duration_ms') or 0) / 1000.0:.2f}s"
+            retries = len(r.get("retry_history") or [])
+            err_msg = (r.get("error_message") or "—").replace("\n", " ")[:80]
+            lines.append(f"| `{t_name}` | {st_icon} | `{dur}` | `{retries}` | {err_msg} |")
         lines.append("")
 
+    # Footer
     lines.append("---")
     lines.append("_Generated by Tracecase Continuous Quality Gate. Standalone, auditable, evidence-backed._")
     lines.append("")

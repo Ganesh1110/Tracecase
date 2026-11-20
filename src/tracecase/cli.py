@@ -2246,8 +2246,8 @@ def ci_command(
         "[yellow]⚡[/yellow]" if m.get("flaky_count", 0) > 0 else "[green]✓[/green]",
     )
     table.add_row(
-        "Surface Coverage",
-        f"{m.get('surface_coverage_pct', 0.0)}%",
+        "Surface File Coverage",
+        f"{m.get('surface_coverage_pct', 0.0)}% (file mapping)",
         "[green]✓[/green]" if m.get("surface_coverage_pct", 0.0) >= 70.0 else "[yellow]⚠[/yellow]",
     )
     table.add_row(
@@ -2257,6 +2257,7 @@ def ci_command(
     )
 
     console.print(table)
+    console.print("[dim]ℹ Note: Surface file coverage measures changed files mapped to tests, not dynamic runtime branch coverage.[/dim]")
 
     if result.gate_result.violations:
         console.print("\n[bold red]Quality Gate Policy Violations:[/bold red]")

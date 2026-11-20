@@ -1,0 +1,48 @@
+name: "Tracecase Quality Gate"
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+
+concurrency:
+  group: tracecase-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    name: "Continuous Quality Gate"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install Tracecase & Playwright
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          playwright install --with-deps chromium
+
+      - name: Run Tracecase Quality Gate
+        uses: ./.github/actions/tracecase-gate
+        with:
+          policy: "standard"
+          budget: "180s"
+          concurrency: "2"
+          browser: "chromium"
+          retries: "1"
+          upload-artifacts: "true"

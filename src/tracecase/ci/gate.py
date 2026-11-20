@@ -157,8 +157,9 @@ class QualityGateEvaluator:
                     rule_name="min_surface_coverage",
                     severity="medium",
                     message=(
-                        f"Functional surface coverage {surface_coverage:.1f}% is below required "
-                        f"{policy.min_surface_coverage_pct:.1f}% ({report.covered_files_count if report else 0}/{total_impacted_files} changed files covered)."
+                        f"Surface file mapping coverage {surface_coverage:.1f}% is below required "
+                        f"{policy.min_surface_coverage_pct:.1f}% ({report.covered_files_count if report else 0}/{total_impacted_files} changed files mapped to tests). "
+                        "Note: surface coverage is a static file-mapping metric, not dynamic runtime branch coverage."
                     ),
                     actual_value=round(surface_coverage, 1),
                     threshold_value=policy.min_surface_coverage_pct,

@@ -267,6 +267,19 @@ class CIRunner:
 
                 batch_record = get_execution_batch(batch_id, db_path=self.db_path)
                 execution_runs = list(batch_record.get("runs") or []) if batch_record else []
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                logger.warning("CI execution cancelled or interrupted. Cancelling batch %s...", batch_id)
+                if batch_id:
+                    try:
+                        await orchestrator.cancel_batch(batch_id)
+                    except Exception as cancel_exc:
+                        logger.debug("Batch cancel exception: %s", cancel_exc)
+                if shutdown_browser:
+                    try:
+                        await orchestrator.browser_pool.shutdown()
+                    except Exception:
+                        pass
+                raise
             except Exception as exc:
                 logger.exception("Batch execution encountered infrastructure error: %s", exc)
                 infra_error_msg = str(exc)

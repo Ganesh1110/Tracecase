@@ -424,7 +424,8 @@ def test_ci_sarif_210_generation_and_schema():
 
     driver = sarif["runs"][0]["tool"]["driver"]
     assert driver["name"] == "Tracecase Continuous Quality Gate"
-    assert len(driver["rules"]) == 4
+    assert len(driver["rules"]) == 5
+    assert any(r["id"] == "TRACECASE-INFRA-ERROR" for r in driver["rules"])
 
     results = sarif["runs"][0]["results"]
     assert len(results) >= 2  # 1 critical test fail + 1 budget exception
@@ -433,6 +434,7 @@ def test_ci_sarif_210_generation_and_schema():
     assert crit_res["level"] == "error"
     loc = crit_res["locations"][0]["physicalLocation"]
     assert loc["artifactLocation"]["uri"] == "src/components/Checkout.tsx"
+    assert loc["artifactLocation"]["uriBaseId"] == "%SRCROOT%"
 
 
 def test_ci_markdown_report_formatting():
@@ -576,3 +578,71 @@ def test_cli_tracecase_ci_standalone(temp_git_repo: Path):
     parsed = json.loads(res_json.output)
     assert parsed["exit_code"] == 0
     assert parsed["gate_result"]["passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_ci_cancellation_and_process_cleanup(temp_git_repo: Path, mock_testcase: TestCase):
+    """Scenario 14: Job cancellation cleanly cancels active batch and shuts down browser pool."""
+    (temp_git_repo / "src" / "index.html").write_text("<button id='pay'>Pay</button>", encoding="utf-8")
+
+    config = CIRunnerConfig(
+        repo_path=str(temp_git_repo),
+        project_id="test_proj",
+        gate_policy=STANDARD_POLICY,
+    )
+
+    mock_batch = {"id": "batch_cancel_1"}
+    cancelled_future = asyncio.Future()
+    cancelled_future.set_exception(asyncio.CancelledError())
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.start_batch_execution = AsyncMock(return_value=mock_batch)
+    mock_orchestrator.active_tasks = {mock_batch["id"]: cancelled_future}
+    mock_orchestrator.cancel_batch = AsyncMock(return_value=True)
+    mock_orchestrator.browser_pool = MagicMock()
+    mock_orchestrator.browser_pool.shutdown = AsyncMock()
+
+    with patch("tracecase.ci.runner.find_testcase_files", return_value=[Path("dummy.json")]), \
+         patch("tracecase.ci.runner.resolve_testcase_file", return_value=(Path("dummy.json"), mock_testcase)):
+
+        runner = CIRunner(config=config, orchestrator=mock_orchestrator)
+        with pytest.raises(asyncio.CancelledError):
+            await runner.run()
+
+        # Verify batch cancellation and browser pool shutdown were called
+        mock_orchestrator.cancel_batch.assert_awaited_once_with("batch_cancel_1")
+
+
+def test_ci_surface_coverage_distinction_and_labeling():
+    """Scenario 15: Surface coverage is explicitly distinguished from behavioral dynamic coverage."""
+    evaluator = QualityGateEvaluator(policy=STRICT_POLICY)  # min_surface_coverage_pct = 85.0
+
+    changeset = GitChangeSet(
+        repo_path=".",
+        files=[
+            ChangedFile(path="src/App.tsx", status="modified", additions=5, deletions=2),
+            ChangedFile(path="src/Nav.tsx", status="modified", additions=10, deletions=1),
+        ],
+    )
+    report = PrioritizationReport(
+        selection_id="sel_cov",
+        project_id="p",
+        strategy="time_budget",
+        total_tests_selected=1,
+        total_estimated_duration_s=5.0,
+        average_selection_confidence=1.0,
+        risk_tier_distribution={},
+        total_impacted_files_count=2,
+        covered_files_count=1,
+        uncovered_files_count=1,
+        uncovered_files=["src/Nav.tsx"],
+        functional_surface_coverage_pct=50.0,
+        disclaimer="",
+    )
+
+    res = evaluator.evaluate(changeset=changeset, report=report, execution_runs=[])
+    assert res.passed is False
+    viol = [v for v in res.violations if v.rule_name == "min_surface_coverage"][0]
+    assert "Surface file mapping coverage" in viol.message
+    assert "static file-mapping metric" in viol.message
+

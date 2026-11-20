@@ -1,0 +1,168 @@
+name: "Tracecase Continuous Quality Gate"
+description: "Predictive regression testing and continuous quality gate for GitHub pull requests and commits."
+author: "Tracecase Team"
+branding:
+  icon: "check-circle"
+  color: "blue"
+
+inputs:
+  base-ref:
+    description: "Base git ref to compare against (e.g. origin/main, HEAD~1). Defaults to github.base_ref or origin/main."
+    required: false
+    default: ""
+  target-ref:
+    description: "Target git ref (defaults to HEAD)."
+    required: false
+    default: "HEAD"
+  policy:
+    description: "Named quality gate policy profile: strict, standard, lenient, or permissive."
+    required: false
+    default: "standard"
+  budget:
+    description: "Execution time budget constraint (e.g. 180s, 3m)."
+    required: false
+    default: "180s"
+  concurrency:
+    description: "Worker pool concurrency ceiling (1-16)."
+    required: false
+    default: "2"
+  browser:
+    description: "Browser engine: chromium, firefox, or webkit."
+    required: false
+    default: "chromium"
+  retries:
+    description: "Retries per failed test case before flagging as flaky or failure (0-3)."
+    required: false
+    default: "1"
+  include-critical-exceptions:
+    description: "Force execution of critical tests that exceed time budget."
+    required: false
+    default: "false"
+  config:
+    description: "Path to optional YAML configuration file (e.g. .tracecase.ci.yaml)."
+    required: false
+    default: ""
+  junit-path:
+    description: "Path to output JUnit XML test report."
+    required: false
+    default: "tracecase-reports/junit.xml"
+  sarif-path:
+    description: "Path to output SARIF 2.1.0 report for GitHub Code Scanning."
+    required: false
+    default: "tracecase-reports/sarif.json"
+  summary-path:
+    description: "Path to output Markdown report summary."
+    required: false
+    default: "tracecase-reports/summary.md"
+  manifest-path:
+    description: "Path to output JSON run manifest."
+    required: false
+    default: "tracecase-reports/manifest.json"
+  project-id:
+    description: "Tracecase project identifier."
+    required: false
+    default: "default_project"
+  upload-artifacts:
+    description: "Whether to upload report artifacts to GitHub workflow run."
+    required: false
+    default: "true"
+
+outputs:
+  exit-code:
+    description: "Exit code of the Tracecase CI quality gate (0=Passed, 1=Gate Failed, 2=Config Error, 3=Infra Error)."
+    value: ${{ steps.run-gate.outputs.exit_code }}
+  gate-status:
+    description: "Verdict of the quality gate evaluation: PASSED, FAILED, or WARNING."
+    value: ${{ steps.run-gate.outputs.gate_status }}
+  tests-selected:
+    description: "Number of tests selected by predictive regression selector."
+    value: ${{ steps.run-gate.outputs.tests_selected }}
+  tests-executed:
+    description: "Number of tests executed."
+    value: ${{ steps.run-gate.outputs.tests_executed }}
+  failures:
+    description: "Number of test assertion failures."
+    value: ${{ steps.run-gate.outputs.failures }}
+  critical-breakages:
+    description: "Number of critical regression breakages."
+    value: ${{ steps.run-gate.outputs.critical_breakages }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve Base Git Ref
+      id: resolve-ref
+      shell: bash
+      run: |
+        BASE_REF="${{ inputs.base-ref }}"
+        if [ -z "$BASE_REF" ]; then
+          if [ -n "$GITHUB_BASE_REF" ]; then
+            BASE_REF="origin/$GITHUB_BASE_REF"
+          else
+            BASE_REF="origin/main"
+          fi
+        fi
+        echo "base_ref=$BASE_REF" >> $GITHUB_OUTPUT
+
+    - name: Run Tracecase CI Quality Gate
+      id: run-gate
+      shell: bash
+      run: |
+        mkdir -p tracecase-reports
+
+        CMD="tracecase ci \
+          --base '${{ steps.resolve-ref.outputs.base_ref }}' \
+          --target '${{ inputs.target-ref }}' \
+          --gate '${{ inputs.policy }}' \
+          --budget '${{ inputs.budget }}' \
+          --concurrency '${{ inputs.concurrency }}' \
+          --browser '${{ inputs.browser }}' \
+          --retries '${{ inputs.retries }}' \
+          --project '${{ inputs.project-id }}' \
+          --junit '${{ inputs.junit-path }}' \
+          --sarif '${{ inputs.sarif-path }}' \
+          --report '${{ inputs.summary-path }}' \
+          --manifest '${{ inputs.manifest-path }}'"
+
+        if [ "${{ inputs.include-critical-exceptions }}" = "true" ]; then
+          CMD="$CMD --include-critical-exceptions"
+        fi
+
+        if [ -n "${{ inputs.config }}" ]; then
+          CMD="$CMD --config '${{ inputs.config }}'"
+        fi
+
+        echo "Executing: $CMD"
+        set +e
+        eval $CMD
+        EXIT_CODE=$?
+        set -e
+
+        echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+        # Export step summary if report exists
+        if [ -f "${{ inputs.summary-path }}" ] && [ -n "$GITHUB_STEP_SUMMARY" ]; then
+          cat "${{ inputs.summary-path }}" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        # Parse manifest metrics if available
+        if [ -f "${{ inputs.manifest-path }}" ]; then
+          python3 -c "import json, sys; d=json.load(open(sys.argv[1])); print(f'gate_status={d.get(\"gate\", {}).get(\"status\", \"UNKNOWN\")}'); print(f'tests_selected={d.get(\"selection\", {}).get(\"selected_count\", 0)}'); print(f'tests_executed={d.get(\"selection\", {}).get(\"executed_count\", 0)}'); m=d.get('gate', {}).get('metrics', {}); print(f'failures={m.get(\"failed_count\", 0)}'); print(f'critical_breakages={m.get(\"critical_failures_count\", 0)}')" "${{ inputs.manifest-path }}" >> $GITHUB_OUTPUT 2>/dev/null || true
+        fi
+
+        if [ $EXIT_CODE -ne 0 ]; then
+          echo "Tracecase Quality Gate failed with exit code $EXIT_CODE"
+          exit $EXIT_CODE
+        fi
+
+    - name: Upload Quality Gate Artifacts
+      if: ${{ inputs.upload-artifacts == 'true' && always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: tracecase-quality-gate-reports
+        path: |
+          ${{ inputs.junit-path }}
+          ${{ inputs.sarif-path }}
+          ${{ inputs.summary-path }}
+          ${{ inputs.manifest-path }}
+        retention-days: 14
