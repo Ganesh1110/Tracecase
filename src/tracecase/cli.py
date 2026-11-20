@@ -1508,6 +1508,550 @@ def risk(
     )
 
 
+@app.command()
+def select(
+    repo_path: Annotated[
+        Path,
+        typer.Argument(help="Path to repository workspace (defaults to current dir)"),
+    ] = Path("."),
+    budget: Annotated[
+        str | None,
+        typer.Option("--budget", "-b", help="Time budget constraint (e.g. 120s, 2m, 90)"),
+    ] = None,
+    min_tier: Annotated[
+        str | None,
+        typer.Option("--min-tier", "-t", help="Minimum risk tier (critical, high, medium, low)"),
+    ] = None,
+    top: Annotated[
+        int | None,
+        typer.Option("--top", "-k", help="Select top K highest priority tests"),
+    ] = None,
+    include_critical_exceptions: Annotated[
+        bool,
+        typer.Option("--include-critical-exceptions", help="Include critical tests that exceed time budget"),
+    ] = False,
+    base: Annotated[
+        str | None,
+        typer.Option("--base", help="Base git ref to compare against (e.g. main, HEAD~1)"),
+    ] = None,
+    staged: Annotated[
+        bool,
+        typer.Option("--staged", help="Inspect only staged git changes"),
+    ] = False,
+    project_id: Annotated[
+        str,
+        typer.Option("--project", "-p", help="Project identifier"),
+    ] = "default_project",
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output raw JSON instead of table"),
+    ] = False,
+) -> None:
+    """Intelligently select regression tests based on change risk and execution constraints (Phase 7.5.4)."""
+    from rich.table import Table
+    from tracecase.intelligence.code_mapper import TestToCodeMapper
+    from tracecase.intelligence.git_analyzer import GitChangeAnalyzer
+    from tracecase.intelligence.risk_scorer import PredictiveRiskScorer
+    from tracecase.intelligence.selector import IntelligentRegressionSelector
+    from tracecase.models import TestCase
+    from tracecase.ui.service import find_testcase_files, resolve_testcase_file
+
+    # Determine strategy
+    if budget and min_tier:
+        strategy = "combined"
+    elif budget:
+        strategy = "time_budget"
+    elif top:
+        strategy = "top_k"
+    elif min_tier:
+        strategy = "risk_threshold"
+    else:
+        strategy = "time_budget"
+        budget = "120s"
+
+    analyzer = GitChangeAnalyzer(repo_path)
+    changeset = analyzer.analyze_repo(base_ref=base, staged_only=staged)
+
+    mapper = TestToCodeMapper(repo_path=repo_path, project_id=project_id)
+    mapper.scan_codebase()
+
+    tc_files = find_testcase_files()
+    testcases: list[TestCase] = []
+    for f in tc_files:
+        try:
+            _, tc = resolve_testcase_file(str(f))
+            testcases.append(tc)
+        except Exception:
+            pass
+
+    graph = mapper.build_graph(testcases, persist=False)
+    scorer = PredictiveRiskScorer(project_id=project_id)
+    risk_report = scorer.evaluate_suite_risk(testcases, graph, changeset, persist=False)
+
+    selector = IntelligentRegressionSelector(project_id=project_id)
+    result = selector.select(
+        testcases=testcases,
+        risk_report=risk_report,
+        strategy=strategy,
+        time_budget=budget,
+        min_risk_tier=min_tier,
+        top_k=top,
+        include_critical_exceptions=include_critical_exceptions,
+        persist=True,
+    )
+
+    try:
+        from tracecase.intelligence.explainer import PrioritizationExplainer
+        explainer = PrioritizationExplainer(project_id=project_id)
+        explainer.build_report(
+            selection=result,
+            risk_report=risk_report,
+            changeset=changeset,
+            graph=graph,
+            persist=True,
+        )
+    except Exception:
+        pass
+
+    if as_json:
+        console.print_json(result.model_dump_json())
+        return
+
+    branch_str = f"on [bold cyan]{changeset.current_branch or 'detached'}[/bold cyan]"
+    commit_str = f"([dim]{changeset.current_commit or 'unknown'}[/dim])"
+    strat_str = f"Strategy: [bold magenta]{strategy.upper()}[/bold magenta]"
+    if result.time_budget_s:
+        strat_str += f" (Budget: [cyan]{result.time_budget_s:.0f}s[/cyan])"
+    console.print(f"[bold]Intelligent Regression Selection[/bold] {branch_str} {commit_str} - {strat_str}\n")
+
+    table = Table(title=f"Regression Test Candidates ({len(result.tests)})", border_style="cyan")
+    table.add_column("Tier", justify="center")
+    table.add_column("Test Case", style="bold")
+    table.add_column("Risk", justify="right")
+    table.add_column("Duration", justify="right")
+    table.add_column("Decision", justify="center")
+    table.add_column("Selection Rationale")
+
+    tier_badges = {
+        "critical": "[bold white on red] CRIT [/bold white on red]",
+        "high": "[bold red] HIGH [/bold red]",
+        "medium": "[bold yellow] MED [/bold yellow]",
+        "low": "[green] LOW [/green]",
+    }
+
+    decision_styles = {
+        "selected": "[bold green] SELECTED [/bold green]",
+        "excluded": "[dim] EXCLUDED [/dim]",
+        "budget_exception": "[bold white on red] BUDGET EXCEPTION [/bold white on red]",
+    }
+
+    src_tags = {
+        "measured_history": "[green]hist[/green]",
+        "recorded_testcase": "[blue]rec[/blue]",
+        "estimated_fallback": "[yellow]est[/yellow]",
+    }
+
+    for item in result.tests:
+        t_badge = tier_badges.get(item.risk_tier, item.risk_tier.upper())
+        d_badge = decision_styles.get(item.decision, item.decision.upper())
+        src_tag = src_tags.get(item.duration_source, "")
+        dur_str = f"{item.estimated_duration_s:.1f}s {src_tag}"
+
+        table.add_row(
+            t_badge,
+            item.testcase_name or item.testcase_id,
+            f"{item.risk_score:.1f}",
+            dur_str,
+            d_badge,
+            item.decision_reason,
+        )
+
+    console.print(table)
+
+    # Budget Exception Alert
+    if result.budget_exception_count > 0:
+        console.print(
+            f"\n[bold red]⚠️ CRITICAL TEST BUDGET EXCEPTION:[/bold red] "
+            f"[bold]{result.budget_exception_count}[/bold] critical risk test(s) exceeded the time budget. "
+            f"They were NOT silently excluded. Re-run with [bold cyan]--include-critical-exceptions[/bold cyan] to include them."
+        )
+
+    # Summary
+    console.print(
+        f"\n[bold]Selection Summary:[/bold] "
+        f"[green]{result.selected_count} Selected[/green] / {result.total_tests_considered} Considered. "
+        f"Estimated Duration: [bold cyan]{result.estimated_total_duration_s:.1f}s[/bold cyan]. "
+        f"Risk Coverage: [bold green]{result.risk_coverage_pct:.1f}%[/bold green] "
+        f"(Critical Coverage: [bold]{result.critical_coverage_pct:.1f}%[/bold])."
+    )
+    console.print(f"[dim]{result.disclaimer}[/dim]")
+
+
+@app.command()
+def explain(
+    selection_id: Annotated[
+        str | None,
+        typer.Argument(help="ID of regression selection snapshot to explain (defaults to latest)"),
+    ] = None,
+    project_id: Annotated[
+        str,
+        typer.Option("--project", "-p", help="Project identifier"),
+    ] = "default_project",
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Output raw JSON instead of tables"),
+    ] = False,
+) -> None:
+    """Explain why tests were selected, excluded, or flagged as budget exceptions with categorized evidence (Phase 7.5.5)."""
+    from rich.table import Table
+    from tracecase.intelligence.explainer import PrioritizationExplainer
+    from tracecase.intelligence.models import RegressionSelectionResult, SelectedTestItem
+    from tracecase.ui.db import get_decision_traces, get_regression_selection_by_id, get_regression_selections
+
+    # 1. Resolve selection ID
+    if not selection_id:
+        recent = get_regression_selections(project_id=project_id, limit=1)
+        if not recent:
+            console.print("[bold red]Error:[/bold red] No regression selections found for project.")
+            raise typer.Exit(code=1)
+        selection_id = recent[0]["id"]
+
+    sel = get_regression_selection_by_id(selection_id)
+    if not sel:
+        console.print(f"[bold red]Error:[/bold red] Regression selection '{selection_id}' not found.")
+        raise typer.Exit(code=1)
+
+    traces = get_decision_traces(selection_id)
+    if not traces:
+        # Generate explanations dynamically if not precomputed
+        tests_data = sel.get("tests") or []
+        items = [SelectedTestItem(**t) for t in tests_data]
+        selection_obj = RegressionSelectionResult(
+            id=sel["id"],
+            project_id=sel.get("project_id", project_id),
+            commit_hash=sel.get("commit_hash"),
+            branch=sel.get("branch"),
+            created_at=sel.get("created_at", ""),
+            strategy=sel.get("strategy", "time_budget"),
+            strategy_params=sel.get("strategy_params") or {},
+            time_budget_s=sel.get("time_budget_s"),
+            total_tests_considered=sel.get("total_tests_considered", len(items)),
+            selected_count=sel.get("selected_count", len(sel.get("selected_test_ids") or [])),
+            excluded_count=sel.get("excluded_count", len(sel.get("excluded_test_ids") or [])),
+            budget_exception_count=sel.get("budget_exception_count", len(sel.get("budget_exceptions") or [])),
+            estimated_total_duration_s=sel.get("estimated_total_duration_s", 0.0),
+            risk_coverage_pct=sel.get("risk_coverage_pct", 0.0),
+            critical_coverage_pct=sel.get("critical_coverage_pct", 0.0),
+            selected_test_ids=sel.get("selected_test_ids") or [],
+            excluded_test_ids=sel.get("excluded_test_ids") or [],
+            budget_exceptions=sel.get("budget_exceptions") or [],
+            tests=items,
+        )
+        explainer = PrioritizationExplainer(project_id=project_id)
+        explainer.build_report(selection_obj, persist=True)
+        traces = get_decision_traces(selection_id)
+
+    if as_json:
+        console.print_json(json.dumps(traces))
+        return
+
+    commit_str = f"([dim]{sel.get('commit_hash') or 'unknown'}[/dim])"
+    strat_str = f"Strategy: [bold magenta]{(sel.get('strategy') or 'unknown').upper()}[/bold magenta]"
+    console.print(f"[bold]Prioritization Decision Explanation[/bold] ({selection_id}) {commit_str} - {strat_str}\n")
+
+    table = Table(title=f"Decisions & Verifiable Evidence Attribution ({len(traces)} tests)", border_style="cyan")
+    table.add_column("Decision", justify="center")
+    table.add_column("Tier", justify="center")
+    table.add_column("Test Case", style="bold")
+    table.add_column("Risk", justify="right")
+    table.add_column("Certainty", justify="center")
+    table.add_column("Duration", justify="right")
+    table.add_column("Evidence Summary")
+    table.add_column("Selection Rationale")
+
+    tier_badges = {
+        "critical": "[bold white on red] CRIT [/bold white on red]",
+        "high": "[bold red] HIGH [/bold red]",
+        "medium": "[bold yellow] MED [/bold yellow]",
+        "low": "[green] LOW [/green]",
+    }
+
+    decision_badges = {
+        "selected": "[bold green] SELECTED [/bold green]",
+        "excluded": "[dim] EXCLUDED [/dim]",
+        "budget_exception": "[bold white on red] EXCEPTION [/bold white on red]",
+    }
+
+    for t in traces:
+        d_badge = decision_badges.get(t["decision"], t["decision"].upper())
+        if t.get("user_override"):
+            d_badge += " [yellow](OVERRIDE)[/yellow]"
+        t_badge = tier_badges.get(t["risk_tier"], t["risk_tier"].upper())
+        conf_pct = f"{t['mapping_confidence'] * 100:.0f}%"
+        dur_str = f"{t['estimated_duration_s']:.1f}s"
+
+        ev = t.get("evidence") or {}
+        obs_count = len(ev.get("observed") or [])
+        heu_count = len(ev.get("heuristic") or [])
+        mis_count = len(ev.get("missing") or [])
+
+        ev_summary = f"[green]✓ {obs_count} obs[/green], [yellow]⚡ {heu_count} heu[/yellow], [dim]ℹ {mis_count} mis[/dim]"
+        if obs_count > 0 and ev.get("observed"):
+            top_obs = ev["observed"][0].get("description", "")
+            if len(top_obs) > 40:
+                top_obs = top_obs[:37] + "..."
+            ev_summary += f"\n[dim]{top_obs}[/dim]"
+
+        rationale = t.get("rationale") or t.get("decision_summary") or ""
+        if len(rationale) > 60:
+            rationale = rationale[:57] + "..."
+
+        table.add_row(
+            d_badge,
+            t_badge,
+            t.get("testcase_name") or t["testcase_id"],
+            f"{t['risk_score']:.1f}",
+            conf_pct,
+            dur_str,
+            ev_summary,
+            rationale,
+        )
+
+    console.print(table)
+    console.print("\n[dim]Note: Mapping confidence measures certainty of code-to-test connection, NOT failure probability.[/dim]")
+
+
+@app.command()
+def report(
+    selection_id: Annotated[
+        str | None,
+        typer.Argument(help="ID of regression selection snapshot to report (defaults to latest)"),
+    ] = None,
+    project_id: Annotated[
+        str,
+        typer.Option("--project", "-p", help="Project identifier"),
+    ] = "default_project",
+    format: Annotated[
+        str,
+        typer.Option("--format", "-f", help="Output format: markdown or json"),
+    ] = "markdown",
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="File path to write report to (outputs to stdout if omitted)"),
+    ] = None,
+) -> None:
+    """Generate publication-ready Markdown regression report or CI/PR JSON manifest (Phase 7.5.5)."""
+    from tracecase.intelligence.explainer import PrioritizationExplainer
+    from tracecase.intelligence.models import RegressionSelectionResult, SelectedTestItem
+    from tracecase.ui.db import get_regression_selection_by_id, get_regression_selections
+
+    # 1. Resolve selection ID
+    if not selection_id:
+        recent = get_regression_selections(project_id=project_id, limit=1)
+        if not recent:
+            console.print("[bold red]Error:[/bold red] No regression selections found for project.")
+            raise typer.Exit(code=1)
+        selection_id = recent[0]["id"]
+
+    sel = get_regression_selection_by_id(selection_id)
+    if not sel:
+        console.print(f"[bold red]Error:[/bold red] Regression selection '{selection_id}' not found.")
+        raise typer.Exit(code=1)
+
+    tests_data = sel.get("tests") or []
+    items = [SelectedTestItem(**t) for t in tests_data]
+    selection_obj = RegressionSelectionResult(
+        id=sel["id"],
+        project_id=sel.get("project_id", project_id),
+        commit_hash=sel.get("commit_hash"),
+        branch=sel.get("branch"),
+        created_at=sel.get("created_at", ""),
+        strategy=sel.get("strategy", "time_budget"),
+        strategy_params=sel.get("strategy_params") or {},
+        time_budget_s=sel.get("time_budget_s"),
+        total_tests_considered=sel.get("total_tests_considered", len(items)),
+        selected_count=sel.get("selected_count", len(sel.get("selected_test_ids") or [])),
+        excluded_count=sel.get("excluded_count", len(sel.get("excluded_test_ids") or [])),
+        budget_exception_count=sel.get("budget_exception_count", len(sel.get("budget_exceptions") or [])),
+        estimated_total_duration_s=sel.get("estimated_total_duration_s", 0.0),
+        risk_coverage_pct=sel.get("risk_coverage_pct", 0.0),
+        critical_coverage_pct=sel.get("critical_coverage_pct", 0.0),
+        selected_test_ids=sel.get("selected_test_ids") or [],
+        excluded_test_ids=sel.get("excluded_test_ids") or [],
+        budget_exceptions=sel.get("budget_exceptions") or [],
+        tests=items,
+    )
+
+    explainer = PrioritizationExplainer(project_id=project_id)
+    prioritization_report = explainer.build_report(selection_obj, persist=False)
+
+    if format.lower() == "json":
+        manifest = explainer.generate_json_manifest(prioritization_report)
+        content = json.dumps(manifest, indent=2)
+    else:
+        content = prioritization_report.markdown_report
+
+    if output:
+        output.write_text(content, encoding="utf-8")
+        console.print(f"[bold green]✓ Report successfully saved to {output}[/bold green]")
+    else:
+        if format.lower() == "json":
+            console.print_json(content)
+        else:
+            console.print(content)
+
+
+@app.command(name="run")
+def run_command(
+    target: Annotated[
+        Path | None,
+        typer.Argument(help="Path to a testcase.json file or folder (optional with --select-smart)"),
+    ] = None,
+    select_smart: Annotated[
+        bool,
+        typer.Option("--select-smart", help="Enable intelligent regression test selection"),
+    ] = False,
+    budget: Annotated[
+        str | None,
+        typer.Option("--budget", "-b", help="Time budget constraint for smart selection (e.g. 120s, 2m)"),
+    ] = None,
+    min_tier: Annotated[
+        str | None,
+        typer.Option("--min-tier", "-t", help="Minimum risk tier (critical, high, medium, low)"),
+    ] = None,
+    top: Annotated[
+        int | None,
+        typer.Option("--top", "-k", help="Select top K highest priority tests"),
+    ] = None,
+    include_critical_exceptions: Annotated[
+        bool,
+        typer.Option("--include-critical-exceptions", help="Include critical tests that exceed time budget"),
+    ] = False,
+    concurrency: Annotated[
+        int,
+        typer.Option("--concurrency", "-c", help="Worker pool concurrency", min=1, max=16),
+    ] = 2,
+    browser: Annotated[
+        str,
+        typer.Option("--browser", help="Browser engine (chromium, firefox, webkit)"),
+    ] = "chromium",
+    retries: Annotated[
+        int,
+        typer.Option("--retries", help="Configurable attempt retries on failure (0-3)", min=0, max=3),
+    ] = 1,
+    ci: Annotated[
+        bool,
+        typer.Option("--ci", "--yes", "-y", help="Non-interactive mode (auto-approves execution)"),
+    ] = False,
+    repo_path: Annotated[
+        Path,
+        typer.Option("--repo", help="Repository path for change intelligence"),
+    ] = Path("."),
+    project_id: Annotated[
+        str,
+        typer.Option("--project", "-p", help="Project identifier"),
+    ] = "default_project",
+) -> None:
+    """Execute test cases with opt-in intelligent regression selection (Phase 7.5.4)."""
+    import asyncio
+    from tracecase.intelligence.code_mapper import TestToCodeMapper
+    from tracecase.intelligence.git_analyzer import GitChangeAnalyzer
+    from tracecase.intelligence.risk_scorer import PredictiveRiskScorer
+    from tracecase.intelligence.selector import IntelligentRegressionSelector
+    from tracecase.models import TestCase
+    from tracecase.ui.executor import orchestrator
+    from tracecase.ui.service import find_testcase_files, resolve_testcase_file
+
+    if select_smart:
+        console.print("[bold cyan]Tracecase Smart Regression Engine[/bold cyan] analyzing code modifications...")
+        strategy = "combined" if (budget and min_tier) else "top_k" if top else "risk_threshold" if min_tier else "time_budget"
+        active_budget = budget or "120s"
+
+        analyzer = GitChangeAnalyzer(repo_path)
+        changeset = analyzer.analyze_repo()
+
+        mapper = TestToCodeMapper(repo_path=repo_path, project_id=project_id)
+        mapper.scan_codebase()
+
+        tc_files = find_testcase_files()
+        testcases: list[TestCase] = []
+        for f in tc_files:
+            try:
+                _, tc = resolve_testcase_file(str(f))
+                testcases.append(tc)
+            except Exception:
+                pass
+
+        graph = mapper.build_graph(testcases, persist=False)
+        scorer = PredictiveRiskScorer(project_id=project_id)
+        risk_report = scorer.evaluate_suite_risk(testcases, graph, changeset, persist=False)
+
+        selector = IntelligentRegressionSelector(project_id=project_id)
+        selection = selector.select(
+            testcases=testcases,
+            risk_report=risk_report,
+            strategy=strategy,
+            time_budget=active_budget,
+            min_risk_tier=min_tier,
+            top_k=top,
+            include_critical_exceptions=include_critical_exceptions,
+            persist=True,
+        )
+
+        test_ids_to_run = list(selection.selected_test_ids)
+        if not test_ids_to_run:
+            console.print("[yellow]No tests met the selection criteria for execution.[/yellow]")
+            return
+
+        console.print(
+            f"\n[bold]Selected {len(test_ids_to_run)} test case(s)[/bold] "
+            f"(Estimated Duration: [cyan]{selection.estimated_total_duration_s:.1f}s[/cyan], "
+            f"Risk Coverage: [green]{selection.risk_coverage_pct:.1f}%[/green]):"
+        )
+        for tid in test_ids_to_run:
+            t_item = next((t for t in selection.tests if t.testcase_id == tid), None)
+            t_name = t_item.testcase_name if t_item else tid
+            t_tier = t_item.risk_tier.upper() if t_item else "N/A"
+            console.print(f"  • [{t_tier}] [bold]{t_name}[/bold] ({t_item.estimated_duration_s:.1f}s) - {t_item.decision_reason if t_item else ''}")
+
+        if selection.budget_exception_count > 0 and not include_critical_exceptions:
+            console.print(
+                f"\n[bold red]Note:[/bold red] {selection.budget_exception_count} critical test(s) exceeded the budget "
+                f"and were excluded. Pass --include-critical-exceptions to run them."
+            )
+
+        if not ci:
+            confirmed = typer.confirm(
+                f"\nProceed with parallel execution of these {len(test_ids_to_run)} tests?",
+                default=True,
+            )
+            if not confirmed:
+                console.print("[yellow]Execution cancelled by user.[/yellow]")
+                return
+
+        console.print(f"\n[bold green]Dispatching batch execution[/bold green] (concurrency={concurrency}, retries={retries})...")
+        batch = asyncio.run(
+            orchestrator.start_batch_execution(
+                testcase_ids=test_ids_to_run,
+                concurrency=concurrency,
+                project_id=project_id,
+                browser=browser,
+                retries=retries,
+            )
+        )
+        console.print(f"[green]✓ Batch execution started:[/green] [cyan]{batch.get('id')}[/cyan] ({len(test_ids_to_run)} tests queued)")
+        return
+
+    # If --select-smart not provided, target path is required
+    if not target:
+        console.print("[red]✗ Error:[/red] Please provide a testcase path to run or use [bold]--select-smart[/bold].")
+        raise typer.Exit(1)
+
+    from tracecase.cli import replay
+    replay(testcase=target, output=None, heal=True, verify=True)
+
+
+
 
 @app.command()
 def ui(

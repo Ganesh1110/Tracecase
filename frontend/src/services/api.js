@@ -315,6 +315,36 @@ export const api = {
   updateRetentionPolicy: (policy) =>
     request('/storage/retention', { method: 'PUT', body: JSON.stringify(policy) }),
 
+  // Intelligence & Smart Regression Selection (Phase 7.5)
+  getGitChanges: (params = {}) => {
+    const q = new URLSearchParams(params);
+    return request(`/intelligence/git-changes?${q.toString()}`);
+  },
+  getRiskReport: (data = {}) =>
+    request('/intelligence/risk', { method: 'POST', body: JSON.stringify(data) }),
+  selectRegressionTests: (data = {}) =>
+    request('/intelligence/select', { method: 'POST', body: JSON.stringify(data) }),
+  getRegressionSelections: (projectId = 'default_project') =>
+    request(`/intelligence/selections?project_id=${projectId}`),
+  getRegressionSelection: (selectionId) =>
+    request(`/intelligence/selections/${selectionId}`),
+  executeRegressionSelection: (selectionId, data = {}) =>
+    request(`/intelligence/selections/${selectionId}/execute`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getSelectionExplanations: (selectionId) =>
+    request(`/intelligence/selections/${selectionId}/explanations`),
+  getSelectionReport: (selectionId, format = 'markdown') =>
+    request(`/intelligence/selections/${selectionId}/report?format=${format}`),
+  getSelectionManifest: (selectionId) =>
+    request(`/intelligence/selections/${selectionId}/manifest`),
+  overrideSelectionDecision: (selectionId, data) =>
+    request(`/intelligence/selections/${selectionId}/override`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   // Settings
   getSettings: () => request('/settings'),
   updateSettings: (settings) =>

@@ -23,6 +23,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ShieldCheck,
+  Zap,
 } from 'lucide-react';
 
 const navSections = [
@@ -48,6 +49,7 @@ const navSections = [
   {
     title: 'Intelligence',
     items: [
+      { name: 'Smart Regression', to: '/regression-selection', icon: Zap, badge: 'Smart' },
       { name: 'Autonomous Exploration', to: '/explore', icon: Compass, badge: 'New' },
       { name: 'AI Test Assistant', to: '/ai-assistant', icon: Sparkles, badge: 'AI' },
       { name: 'Test Analysis', to: '/test-analysis', icon: BarChart3 },

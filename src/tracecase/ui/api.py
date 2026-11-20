@@ -10,7 +10,7 @@ from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from tracecase.ai.analyst import analyze_testcase
@@ -38,17 +38,25 @@ from tracecase.artifact_manager import (
 from tracecase.index.search import get_coverage_report, search_testcases
 from tracecase.index.store import index_testcase
 from tracecase.intelligence.code_mapper import TestToCodeMapper
+from tracecase.intelligence.explainer import PrioritizationExplainer
 from tracecase.intelligence.git_analyzer import GitChangeAnalyzer
 from tracecase.intelligence.models import (
     CodeImpactReport,
+    DecisionTraceRecord,
     GitChangeSet,
     ImpactedTestResult,
     PredictiveRiskReport,
+    PrioritizationReport,
+    RegressionSelectionResult,
     RiskScoringWeights,
+    SelectedTestItem,
+    SelectionStrategy,
     TestCodeMapping,
+    TestPrioritizationExplanation,
     TestRiskScore,
 )
 from tracecase.intelligence.risk_scorer import PredictiveRiskScorer
+from tracecase.intelligence.selector import IntelligentRegressionSelector
 from tracecase.models import TestCase
 from tracecase.mutation.engine import MutationEngine
 from tracecase.replay.har import build_har
@@ -63,11 +71,14 @@ from tracecase.ui.db import (
     delete_suite,
     get_ai_analyses_for_testcase,
     get_dashboard_metrics,
+    get_decision_traces,
     get_execution_attempts,
     get_execution_batch,
     get_execution_matrix,
     get_execution_run,
     get_project,
+    get_regression_selection_by_id,
+    get_regression_selections,
     get_risk_scores_snapshots,
     get_settings,
     get_suite,
@@ -80,9 +91,12 @@ from tracecase.ui.db import (
     list_projects,
     list_suites,
     list_synthesized_drafts,
+    record_user_decision_override,
     reject_synthesized_draft,
     remove_testcase_from_suite,
     save_ai_analysis,
+    save_decision_traces,
+    save_regression_selection,
     save_synthesized_draft,
     sync_all_testcases_from_disk,
     update_project,
@@ -1902,6 +1916,326 @@ async def get_risk_snapshots_endpoint(
         project_id=project_id,
         limit=limit,
     )
+
+
+# ---------------------------------------------------------------------------
+# Intelligent Regression Selection Endpoints (Phase 7.5.4)
+# ---------------------------------------------------------------------------
+
+class SelectRegressionRequest(BaseModel):
+    repo_path: str = "."
+    base_ref: str | None = None
+    target_ref: str | None = None
+    staged_only: bool = False
+    project_id: str = "default_project"
+    strategy: SelectionStrategy = "time_budget"
+    time_budget: str | float | None = "120s"
+    min_risk_tier: str | None = None
+    min_risk_score: float | None = None
+    top_k: int | None = None
+    include_critical_exceptions: bool = False
+    fallback_duration_s: float = 15.0
+    persist: bool = True
+
+
+class ExecuteSelectionRequest(BaseModel):
+    include_budget_exceptions: bool = False
+    concurrency: int = 2
+    browser: str = "chromium"
+    headed: bool = False
+    heal: bool = True
+    assertions: bool = True
+    visual_diff: bool = False
+    retries: int = 1
+
+
+@router.post("/intelligence/select", response_model=RegressionSelectionResult)
+async def select_regression_endpoint(
+    request: SelectRegressionRequest | None = None,
+    repo_path: str = Query(".", description="Path to repository workspace"),
+    base_ref: str | None = Query(None, description="Optional base git ref (e.g. main, HEAD~1)"),
+    target_ref: str | None = Query(None, description="Optional target git ref (defaults to HEAD)"),
+    staged_only: bool = Query(False, description="Whether to inspect only staged changes"),
+    project_id: str = Query("default_project", description="Project ID"),
+    strategy: SelectionStrategy = Query("time_budget", description="Selection strategy: time_budget, risk_threshold, top_k, combined"),
+    time_budget: str | None = Query("120s", description="Time budget (e.g. 120s, 2m)"),
+    min_risk_tier: str | None = Query(None, description="Minimum risk tier (critical, high, medium, low)"),
+    min_risk_score: float | None = Query(None, description="Minimum raw risk score (0-100)"),
+    top_k: int | None = Query(None, description="Maximum test count for top_k strategy"),
+    include_critical_exceptions: bool = Query(False, description="Whether to include critical tests exceeding time budget"),
+    fallback_duration_s: float = Query(15.0, description="Fallback execution duration in seconds"),
+    persist: bool = Query(True, description="Whether to persist selection snapshot to SQLite"),
+) -> RegressionSelectionResult:
+    """Select the highest-value regression tests given git changes, risk scores, and duration constraints."""
+    from tracecase.ui.service import find_testcase_files, resolve_testcase_file
+
+    r_path = request.repo_path if request and request.repo_path != "." else repo_path
+    b_ref = (request.base_ref if request else None) or base_ref
+    t_ref = (request.target_ref if request else None) or target_ref
+    s_only = request.staged_only if request else staged_only
+    p_id = request.project_id if request and request.project_id != "default_project" else project_id
+    strat = request.strategy if request and request.strategy != "time_budget" else strategy
+    t_budget = request.time_budget if request and request.time_budget != "120s" else time_budget
+    m_tier = (request.min_risk_tier if request else None) or min_risk_tier
+    m_score = (request.min_risk_score if request else None) or min_risk_score
+    t_k = (request.top_k if request else None) or top_k
+    inc_crit = request.include_critical_exceptions if request else include_critical_exceptions
+    fb_dur = request.fallback_duration_s if request and request.fallback_duration_s != 15.0 else fallback_duration_s
+    p_persist = request.persist if request is not None else persist
+
+    # 1. Analyze git changes
+    analyzer = GitChangeAnalyzer(r_path)
+    changeset = analyzer.analyze_repo(base_ref=b_ref, target_ref=t_ref, staged_only=s_only)
+
+    # 2. Build code mapping graph
+    mapper = TestToCodeMapper(repo_path=r_path, project_id=p_id)
+    mapper.scan_codebase()
+
+    tc_files = find_testcase_files()
+    testcases: list[TestCase] = []
+    for f in tc_files:
+        try:
+            _, tc = resolve_testcase_file(str(f))
+            testcases.append(tc)
+        except Exception:
+            pass
+
+    graph = mapper.build_graph(testcases, persist=False)
+
+    # 3. Calculate predictive risk scores
+    scorer = PredictiveRiskScorer(project_id=p_id)
+    risk_report = scorer.evaluate_suite_risk(testcases, graph, changeset, persist=False)
+
+    # 4. Run intelligent selection
+    selector = IntelligentRegressionSelector(
+        project_id=p_id,
+        fallback_duration_s=fb_dur,
+    )
+    result = selector.select(
+        testcases=testcases,
+        risk_report=risk_report,
+        strategy=strat,
+        time_budget=t_budget,
+        min_risk_tier=m_tier,
+        min_risk_score=m_score,
+        top_k=t_k,
+        include_critical_exceptions=inc_crit,
+        persist=p_persist,
+    )
+    if p_persist:
+        try:
+            explainer = PrioritizationExplainer(project_id=p_id)
+            explainer.build_report(
+                selection=result,
+                risk_report=risk_report,
+                changeset=changeset,
+                graph=graph,
+                persist=True,
+            )
+        except Exception as exc:
+            logger.warning("Failed to auto-generate decision traces for selection %s: %s", result.id, exc)
+    return result
+
+
+@router.get("/intelligence/selections", response_model=list[dict[str, Any]])
+async def get_regression_selections_endpoint(
+    project_id: str = Query("default_project", description="Project ID"),
+    commit_hash: str | None = Query(None, description="Filter by commit hash"),
+    limit: int = Query(50, ge=1, le=500, description="Maximum snapshots to retrieve"),
+) -> list[dict[str, Any]]:
+    """Retrieve historical regression selection summaries."""
+    return get_regression_selections(
+        project_id=project_id,
+        commit_hash=commit_hash,
+        limit=limit,
+    )
+
+
+@router.get("/intelligence/selections/{selection_id}", response_model=dict[str, Any])
+async def get_regression_selection_detail_endpoint(selection_id: str) -> dict[str, Any]:
+    """Retrieve a complete regression selection snapshot including per-test decisions."""
+    sel = get_regression_selection_by_id(selection_id)
+    if not sel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Regression selection '{selection_id}' not found.",
+        )
+    return sel
+
+
+@router.post("/intelligence/selections/{selection_id}/execute")
+async def execute_regression_selection_endpoint(
+    selection_id: str,
+    req: ExecuteSelectionRequest | None = None,
+) -> dict[str, Any]:
+    """Launch execution for test cases chosen by an intelligent regression selection snapshot."""
+    sel = get_regression_selection_by_id(selection_id)
+    if not sel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Regression selection '{selection_id}' not found.",
+        )
+
+    options = req or ExecuteSelectionRequest()
+    test_ids = list(sel.get("selected_test_ids") or [])
+
+    if options.include_budget_exceptions:
+        budget_exceptions = sel.get("budget_exceptions") or []
+        for be in budget_exceptions:
+            if be not in test_ids:
+                test_ids.append(be)
+
+    if not test_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No test cases to execute in this selection.",
+        )
+
+    try:
+        batch = await orchestrator.start_batch_execution(
+            testcase_ids=test_ids,
+            concurrency=options.concurrency,
+            project_id=sel.get("project_id", "default_project"),
+            browser=options.browser,
+            headed=options.headed,
+            heal=options.heal,
+            assertions=options.assertions,
+            visual_diff=options.visual_diff,
+            retries=options.retries,
+        )
+        return {
+            "status": "launched",
+            "selection_id": selection_id,
+            "batch_id": batch.get("id"),
+            "total_tests": len(test_ids),
+            "testcase_ids": test_ids,
+            "batch": batch,
+        }
+    except Exception as exc:
+        logger.exception("Failed to launch batch execution for selection %s: %s", selection_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Execution launch failed: {exc}",
+        ) from exc
+
+
+class DecisionOverrideRequest(BaseModel):
+    testcase_id: str
+    override_decision: str  # "selected" or "excluded"
+    override_reason: str
+
+
+def _reconstruct_selection_obj(sel: dict[str, Any]) -> RegressionSelectionResult:
+    """Helper to convert stored selection dict into RegressionSelectionResult."""
+    tests_data = sel.get("tests") or []
+    items = [SelectedTestItem(**t) for t in tests_data]
+    return RegressionSelectionResult(
+        id=sel["id"],
+        project_id=sel.get("project_id", "default_project"),
+        commit_hash=sel.get("commit_hash"),
+        branch=sel.get("branch"),
+        created_at=sel.get("created_at", ""),
+        strategy=sel.get("strategy", "time_budget"),
+        strategy_params=sel.get("strategy_params") or {},
+        time_budget_s=sel.get("time_budget_s"),
+        total_tests_considered=sel.get("total_tests_considered", len(items)),
+        selected_count=sel.get("selected_count", len(sel.get("selected_test_ids") or [])),
+        excluded_count=sel.get("excluded_count", len(sel.get("excluded_test_ids") or [])),
+        budget_exception_count=sel.get("budget_exception_count", len(sel.get("budget_exceptions") or [])),
+        estimated_total_duration_s=sel.get("estimated_total_duration_s", 0.0),
+        risk_coverage_pct=sel.get("risk_coverage_pct", 0.0),
+        critical_coverage_pct=sel.get("critical_coverage_pct", 0.0),
+        selected_test_ids=sel.get("selected_test_ids") or [],
+        excluded_test_ids=sel.get("excluded_test_ids") or [],
+        budget_exceptions=sel.get("budget_exceptions") or [],
+        tests=items,
+    )
+
+
+@router.get("/intelligence/selections/{selection_id}/explanations", response_model=list[dict[str, Any]])
+async def get_regression_selection_explanations_endpoint(selection_id: str) -> list[dict[str, Any]]:
+    """Retrieve auditable decision traces and evidence categorization for a selection."""
+    sel = get_regression_selection_by_id(selection_id)
+    if not sel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Regression selection '{selection_id}' not found.",
+        )
+    traces = get_decision_traces(selection_id)
+    if traces:
+        return traces
+    # Fallback: if traces weren't precomputed, reconstruct explanations from stored selection tests
+    selection_obj = _reconstruct_selection_obj(sel)
+    explainer = PrioritizationExplainer(project_id=sel.get("project_id", "default_project"))
+    explainer.build_report(selection_obj, persist=True)
+    return get_decision_traces(selection_id)
+
+
+@router.get("/intelligence/selections/{selection_id}/report")
+async def get_regression_selection_report_endpoint(
+    selection_id: str,
+    format: str = Query("markdown", description="Report format: markdown or json"),
+) -> Any:
+    """Generate or retrieve a publication-ready regression prioritization report."""
+    sel = get_regression_selection_by_id(selection_id)
+    if not sel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Regression selection '{selection_id}' not found.",
+        )
+    selection_obj = _reconstruct_selection_obj(sel)
+    explainer = PrioritizationExplainer(project_id=sel.get("project_id", "default_project"))
+    report = explainer.build_report(selection_obj, persist=False)
+    if format.lower() == "markdown":
+        return PlainTextResponse(content=report.markdown_report, media_type="text/markdown")
+    return report.model_dump()
+
+
+@router.get("/intelligence/selections/{selection_id}/manifest", response_model=dict[str, Any])
+async def get_regression_selection_manifest_endpoint(selection_id: str) -> dict[str, Any]:
+    """Generate machine-readable JSON manifest for CI/PR pull request automation."""
+    sel = get_regression_selection_by_id(selection_id)
+    if not sel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Regression selection '{selection_id}' not found.",
+        )
+    selection_obj = _reconstruct_selection_obj(sel)
+    explainer = PrioritizationExplainer(project_id=sel.get("project_id", "default_project"))
+    report = explainer.build_report(selection_obj, persist=False)
+    return explainer.generate_json_manifest(report)
+
+
+@router.post("/intelligence/selections/{selection_id}/override")
+async def override_selection_decision_endpoint(
+    selection_id: str,
+    req: DecisionOverrideRequest,
+) -> dict[str, Any]:
+    """Record explicit user approval or exclusion override for a test with audit rationale."""
+    sel = get_regression_selection_by_id(selection_id)
+    if not sel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Regression selection '{selection_id}' not found.",
+        )
+    if req.override_decision not in ("selected", "excluded", "user_excluded"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="override_decision must be 'selected' or 'excluded'",
+        )
+    if not req.override_reason or not req.override_reason.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="override_reason is required for auditability.",
+        )
+    res = record_user_decision_override(
+        selection_id=selection_id,
+        testcase_id=req.testcase_id,
+        override_decision=req.override_decision,
+        override_reason=req.override_reason.strip(),
+    )
+    return {"status": "ok", "override": res}
+
 
 
 # ---------------------------------------------------------------------------

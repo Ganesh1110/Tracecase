@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 from pydantic import BaseModel, Field
 
@@ -194,3 +195,150 @@ class PredictiveRiskReport(BaseModel):
     medium_count: int = 0
     low_count: int = 0
     scores: list[TestRiskScore] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Intelligent Regression Selection Models (Phase 7.5.4)
+# ---------------------------------------------------------------------------
+
+SelectionStrategy = Literal["time_budget", "risk_threshold", "top_k", "combined"]
+DurationSource = Literal["measured_history", "recorded_testcase", "estimated_fallback"]
+SelectionDecision = Literal["selected", "excluded", "budget_exception"]
+
+
+class SelectedTestItem(BaseModel):
+    """A test case considered during regression selection with decision and rationale."""
+    __test__ = False
+    testcase_id: str
+    testcase_name: str
+    risk_score: float = Field(ge=0.0, le=100.0)
+    risk_tier: RiskTier
+    mapping_confidence: float = Field(ge=0.0, le=1.0)
+    estimated_duration_s: float = Field(ge=0.0)
+    duration_source: DurationSource
+    decision: SelectionDecision
+    decision_reason: str
+    value_score: float = 0.0
+    primary_risk_driver: str = ""
+    affected_files: list[str] = Field(default_factory=list)
+
+
+class RegressionSelectionResult(BaseModel):
+    """Complete output of an intelligent regression test selection operation."""
+    __test__ = False
+    id: str
+    project_id: str = "default_project"
+    commit_hash: str | None = None
+    branch: str | None = None
+    strategy: SelectionStrategy
+    strategy_params: dict[str, Any] = Field(default_factory=dict)
+    selected_test_ids: list[str] = Field(default_factory=list)
+    excluded_test_ids: list[str] = Field(default_factory=list)
+    budget_exception_test_ids: list[str] = Field(default_factory=list)
+    tests: list[SelectedTestItem] = Field(default_factory=list)
+    total_tests_considered: int = 0
+    selected_count: int = 0
+    excluded_count: int = 0
+    budget_exception_count: int = 0
+    time_budget_s: float | None = None
+    estimated_total_duration_s: float = 0.0
+    risk_coverage_pct: float = 0.0
+    critical_coverage_pct: float = 0.0
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    disclaimer: str = (
+        "Estimated execution times are projections based on historical execution statistics "
+        "and recorded steps, not guaranteed durations."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Explainable Test Prioritization Models (Phase 7.5.5)
+# ---------------------------------------------------------------------------
+
+EvidenceType = Literal["observed", "heuristic", "missing"]
+EvidenceCategory = Literal["git_diff", "selector", "route", "dependency", "history", "budget", "approval"]
+
+
+class EvidenceItem(BaseModel):
+    """An individual verifiable piece of evidence explaining test prioritization."""
+    evidence_type: EvidenceType
+    category: EvidenceCategory
+    description: str
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class TestPrioritizationExplanation(BaseModel):
+    """Deep, transparent explanation for why a test was selected, prioritized, or excluded."""
+    __test__ = False
+    testcase_id: str
+    testcase_name: str
+    decision: SelectionDecision
+    decision_summary: str
+    risk_score: float = Field(ge=0.0, le=100.0)
+    risk_tier: RiskTier
+    mapping_confidence: float = Field(ge=0.0, le=1.0)
+    confidence_type: str = "exact"
+    estimated_duration_s: float = Field(ge=0.0)
+    duration_source: DurationSource
+    primary_risk_driver: str
+    observed_evidence: list[EvidenceItem] = Field(default_factory=list)
+    heuristic_inferences: list[EvidenceItem] = Field(default_factory=list)
+    missing_evidence: list[EvidenceItem] = Field(default_factory=list)
+    risk_narrative: str
+    selection_rationale: str
+    affected_files: list[str] = Field(default_factory=list)
+    matched_selectors: list[str] = Field(default_factory=list)
+    matched_routes: list[str] = Field(default_factory=list)
+
+
+class DecisionTraceRecord(BaseModel):
+    """Auditable historical trace of an individual regression decision."""
+    id: str
+    selection_id: str
+    project_id: str = "default_project"
+    testcase_id: str
+    testcase_name: str
+    decision: str
+    risk_score: float
+    risk_tier: str
+    mapping_confidence: float
+    estimated_duration_s: float
+    duration_source: str
+    decision_summary: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    rationale: str
+    user_override: bool = False
+    override_reason: str | None = None
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+class PrioritizationReport(BaseModel):
+    """Complete human- and machine-readable prioritization and explanation report."""
+    __test__ = False
+    selection_id: str
+    project_id: str = "default_project"
+    commit_hash: str | None = None
+    branch: str | None = None
+    strategy: SelectionStrategy
+    strategy_params: dict[str, Any] = Field(default_factory=dict)
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    total_tests: int = 0
+    selected_count: int = 0
+    excluded_count: int = 0
+    budget_exception_count: int = 0
+    time_budget_s: float | None = None
+    estimated_total_duration_s: float = 0.0
+    risk_coverage_pct: float = 0.0
+    critical_coverage_pct: float = 0.0
+    functional_surface_coverage_pct: float = 0.0
+    covered_files_count: int = 0
+    total_impacted_files_count: int = 0
+    explanations: list[TestPrioritizationExplanation] = Field(default_factory=list)
+    markdown_report: str = ""
+    disclaimer: str = (
+        "Estimated execution times are projections based on historical execution statistics "
+        "and recorded steps, not guaranteed durations. Mapping confidence reflects relationship "
+        "certainty, not probability of failure."
+    )
+
+

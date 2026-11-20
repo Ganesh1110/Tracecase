@@ -494,6 +494,67 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             "CREATE INDEX IF NOT EXISTS idx_risk_snapshots_tc ON test_risk_snapshots(testcase_id)"
         )
 
+        # Regression Selection Snapshots Table (Phase 7.5.4)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS regression_selections (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL DEFAULT 'default_project',
+                commit_hash TEXT,
+                branch TEXT,
+                strategy TEXT NOT NULL,
+                strategy_params_json TEXT NOT NULL DEFAULT '{}',
+                selected_test_ids_json TEXT NOT NULL DEFAULT '[]',
+                excluded_test_ids_json TEXT NOT NULL DEFAULT '[]',
+                budget_exceptions_json TEXT NOT NULL DEFAULT '[]',
+                tests_json TEXT NOT NULL DEFAULT '[]',
+                estimated_duration_s REAL NOT NULL DEFAULT 0.0,
+                risk_coverage_pct REAL NOT NULL DEFAULT 0.0,
+                critical_coverage_pct REAL NOT NULL DEFAULT 0.0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reg_selections_proj ON regression_selections(project_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reg_selections_commit ON regression_selections(commit_hash)"
+        )
+
+        # Regression Decision Traces Table (Phase 7.5.5)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS regression_decision_traces (
+                id TEXT PRIMARY KEY,
+                selection_id TEXT NOT NULL,
+                project_id TEXT NOT NULL DEFAULT 'default_project',
+                commit_hash TEXT,
+                testcase_id TEXT NOT NULL,
+                testcase_name TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                risk_score REAL NOT NULL,
+                risk_tier TEXT NOT NULL,
+                mapping_confidence REAL NOT NULL,
+                estimated_duration_s REAL NOT NULL,
+                duration_source TEXT NOT NULL,
+                decision_summary TEXT NOT NULL,
+                evidence_json TEXT NOT NULL DEFAULT '{}',
+                rationale TEXT NOT NULL,
+                user_override INTEGER NOT NULL DEFAULT 0,
+                override_reason TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (selection_id) REFERENCES regression_selections(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_dec_traces_sel ON regression_decision_traces(selection_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_dec_traces_tc ON regression_decision_traces(testcase_id)"
+        )
+
         # Ensure default project exists
         default_proj = conn.execute(
             "SELECT id FROM projects WHERE id = 'default_project'"
@@ -3097,5 +3158,429 @@ def get_risk_scores_snapshots(
                 d["breakdown"] = {}
             results.append(d)
         return results
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Intelligent Regression Selection Persistence (Phase 7.5.4)
+# ---------------------------------------------------------------------------
+
+def get_testcase_duration_stats(
+    testcase_id: str,
+    project_id: str = "default_project",
+    fallback_s: float = 15.0,
+    db_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Retrieve measured or estimated execution duration statistics for a test case."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT duration_ms FROM execution_runs
+            WHERE testcase_id = ? AND status IN ('passed', 'failed') AND duration_ms > 0
+            ORDER BY started_at DESC LIMIT 30
+            """,
+            (testcase_id,),
+        ).fetchall()
+
+        if rows:
+            durations_s = [r["duration_ms"] / 1000.0 for r in rows if r["duration_ms"]]
+            if durations_s:
+                avg_dur = sum(durations_s) / len(durations_s)
+                sorted_d = sorted(durations_s)
+                med_dur = sorted_d[len(sorted_d) // 2]
+                return {
+                    "duration_s": round(med_dur, 2),
+                    "source": "measured_history",
+                    "sample_count": len(durations_s),
+                    "avg_duration_s": round(avg_dur, 2),
+                    "median_duration_s": round(med_dur, 2),
+                    "min_duration_s": round(min(durations_s), 2),
+                    "max_duration_s": round(max(durations_s), 2),
+                }
+
+        meta = conn.execute(
+            "SELECT total_duration FROM testcases_meta WHERE id = ? AND total_duration > 0",
+            (testcase_id,),
+        ).fetchone()
+        if meta and meta["total_duration"] and meta["total_duration"] > 0:
+            return {
+                "duration_s": round(float(meta["total_duration"]), 2),
+                "source": "recorded_testcase",
+                "sample_count": 0,
+                "avg_duration_s": round(float(meta["total_duration"]), 2),
+                "median_duration_s": round(float(meta["total_duration"]), 2),
+            }
+
+        return {
+            "duration_s": round(fallback_s, 2),
+            "source": "estimated_fallback",
+            "sample_count": 0,
+            "avg_duration_s": round(fallback_s, 2),
+            "median_duration_s": round(fallback_s, 2),
+        }
+    finally:
+        conn.close()
+
+
+def save_regression_selection(
+    result: Any,
+    db_path: Path | str | None = None,
+) -> str:
+    """Persist a regression selection snapshot into SQLite."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        if isinstance(result, dict):
+            sel_id = result.get("id")
+            proj_id = result.get("project_id", "default_project")
+            commit_h = result.get("commit_hash")
+            branch = result.get("branch")
+            strategy = result.get("strategy", "time_budget")
+            params = result.get("strategy_params", {})
+            sel_ids = result.get("selected_test_ids", [])
+            exc_ids = result.get("excluded_test_ids", [])
+            b_exc_ids = result.get("budget_exception_test_ids", [])
+            tests = result.get("tests", [])
+            est_dur = float(result.get("estimated_total_duration_s", 0.0))
+            cov = float(result.get("risk_coverage_pct", 0.0))
+            crit_cov = float(result.get("critical_coverage_pct", 0.0))
+            created_at = result.get("created_at") or datetime.now().isoformat()
+        else:
+            sel_id = getattr(result, "id", "")
+            proj_id = getattr(result, "project_id", "default_project")
+            commit_h = getattr(result, "commit_hash", None)
+            branch = getattr(result, "branch", None)
+            strategy = getattr(result, "strategy", "time_budget")
+            params = getattr(result, "strategy_params", {})
+            sel_ids = getattr(result, "selected_test_ids", [])
+            exc_ids = getattr(result, "excluded_test_ids", [])
+            b_exc_ids = getattr(result, "budget_exception_test_ids", [])
+            tests_raw = getattr(result, "tests", [])
+            tests = [t.model_dump() if hasattr(t, "model_dump") else t for t in tests_raw]
+            est_dur = float(getattr(result, "estimated_total_duration_s", 0.0))
+            cov = float(getattr(result, "risk_coverage_pct", 0.0))
+            crit_cov = float(getattr(result, "critical_coverage_pct", 0.0))
+            created_at = getattr(result, "created_at", None) or datetime.now().isoformat()
+
+        if not sel_id:
+            sel_id = f"sel_{commit_h or 'local'}_{int(datetime.now().timestamp())}"
+
+        params_json = json.dumps(params)
+        sel_json = json.dumps(sel_ids)
+        exc_json = json.dumps(exc_ids)
+        b_exc_json = json.dumps(b_exc_ids)
+        tests_json = json.dumps(tests)
+
+        with conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO regression_selections (
+                    id, project_id, commit_hash, branch, strategy,
+                    strategy_params_json, selected_test_ids_json, excluded_test_ids_json,
+                    budget_exceptions_json, tests_json, estimated_duration_s,
+                    risk_coverage_pct, critical_coverage_pct, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    sel_id,
+                    proj_id,
+                    commit_h,
+                    branch,
+                    str(strategy),
+                    params_json,
+                    sel_json,
+                    exc_json,
+                    b_exc_json,
+                    tests_json,
+                    est_dur,
+                    cov,
+                    crit_cov,
+                    created_at,
+                ),
+            )
+        return sel_id
+    finally:
+        conn.close()
+
+
+def get_regression_selections(
+    project_id: str = "default_project",
+    commit_hash: str | None = None,
+    limit: int = 50,
+    db_path: Path | str | None = None,
+) -> list[dict[str, Any]]:
+    """Retrieve historical regression selection summaries."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        query = (
+            "SELECT id, project_id, commit_hash, branch, strategy, strategy_params_json, "
+            "selected_test_ids_json, excluded_test_ids_json, budget_exceptions_json, "
+            "estimated_duration_s, risk_coverage_pct, critical_coverage_pct, created_at "
+            "FROM regression_selections WHERE project_id = ?"
+        )
+        params: list[Any] = [project_id]
+        if commit_hash:
+            query += " AND commit_hash = ?"
+            params.append(commit_hash)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        rows = conn.execute(query, params).fetchall()
+        results: list[dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["strategy_params"] = json.loads(d.get("strategy_params_json") or "{}")
+                d["selected_test_ids"] = json.loads(d.get("selected_test_ids_json") or "[]")
+                d["excluded_test_ids"] = json.loads(d.get("excluded_test_ids_json") or "[]")
+                d["budget_exceptions"] = json.loads(d.get("budget_exceptions_json") or "[]")
+            except Exception:
+                pass
+            results.append(d)
+        return results
+    finally:
+        conn.close()
+
+
+def get_regression_selection_by_id(
+    selection_id: str,
+    db_path: Path | str | None = None,
+) -> dict[str, Any] | None:
+    """Retrieve a complete regression selection snapshot by ID."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM regression_selections WHERE id = ?",
+            (selection_id,),
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["strategy_params"] = json.loads(d.get("strategy_params_json") or "{}")
+            d["selected_test_ids"] = json.loads(d.get("selected_test_ids_json") or "[]")
+            d["excluded_test_ids"] = json.loads(d.get("excluded_test_ids_json") or "[]")
+            d["budget_exceptions"] = json.loads(d.get("budget_exceptions_json") or "[]")
+            d["tests"] = json.loads(d.get("tests_json") or "[]")
+        except Exception:
+            pass
+        return d
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Decision Trace & Audit Operations (Phase 7.5.5)
+# ---------------------------------------------------------------------------
+
+def save_decision_traces(
+    selection_id: str,
+    traces: list[Any],
+    commit_hash: str | None = None,
+    project_id: str = "default_project",
+    db_path: Path | str | None = None,
+) -> int:
+    """Persist auditable decision traces for an intelligent regression selection."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    saved = 0
+    now = datetime.now().isoformat()
+    try:
+        with conn:
+            for t in traces:
+                if isinstance(t, dict):
+                    tc_id = t.get("testcase_id")
+                    tc_name = t.get("testcase_name", "")
+                    decision = t.get("decision", "excluded")
+                    r_score = float(t.get("risk_score", 0.0))
+                    r_tier = t.get("risk_tier", "low")
+                    m_conf = float(t.get("mapping_confidence", 0.0))
+                    est_dur = float(t.get("estimated_duration_s", 0.0))
+                    dur_src = t.get("duration_source", "estimated_fallback")
+                    summary = t.get("decision_summary", "")
+                    rationale = t.get("selection_rationale", "")
+                    evidence = {
+                        "observed": t.get("observed_evidence", []),
+                        "heuristic": t.get("heuristic_inferences", []),
+                        "missing": t.get("missing_evidence", []),
+                        "risk_narrative": t.get("risk_narrative", ""),
+                        "affected_files": t.get("affected_files", []),
+                        "matched_selectors": t.get("matched_selectors", []),
+                        "matched_routes": t.get("matched_routes", []),
+                    }
+                else:
+                    tc_id = getattr(t, "testcase_id", "")
+                    tc_name = getattr(t, "testcase_name", "")
+                    decision = getattr(t, "decision", "excluded")
+                    r_score = float(getattr(t, "risk_score", 0.0))
+                    r_tier = getattr(t, "risk_tier", "low")
+                    m_conf = float(getattr(t, "mapping_confidence", 0.0))
+                    est_dur = float(getattr(t, "estimated_duration_s", 0.0))
+                    dur_src = getattr(t, "duration_source", "estimated_fallback")
+                    summary = getattr(t, "decision_summary", "")
+                    rationale = getattr(t, "selection_rationale", "")
+                    obs_raw = getattr(t, "observed_evidence", [])
+                    heu_raw = getattr(t, "heuristic_inferences", [])
+                    mis_raw = getattr(t, "missing_evidence", [])
+                    evidence = {
+                        "observed": [x.model_dump() if hasattr(x, "model_dump") else x for x in obs_raw],
+                        "heuristic": [x.model_dump() if hasattr(x, "model_dump") else x for x in heu_raw],
+                        "missing": [x.model_dump() if hasattr(x, "model_dump") else x for x in mis_raw],
+                        "risk_narrative": getattr(t, "risk_narrative", ""),
+                        "affected_files": getattr(t, "affected_files", []),
+                        "matched_selectors": getattr(t, "matched_selectors", []),
+                        "matched_routes": getattr(t, "matched_routes", []),
+                    }
+
+                trace_id = f"trace_{selection_id}_{tc_id}"
+                evidence_str = json.dumps(evidence)
+
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO regression_decision_traces (
+                        id, selection_id, project_id, commit_hash, testcase_id, testcase_name,
+                        decision, risk_score, risk_tier, mapping_confidence, estimated_duration_s,
+                        duration_source, decision_summary, evidence_json, rationale, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        trace_id,
+                        selection_id,
+                        project_id,
+                        commit_hash,
+                        tc_id,
+                        tc_name,
+                        str(decision),
+                        r_score,
+                        str(r_tier),
+                        m_conf,
+                        est_dur,
+                        str(dur_src),
+                        summary,
+                        evidence_str,
+                        rationale,
+                        now,
+                    ),
+                )
+                saved += 1
+        return saved
+    finally:
+        conn.close()
+
+
+def get_decision_traces(
+    selection_id: str,
+    db_path: Path | str | None = None,
+) -> list[dict[str, Any]]:
+    """Retrieve all auditable decision traces for a regression selection."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM regression_decision_traces
+            WHERE selection_id = ?
+            ORDER BY risk_score DESC, testcase_id ASC
+            """,
+            (selection_id,),
+        ).fetchall()
+        results: list[dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["evidence"] = json.loads(d.get("evidence_json") or "{}")
+            except Exception:
+                d["evidence"] = {}
+            results.append(d)
+        return results
+    finally:
+        conn.close()
+
+
+def record_user_decision_override(
+    selection_id: str,
+    testcase_id: str,
+    override_decision: str,
+    override_reason: str,
+    db_path: Path | str | None = None,
+) -> dict[str, Any] | None:
+    """Record an explicit user approval or exclusion override for a test with audit rationale."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    now = datetime.now().isoformat()
+    try:
+        with conn:
+            cursor = conn.execute(
+                """
+                UPDATE regression_decision_traces
+                SET decision = ?, user_override = 1, override_reason = ?, created_at = ?
+                WHERE selection_id = ? AND testcase_id = ?
+                """,
+                (override_decision, override_reason, now, selection_id, testcase_id),
+            )
+            if cursor.rowcount == 0:
+                meta = conn.execute(
+                    "SELECT name FROM testcases_meta WHERE id = ?", (testcase_id,)
+                ).fetchone()
+                tc_name = meta["name"] if meta else testcase_id
+                trace_id = f"trace_{selection_id}_{testcase_id}"
+                conn.execute(
+                    """
+                    INSERT INTO regression_decision_traces (
+                        id, selection_id, project_id, testcase_id, testcase_name,
+                        decision, risk_score, risk_tier, mapping_confidence, estimated_duration_s,
+                        duration_source, decision_summary, evidence_json, rationale,
+                        user_override, override_reason, created_at
+                    ) VALUES (?, ?, 'default_project', ?, ?, ?, 0.0, 'low', 0.0, 15.0, 'estimated_fallback', ?, '{}', ?, 1, ?, ?)
+                    """,
+                    (
+                        trace_id,
+                        selection_id,
+                        testcase_id,
+                        tc_name,
+                        override_decision,
+                        f"User override to {override_decision}",
+                        override_reason,
+                        override_reason,
+                        now,
+                    ),
+                )
+
+            sel_row = conn.execute(
+                "SELECT * FROM regression_selections WHERE id = ?", (selection_id,)
+            ).fetchone()
+            if sel_row:
+                sel_ids = set(json.loads(sel_row["selected_test_ids_json"] or "[]"))
+                exc_ids = set(json.loads(sel_row["excluded_test_ids_json"] or "[]"))
+                b_exc_ids = set(json.loads(sel_row["budget_exceptions_json"] or "[]"))
+
+                if override_decision == "selected":
+                    sel_ids.add(testcase_id)
+                    exc_ids.discard(testcase_id)
+                    b_exc_ids.discard(testcase_id)
+                elif override_decision in ("excluded", "user_excluded"):
+                    exc_ids.add(testcase_id)
+                    sel_ids.discard(testcase_id)
+                    b_exc_ids.discard(testcase_id)
+
+                conn.execute(
+                    """
+                    UPDATE regression_selections
+                    SET selected_test_ids_json = ?, excluded_test_ids_json = ?, budget_exceptions_json = ?
+                    WHERE id = ?
+                    """,
+                    (json.dumps(sorted(sel_ids)), json.dumps(sorted(exc_ids)), json.dumps(sorted(b_exc_ids)), selection_id),
+                )
+
+        updated = conn.execute(
+            "SELECT * FROM regression_decision_traces WHERE selection_id = ? AND testcase_id = ?",
+            (selection_id, testcase_id),
+        ).fetchone()
+        return dict(updated) if updated else None
     finally:
         conn.close()
