@@ -315,6 +315,7 @@ class SandboxExecutor:
             validation_id=validation_id,
             draft_id=draft.id,
             draft_version=getattr(draft, "version", 1),
+            draft_content_hash=getattr(draft, "content_hash", None),
             browser=browser,
             headless=headless,
             started_at=started_at,

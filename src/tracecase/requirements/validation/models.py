@@ -63,6 +63,7 @@ class DraftValidationReport(BaseModel):
     validation_id: str = Field(default_factory=lambda: f"val_{uuid.uuid4().hex[:8]}")
     draft_id: str
     draft_version: int = 1
+    draft_content_hash: str | None = None
     browser: str = "chromium"
     headless: bool = True
     started_at: datetime = Field(default_factory=datetime.now)

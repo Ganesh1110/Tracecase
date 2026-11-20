@@ -70,6 +70,7 @@ from tracecase.ui.db import (
     create_suite,
     delete_project,
     delete_suite,
+    diff_draft_snapshots,
     get_ai_analyses_for_testcase,
     get_ci_analytics,
     get_ci_drift_for_run,
@@ -77,6 +78,7 @@ from tracecase.ui.db import (
     get_ci_runs,
     get_dashboard_metrics,
     get_decision_traces,
+    get_draft_snapshot,
     get_execution_attempts,
     get_execution_batch,
     get_execution_matrix,
@@ -91,6 +93,7 @@ from tracecase.ui.db import (
     get_test_code_mappings,
     get_testcase_flakiness_stats,
     list_execution_batches,
+    list_draft_snapshots,
     list_execution_matrices,
     list_execution_runs,
     list_projects,
@@ -2339,6 +2342,12 @@ class SynthesizeRequest(BaseModel):
 class DraftApproveRequest(BaseModel):
     custom_name: str | None = None
     modifications: dict[str, Any] | None = None
+    expected_version: int | None = None
+    expected_content_hash: str | None = None
+    suite_id: str | None = None
+    reviewer: str | None = None
+    notes: str | None = None
+    require_validation: bool = False
 
 
 class DraftRejectRequest(BaseModel):
@@ -2419,10 +2428,23 @@ async def approve_draft_endpoint(
     try:
         custom_name = req.custom_name if req else None
         modifications = req.modifications if req else None
+        expected_version = req.expected_version if req else None
+        expected_content_hash = req.expected_content_hash if req else None
+        suite_id = req.suite_id if req else None
+        reviewer = req.reviewer if req else None
+        notes = req.notes if req else None
+        require_validation = req.require_validation if req else False
+
         result = approve_synthesized_draft(
             draft_id=draft_id,
             custom_name=custom_name,
             modifications=modifications,
+            expected_version=expected_version,
+            expected_content_hash=expected_content_hash,
+            suite_id=suite_id,
+            reviewer=reviewer,
+            notes=notes,
+            require_validation=require_validation,
         )
         return result
     except ValueError as exc:
@@ -2433,6 +2455,43 @@ async def approve_draft_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed approving draft: {exc}",
         ) from exc
+
+
+@router.get("/autonomous/drafts/{draft_id}/snapshots")
+async def list_draft_snapshots_endpoint(draft_id: str) -> list[dict[str, Any]]:
+    """List all historical immutable snapshots for a draft."""
+    draft = get_synthesized_draft(draft_id)
+    if not draft:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Draft '{draft_id}' not found",
+        )
+    return list_draft_snapshots(draft_id)
+
+
+@router.get("/autonomous/drafts/{draft_id}/snapshots/{version}")
+async def get_draft_snapshot_endpoint(draft_id: str, version: int) -> dict[str, Any]:
+    """Get a specific immutable draft snapshot by version number."""
+    snap = get_draft_snapshot(draft_id, version)
+    if not snap:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Snapshot version {version} not found for draft '{draft_id}'",
+        )
+    return snap
+
+
+@router.get("/autonomous/drafts/{draft_id}/diff")
+async def diff_draft_snapshots_endpoint(
+    draft_id: str,
+    v1: int = Query(..., description="Base version"),
+    v2: int = Query(..., description="Target version to compare against"),
+) -> dict[str, Any]:
+    """Compute structured step diff between two draft versions."""
+    try:
+        return diff_draft_snapshots(draft_id, v1, v2)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/autonomous/drafts/{draft_id}/reject")

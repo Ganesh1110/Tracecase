@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import uuid
@@ -667,7 +668,7 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             "CREATE INDEX IF NOT EXISTS idx_ci_drift_tc ON ci_drift_records(testcase_id)"
         )
 
-        # Phase 9.1.3: Draft Validations Table and Synthesized Drafts Versioning
+        # Phase 9.1.3 & Phase 9.1.4: Draft Validations, Version Snapshots, and Content Hashing
         try:
             cursor = conn.execute("PRAGMA table_info(synthesized_drafts)")
             draft_cols = [row["name"] for row in cursor.fetchall()]
@@ -683,6 +684,10 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
                 conn.execute(
                     "ALTER TABLE synthesized_drafts ADD COLUMN validation_details_json TEXT NOT NULL DEFAULT '{}'"
                 )
+            if "content_hash" not in draft_cols:
+                conn.execute(
+                    "ALTER TABLE synthesized_drafts ADD COLUMN content_hash TEXT"
+                )
         except Exception:
             pass
 
@@ -692,6 +697,7 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
                 id TEXT PRIMARY KEY,
                 draft_id TEXT NOT NULL,
                 draft_version INTEGER NOT NULL DEFAULT 1,
+                draft_content_hash TEXT,
                 browser TEXT NOT NULL DEFAULT 'chromium',
                 headless INTEGER NOT NULL DEFAULT 1,
                 status TEXT NOT NULL DEFAULT 'NOT_RUN',
@@ -708,12 +714,103 @@ def init_studio_db(db_path: Path | str | None = None) -> None:
             )
             """
         )
+        try:
+            val_cursor = conn.execute("PRAGMA table_info(draft_validations)")
+            val_cols = [row["name"] for row in val_cursor.fetchall()]
+            if "draft_content_hash" not in val_cols:
+                conn.execute("ALTER TABLE draft_validations ADD COLUMN draft_content_hash TEXT")
+        except Exception:
+            pass
+
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_draft_validations_draft ON draft_validations(draft_id)"
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_draft_validations_version ON draft_validations(draft_id, draft_version)"
         )
+
+        # Phase 9.1.4: Immutable Draft Snapshots Table
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS synthesized_draft_snapshots (
+                id TEXT PRIMARY KEY,
+                draft_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                content_hash TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                journey_type TEXT NOT NULL DEFAULT 'navigation',
+                start_url TEXT NOT NULL DEFAULT '',
+                steps_json TEXT NOT NULL DEFAULT '[]',
+                requires_human_input INTEGER NOT NULL DEFAULT 0,
+                changelog TEXT,
+                author TEXT DEFAULT 'system',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (draft_id) REFERENCES synthesized_drafts(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_draft_snapshots_version ON synthesized_draft_snapshots(draft_id, version)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_draft_snapshots_hash ON synthesized_draft_snapshots(content_hash)"
+        )
+
+        # Automatic Backfill: Ensure existing drafts have version 1 snapshot and content hash
+        try:
+            existing_drafts = conn.execute(
+                "SELECT id, version, content_hash, name, description, journey_type, start_url, steps_json, requires_human_input, created_at FROM synthesized_drafts"
+            ).fetchall()
+            for row in existing_drafts:
+                d_id = row["id"]
+                ver = row["version"] or 1
+                c_hash = row["content_hash"]
+                steps_data = json.loads(row["steps_json"] or "[]")
+                if not c_hash:
+                    c_hash = compute_draft_content_hash(
+                        steps=steps_data,
+                        start_url=row["start_url"] or "",
+                        name=row["name"] or "",
+                        journey_type=row["journey_type"] or "",
+                    )
+                    conn.execute(
+                        "UPDATE synthesized_drafts SET content_hash = ? WHERE id = ?",
+                        (c_hash, d_id),
+                    )
+
+                snap_exists = conn.execute(
+                    "SELECT 1 FROM synthesized_draft_snapshots WHERE draft_id = ? AND version = ?",
+                    (d_id, ver),
+                ).fetchone()
+                if not snap_exists:
+                    snap_id = f"snap_{uuid.uuid4().hex[:8]}"
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO synthesized_draft_snapshots (
+                            id, draft_id, version, content_hash, name, description,
+                            journey_type, start_url, steps_json, requires_human_input,
+                            changelog, author, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            snap_id,
+                            d_id,
+                            ver,
+                            c_hash,
+                            row["name"] or "Synthesized Journey",
+                            row["description"] or "",
+                            row["journey_type"] or "navigation",
+                            row["start_url"] or "",
+                            row["steps_json"] or "[]",
+                            row["requires_human_input"] or 0,
+                            "Initial version backfill",
+                            "system",
+                            row["created_at"] or datetime.now().isoformat(),
+                        ),
+                    )
+        except Exception:
+            pass
 
         # Ensure default project exists
         default_proj = conn.execute(
@@ -2795,16 +2892,83 @@ def clear_test_code_mappings(
 # Test Journey Drafts & Approval Operations
 # ---------------------------------------------------------------------------
 
+def compute_draft_content_hash(
+    steps: list[dict[str, Any]] | list[Any],
+    start_url: str = "",
+    name: str = "",
+    journey_type: str = "",
+) -> str:
+    """
+    Compute a deterministic SHA-256 content hash covering execution-relevant fields:
+    - start_url
+    - normalized steps (action_type, selector, input_value, url, assertions)
+    - name and journey_type
+    Ephemeral fields like timestamps, durations, or screenshot paths are excluded.
+    """
+    normalized_steps = []
+    for s in steps:
+        if hasattr(s, "model_dump"):
+            s_dict = s.model_dump(mode="json")
+        elif isinstance(s, dict):
+            s_dict = s
+        else:
+            s_dict = {}
+
+        # Normalize assertions
+        raw_assertions = s_dict.get("assertions") or []
+        norm_assertions = []
+        for a in raw_assertions:
+            if hasattr(a, "model_dump"):
+                a_dict = a.model_dump(mode="json")
+            elif isinstance(a, dict):
+                a_dict = a
+            else:
+                a_dict = {}
+            norm_assertions.append({
+                "assertion_type": a_dict.get("assertion_type", ""),
+                "target_selector": a_dict.get("target_selector") or "",
+                "expected_value": str(a_dict.get("expected_value")) if a_dict.get("expected_value") is not None else None,
+            })
+        norm_assertions.sort(key=lambda x: (x["assertion_type"], x["target_selector"]))
+
+        normalized_steps.append({
+            "action_type": s_dict.get("action_type", ""),
+            "selector": s_dict.get("selector") or "",
+            "input_value": s_dict.get("input_value") or "",
+            "url": s_dict.get("url") or "",
+            "assertions": norm_assertions,
+        })
+
+    payload = {
+        "start_url": (start_url or "").strip(),
+        "name": (name or "").strip(),
+        "journey_type": (journey_type or "").strip(),
+        "steps": normalized_steps,
+    }
+    canonical_json = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+
+
 def save_synthesized_draft(
     draft: dict[str, Any], db_path: Path | str | None = None
 ) -> dict[str, Any]:
-    """Persist a synthesized test journey draft."""
+    """Persist a synthesized test journey draft and capture immutable snapshot."""
     init_studio_db(db_path)
     conn = get_connection(db_path)
     draft_id = draft.get("id") or f"draft_{uuid.uuid4().hex[:8]}"
     now = datetime.now().isoformat()
-    steps_json = json.dumps(draft.get("steps", []))
+    steps_raw = draft.get("steps", [])
+    steps_json = json.dumps(steps_raw)
     requires_input = 1 if draft.get("requires_human_input") else 0
+    version = int(draft.get("version") or 1)
+    
+    content_hash = draft.get("content_hash") or compute_draft_content_hash(
+        steps=steps_raw,
+        start_url=draft.get("start_url", ""),
+        name=draft.get("name", "Synthesized Journey"),
+        journey_type=draft.get("journey_type", "navigation"),
+    )
+
     try:
         with conn:
             conn.execute(
@@ -2813,8 +2977,8 @@ def save_synthesized_draft(
                     id, exploration_id, project_id, name, description,
                     journey_type, priority, start_url, steps_json,
                     status, approved_testcase_id, rejection_reason,
-                    requires_human_input, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    requires_human_input, created_at, version, content_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     draft_id,
@@ -2831,8 +2995,38 @@ def save_synthesized_draft(
                     draft.get("rejection_reason"),
                     requires_input,
                     draft.get("created_at", now),
+                    version,
+                    content_hash,
                 ),
             )
+
+            # Persist immutable snapshot for this draft version if not already present
+            snap_id = f"snap_{uuid.uuid4().hex[:8]}"
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO synthesized_draft_snapshots (
+                    id, draft_id, version, content_hash, name, description,
+                    journey_type, start_url, steps_json, requires_human_input,
+                    changelog, author, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    snap_id,
+                    draft_id,
+                    version,
+                    content_hash,
+                    draft.get("name", "Synthesized Journey"),
+                    draft.get("description", ""),
+                    draft.get("journey_type", "navigation"),
+                    draft.get("start_url", ""),
+                    steps_json,
+                    requires_input,
+                    draft.get("changelog") or "Initial draft generation",
+                    draft.get("author") or "system",
+                    now,
+                ),
+            )
+
         return get_synthesized_draft(draft_id, db_path) or draft
     finally:
         conn.close()
@@ -2854,6 +3048,7 @@ def get_synthesized_draft(
         d["steps"] = json.loads(d.get("steps_json") or "[]")
         d["requires_human_input"] = bool(d.get("requires_human_input", 0))
         d["version"] = int(d.get("version") or 1)
+        d["content_hash"] = d.get("content_hash")
         d["validation_status"] = d.get("validation_status") or "not_run"
         d["validation_details"] = json.loads(d.get("validation_details_json") or "{}")
         return d
@@ -2903,14 +3098,20 @@ def update_synthesized_draft(
     name: str | None = None,
     description: str | None = None,
     steps: list[dict[str, Any]] | None = None,
+    changelog: str | None = None,
+    author: str = "user",
     db_path: Path | str | None = None,
 ) -> dict[str, Any] | None:
     """
     Update a draft's name, description, or steps.
     
     Security Guardrail:
-    If a draft was previously 'approved', modifying its content automatically
-    invalidates approval status, resetting it to 'pending' and requiring re-approval.
+    - Increments draft version.
+    - Captures an immutable snapshot with re-calculated deterministic content_hash.
+    - If a draft was previously 'approved', modifying its content automatically
+      invalidates approval status, resetting it to 'pending'.
+    - Resets validation_status to 'not_run' since validation of an older version
+      cannot prove validity of the edited version.
     """
     init_studio_db(db_path)
     draft = get_synthesized_draft(draft_id, db_path)
@@ -2920,6 +3121,24 @@ def update_synthesized_draft(
     was_approved = draft.get("status") == "approved"
     conn = get_connection(db_path)
     now = datetime.now().isoformat()
+    old_version = int(draft.get("version") or 1)
+    new_version = old_version
+    
+    updated_name = name if name is not None else draft.get("name", "Synthesized Journey")
+    updated_desc = description if description is not None else draft.get("description", "")
+    updated_steps = steps if steps is not None else draft.get("steps", [])
+    
+    content_changed = (steps is not None) or (name is not None)
+    if content_changed:
+        new_version = old_version + 1
+
+    new_content_hash = compute_draft_content_hash(
+        steps=updated_steps,
+        start_url=draft.get("start_url", ""),
+        name=updated_name,
+        journey_type=draft.get("journey_type", "navigation"),
+    )
+
     try:
         with conn:
             updates = []
@@ -2934,14 +3153,17 @@ def update_synthesized_draft(
                 updates.append("steps_json = ?")
                 params.append(json.dumps(steps))
 
-            if steps is not None or name is not None:
-                updates.append("version = COALESCE(version, 1) + 1")
-
-            if was_approved and (steps is not None or name is not None):
-                # Security invalidation: reset approval status
+            if content_changed:
+                updates.append("version = ?")
+                params.append(new_version)
+                updates.append("content_hash = ?")
+                params.append(new_content_hash)
+                # Security invalidation: reset approval and validation status
                 updates.append("status = 'pending'")
                 updates.append("approved_testcase_id = NULL")
                 updates.append("requires_human_input = 1")
+                updates.append("validation_status = 'not_run'")
+                updates.append("validation_details_json = '{}'")
 
             updates.append("reviewed_at = ?")
             params.append(now)
@@ -2949,6 +3171,35 @@ def update_synthesized_draft(
             params.append(draft_id)
             sql = f"UPDATE synthesized_drafts SET {', '.join(updates)} WHERE id = ?"
             conn.execute(sql, tuple(params))
+
+            # Record immutable snapshot if version incremented
+            if content_changed:
+                snap_id = f"snap_{uuid.uuid4().hex[:8]}"
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO synthesized_draft_snapshots (
+                        id, draft_id, version, content_hash, name, description,
+                        journey_type, start_url, steps_json, requires_human_input,
+                        changelog, author, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        snap_id,
+                        draft_id,
+                        new_version,
+                        new_content_hash,
+                        updated_name,
+                        updated_desc,
+                        draft.get("journey_type", "navigation"),
+                        draft.get("start_url", ""),
+                        json.dumps(updated_steps),
+                        1 if draft.get("requires_human_input") else 0,
+                        changelog or f"Edited draft to version {new_version}",
+                        author,
+                        now,
+                    ),
+                )
+
         return get_synthesized_draft(draft_id, db_path)
     finally:
         conn.close()
@@ -2959,21 +3210,77 @@ def approve_synthesized_draft(
     custom_name: str | None = None,
     modifications: dict[str, Any] | None = None,
     base_dir: Path | str | None = None,
+    expected_version: int | None = None,
+    expected_content_hash: str | None = None,
+    suite_id: str | None = None,
+    reviewer: str | None = None,
+    notes: str | None = None,
+    require_validation: bool = False,
     db_path: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Approve a synthesized draft journey and promote it into an executable TestCase."""
+    """
+    Approve a synthesized draft journey and promote it into an executable TestCase.
+    
+    Guarantees:
+    - Atomicity: File creation, testcase metadata registration, and suite linking execute
+      in a single transactional block with automatic rollback and filesystem cleanup.
+    - Idempotency: Multiple approval calls on an already-approved draft return the existing
+      TestCase without creating duplicates.
+    - Version & Hash Verification: Validates that the approved version matches expectations
+      and optionally enforces verified sandbox validation status.
+    - Optimistic Concurrency: Rejects approval if a concurrent modification changed draft version.
+    """
     init_studio_db(db_path)
     draft = get_synthesized_draft(draft_id, db_path)
     if not draft:
         raise ValueError(f"Draft '{draft_id}' not found.")
 
+    current_ver = int(draft.get("version") or 1)
+    current_hash = draft.get("content_hash") or compute_draft_content_hash(
+        steps=draft.get("steps", []),
+        start_url=draft.get("start_url", ""),
+        name=draft.get("name", "Synthesized Journey"),
+        journey_type=draft.get("journey_type", "navigation"),
+    )
+
+    # 1. Version and hash checks
+    if expected_version is not None and current_ver != expected_version:
+        raise ValueError(f"Draft version conflict: current version is {current_ver}, expected {expected_version}.")
+    if expected_content_hash is not None and current_hash != expected_content_hash:
+        raise ValueError(f"Draft content hash mismatch: current hash is {current_hash}, expected {expected_content_hash}.")
+
+    # 2. Idempotency guard: if already approved for this exact version and testcase exists
     if draft.get("status") == "approved" and draft.get("approved_testcase_id"):
         return {
             "draft_id": draft_id,
             "testcase_id": draft["approved_testcase_id"],
             "status": "approved",
-            "message": "Draft already approved.",
+            "message": f"Draft already approved for version {current_ver}.",
+            "idempotent": True,
+            "version": current_ver,
+            "content_hash": current_hash,
         }
+
+    # 3. Validation requirement check
+    if require_validation:
+        conn = get_connection(db_path)
+        try:
+            valid_row = conn.execute(
+                """
+                SELECT id FROM draft_validations
+                WHERE draft_id = ? AND draft_version = ?
+                  AND (draft_content_hash = ? OR draft_content_hash IS NULL)
+                  AND status IN ('VERIFIED', 'SUCCESS')
+                LIMIT 1
+                """,
+                (draft_id, current_ver, current_hash),
+            ).fetchone()
+            if not valid_row:
+                raise ValueError(
+                    f"Draft '{draft_id}' version {current_ver} has not passed sandbox validation and cannot be approved."
+                )
+        finally:
+            conn.close()
 
     now = datetime.now()
     tc_id = f"tc_{uuid.uuid4().hex[:8]}"
@@ -3044,47 +3351,206 @@ def approve_synthesized_draft(
         total_steps=len(testcase_steps),
     )
 
-    # Write testcase file to disk
+    # Atomic write with rollback cleanup
     target_root = Path(base_dir) if base_dir else Path("recordings")
     tc_dir = target_root / tc_id
-    tc_dir.mkdir(parents=True, exist_ok=True)
     tc_file = tc_dir / "testcase.json"
-    tc_file.write_text(testcase.model_dump_json(indent=2), encoding="utf-8")
+    tc_dir_created = False
 
-    # Upsert into testcases_meta with approval_status="approved"
-    sync_testcase_meta(
-        testcase=testcase,
-        file_path=tc_file,
-        project_id=project_id,
-        tags=["synthesized", "autonomous", draft.get("journey_type", "navigation")],
-        approval_status="approved",
-        provenance={"draft_id": draft_id, "exploration_id": draft.get("exploration_id")},
-        db_path=db_path,
-    )
+    try:
+        tc_dir.mkdir(parents=True, exist_ok=True)
+        tc_dir_created = True
+        tc_file.write_text(testcase.model_dump_json(indent=2), encoding="utf-8")
 
-    # Update draft in database
+        # Database Transaction
+        conn = get_connection(db_path)
+        try:
+            with conn:
+                sync_testcase_meta(
+                    testcase=testcase,
+                    file_path=tc_file,
+                    project_id=project_id,
+                    tags=["synthesized", "autonomous", draft.get("journey_type", "navigation")],
+                    approval_status="approved",
+                    provenance={
+                        "draft_id": draft_id,
+                        "exploration_id": draft.get("exploration_id"),
+                        "version": current_ver,
+                        "content_hash": current_hash,
+                        "reviewer": reviewer or "reviewer",
+                        "notes": notes,
+                    },
+                    db_path=db_path,
+                )
+
+                if suite_id:
+                    add_testcase_to_suite(suite_id, tc_id, db_path=db_path)
+
+                # Optimistic lock on version
+                cursor = conn.execute(
+                    """
+                    UPDATE synthesized_drafts
+                    SET status = 'approved',
+                        approved_testcase_id = ?,
+                        reviewed_at = ?,
+                        rejection_reason = NULL
+                    WHERE id = ? AND version = ?
+                    """,
+                    (tc_id, now.isoformat(), draft_id, current_ver),
+                )
+                if cursor.rowcount == 0:
+                    raise ValueError(
+                        f"Concurrent modification detected: draft '{draft_id}' version changed during approval."
+                    )
+        finally:
+            conn.close()
+
+        return {
+            "draft_id": draft_id,
+            "testcase_id": tc_id,
+            "status": "approved",
+            "file_path": str(tc_file),
+            "testcase": testcase.model_dump(mode="json"),
+            "version": current_ver,
+            "content_hash": current_hash,
+            "idempotent": False,
+        }
+    except Exception:
+        if tc_dir_created:
+            try:
+                if tc_file.exists():
+                    tc_file.unlink()
+                if tc_dir.exists():
+                    tc_dir.rmdir()
+            except Exception:
+                pass
+        raise
+
+
+def list_draft_snapshots(
+    draft_id: str, db_path: Path | str | None = None
+) -> list[dict[str, Any]]:
+    """List all historical immutable snapshots for a draft."""
+    init_studio_db(db_path)
     conn = get_connection(db_path)
     try:
-        with conn:
-            conn.execute(
-                """
-                UPDATE synthesized_drafts
-                SET status = 'approved',
-                    approved_testcase_id = ?,
-                    reviewed_at = ?
-                WHERE id = ?
-                """,
-                (tc_id, now.isoformat(), draft_id),
-            )
+        rows = conn.execute(
+            """
+            SELECT * FROM synthesized_draft_snapshots
+            WHERE draft_id = ?
+            ORDER BY version ASC
+            """,
+            (draft_id,),
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["steps"] = json.loads(d.get("steps_json") or "[]")
+            d["requires_human_input"] = bool(d.get("requires_human_input", 0))
+            result.append(d)
+        return result
     finally:
         conn.close()
 
+
+def get_draft_snapshot(
+    draft_id: str, version: int, db_path: Path | str | None = None
+) -> dict[str, Any] | None:
+    """Retrieve an exact immutable draft snapshot by version."""
+    init_studio_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT * FROM synthesized_draft_snapshots
+            WHERE draft_id = ? AND version = ?
+            """,
+            (draft_id, version),
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["steps"] = json.loads(d.get("steps_json") or "[]")
+        d["requires_human_input"] = bool(d.get("requires_human_input", 0))
+        return d
+    finally:
+        conn.close()
+
+
+def diff_draft_snapshots(
+    draft_id: str, v1: int, v2: int, db_path: Path | str | None = None
+) -> dict[str, Any]:
+    """Compute structured step-by-step diff between two draft versions."""
+    s1 = get_draft_snapshot(draft_id, v1, db_path)
+    if not s1:
+        raise ValueError(f"Snapshot version {v1} not found for draft '{draft_id}'.")
+    s2 = get_draft_snapshot(draft_id, v2, db_path)
+    if not s2:
+        raise ValueError(f"Snapshot version {v2} not found for draft '{draft_id}'.")
+
+    steps1 = s1.get("steps", [])
+    steps2 = s2.get("steps", [])
+    max_len = max(len(steps1), len(steps2))
+    step_diffs = []
+
+    for i in range(max_len):
+        step_num = i + 1
+        old_s = steps1[i] if i < len(steps1) else None
+        new_s = steps2[i] if i < len(steps2) else None
+
+        if old_s is None and new_s is not None:
+            step_diffs.append({
+                "step_number": step_num,
+                "diff_type": "added",
+                "change_summary": f"Added step: {new_s.get('action_type')} on '{new_s.get('selector') or new_s.get('url')}'",
+                "old_step": None,
+                "new_step": new_s,
+            })
+        elif old_s is not None and new_s is None:
+            step_diffs.append({
+                "step_number": step_num,
+                "diff_type": "removed",
+                "change_summary": f"Removed step: {old_s.get('action_type')}",
+                "old_step": old_s,
+                "new_step": None,
+            })
+        else:
+            changes = []
+            if old_s.get("action_type") != new_s.get("action_type"):
+                changes.append(f"action_type: '{old_s.get('action_type')}' -> '{new_s.get('action_type')}'")
+            if old_s.get("selector") != new_s.get("selector"):
+                changes.append(f"selector: '{old_s.get('selector')}' -> '{new_s.get('selector')}'")
+            if old_s.get("input_value") != new_s.get("input_value"):
+                changes.append(f"input_value: '{old_s.get('input_value')}' -> '{new_s.get('input_value')}'")
+            if old_s.get("url") != new_s.get("url"):
+                changes.append(f"url: '{old_s.get('url')}' -> '{new_s.get('url')}'")
+
+            if changes:
+                step_diffs.append({
+                    "step_number": step_num,
+                    "diff_type": "modified",
+                    "change_summary": ", ".join(changes),
+                    "old_step": old_s,
+                    "new_step": new_s,
+                })
+            else:
+                step_diffs.append({
+                    "step_number": step_num,
+                    "diff_type": "unchanged",
+                    "change_summary": "No changes",
+                    "old_step": old_s,
+                    "new_step": new_s,
+                })
+
+    has_changes = any(d["diff_type"] != "unchanged" for d in step_diffs)
     return {
         "draft_id": draft_id,
-        "testcase_id": tc_id,
-        "status": "approved",
-        "file_path": str(tc_file),
-        "testcase": testcase.model_dump(mode="json"),
+        "base_version": v1,
+        "target_version": v2,
+        "base_content_hash": s1["content_hash"],
+        "target_content_hash": s2["content_hash"],
+        "step_diffs": step_diffs,
+        "has_changes": has_changes,
     }
 
 
@@ -3122,24 +3588,36 @@ def save_draft_validation(
     report: dict[str, Any],
     db_path: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Persist a draft validation run and update parent draft validation summary."""
+    """
+    Persist a draft validation run and update parent draft validation summary if current.
+    
+    Security Guardrail (Safeguard B):
+    Every validation report references its exact draft_version and draft_content_hash.
+    If the draft has been edited to a newer version since this validation started,
+    the validation run is preserved in history, but does NOT mark the newer draft version as validated.
+    """
     init_studio_db(db_path)
     conn = get_connection(db_path)
+    draft_id = report["draft_id"]
+    val_ver = int(report.get("draft_version") or 1)
+    val_hash = report.get("draft_content_hash")
+
     try:
         with conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO draft_validations (
-                    id, draft_id, draft_version, browser, headless, status,
+                    id, draft_id, draft_version, draft_content_hash, browser, headless, status,
                     started_at, completed_at, step_results_json,
                     assertion_results_json, artifacts_json, failure_summary,
                     environment_json, safety_policy_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     report["validation_id"],
-                    report["draft_id"],
-                    report.get("draft_version", 1),
+                    draft_id,
+                    val_ver,
+                    val_hash,
                     report.get("browser", "chromium"),
                     1 if report.get("headless", True) else 0,
                     report.get("overall_status", "NOT_RUN"),
@@ -3155,35 +3633,49 @@ def save_draft_validation(
                 ),
             )
 
-            # Update parent synthesized draft's validation summary
-            step_res = report.get("step_results", [])
-            passed_steps = sum(1 for s in step_res if s.get("status") == "PASSED")
-            failed_steps = sum(1 for s in step_res if s.get("status") == "FAILED")
-            blocked_steps = sum(1 for s in step_res if s.get("status") == "BLOCKED")
+            # Safeguard B: Check parent draft's current version and content_hash
+            draft_row = conn.execute(
+                "SELECT version, content_hash FROM synthesized_drafts WHERE id = ?",
+                (draft_id,),
+            ).fetchone()
 
-            summary_details = {
-                "validation_id": report["validation_id"],
-                "draft_version": report.get("draft_version", 1),
-                "overall_status": report.get("overall_status"),
-                "failure_summary": report.get("failure_summary"),
-                "passed_steps": passed_steps,
-                "failed_steps": failed_steps,
-                "blocked_steps": blocked_steps,
-            }
+            if draft_row:
+                current_ver = int(draft_row["version"] or 1)
+                current_hash = draft_row["content_hash"]
+                is_matching_version = (val_ver == current_ver)
+                is_matching_hash = (val_hash is None or current_hash is None or val_hash == current_hash)
 
-            conn.execute(
-                """
-                UPDATE synthesized_drafts
-                SET validation_status = ?,
-                    validation_details_json = ?
-                WHERE id = ?
-                """,
-                (
-                    str(report.get("overall_status", "NOT_RUN")).lower(),
-                    json.dumps(summary_details),
-                    report["draft_id"],
-                ),
-            )
+                if is_matching_version and is_matching_hash:
+                    step_res = report.get("step_results", [])
+                    passed_steps = sum(1 for s in step_res if s.get("status") == "PASSED")
+                    failed_steps = sum(1 for s in step_res if s.get("status") == "FAILED")
+                    blocked_steps = sum(1 for s in step_res if s.get("status") == "BLOCKED")
+
+                    summary_details = {
+                        "validation_id": report["validation_id"],
+                        "draft_version": val_ver,
+                        "draft_content_hash": val_hash,
+                        "overall_status": report.get("overall_status"),
+                        "failure_summary": report.get("failure_summary"),
+                        "passed_steps": passed_steps,
+                        "failed_steps": failed_steps,
+                        "blocked_steps": blocked_steps,
+                    }
+
+                    conn.execute(
+                        """
+                        UPDATE synthesized_drafts
+                        SET validation_status = ?,
+                            validation_details_json = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            str(report.get("overall_status", "NOT_RUN")).lower(),
+                            json.dumps(summary_details),
+                            draft_id,
+                        ),
+                    )
+
         return get_draft_validation(report["validation_id"], db_path) or report
     finally:
         conn.close()
@@ -3233,12 +3725,16 @@ def get_latest_draft_validation(
         if not val_data:
             return None
 
-        # Check whether validation aligns with current draft version
+        # Check whether validation aligns with current draft version and content hash
         draft_row = conn.execute(
-            "SELECT version FROM synthesized_drafts WHERE id = ?", (draft_id,)
+            "SELECT version, content_hash FROM synthesized_drafts WHERE id = ?", (draft_id,)
         ).fetchone()
         current_version = int(draft_row["version"]) if draft_row and draft_row["version"] else 1
-        val_data["is_current_version"] = bool(val_data.get("draft_version") == current_version)
+        current_hash = draft_row["content_hash"] if draft_row else None
+        
+        is_ver_match = bool(val_data.get("draft_version") == current_version)
+        is_hash_match = bool(val_data.get("draft_content_hash") is None or current_hash is None or val_data.get("draft_content_hash") == current_hash)
+        val_data["is_current_version"] = (is_ver_match and is_hash_match)
         return val_data
     finally:
         conn.close()

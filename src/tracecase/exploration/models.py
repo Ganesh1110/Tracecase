@@ -230,3 +230,47 @@ class TestJourneyDraft(BaseModel):
     validation_status: Literal["verified", "partially_verified", "failed", "blocked", "not_run"] = "not_run"
     validation_details: dict[str, Any] = Field(default_factory=dict)
     version: int = 1
+    content_hash: str | None = None
+
+
+class TestJourneyDraftSnapshot(BaseModel):
+    """Immutable version snapshot of a synthesized draft journey."""
+
+    __test__ = False
+
+    id: str
+    draft_id: str
+    version: int
+    content_hash: str
+    name: str
+    description: str = ""
+    journey_type: str = "navigation"
+    start_url: str = ""
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+    requires_human_input: bool = False
+    changelog: str = ""
+    author: str = "system"
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
+class DraftDiffStep(BaseModel):
+    """Detailed diff for a single step between two draft versions."""
+
+    step_number: int
+    diff_type: Literal["added", "removed", "modified", "unchanged"]
+    change_summary: str
+    old_step: dict[str, Any] | None = None
+    new_step: dict[str, Any] | None = None
+
+
+class DraftDiffSummary(BaseModel):
+    """Structured step-by-step diff summary between two draft versions."""
+
+    draft_id: str
+    base_version: int
+    target_version: int
+    base_content_hash: str
+    target_content_hash: str
+    step_diffs: list[DraftDiffStep] = Field(default_factory=list)
+    has_changes: bool = False
+
