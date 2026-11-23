@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head><title>Registration Form</title></head>
+<body>
+  <h2>Create Account</h2>
+  <form id="reg-form" onsubmit="event.preventDefault(); submitReg();">
+    <div>
+      <label>Email: <input type="email" id="email" name="email" required /></label>
+    </div>
+    <div>
+      <label>Bio: <textarea id="bio" name="bio" rows="3"></textarea></label>
+    </div>
+    <div>
+      <label>Role:
+        <select id="role-select" name="role">
+          <option value="qa_engineer">QA Engineer</option>
+          <option value="developer">Developer</option>
+          <option value="lead">QA Lead</option>
+        </select>
+      </label>
+    </div>
+    <div>
+      <label><input type="checkbox" id="terms-chk" name="terms" /> Accept Terms</label>
+    </div>
+    <div>
+      <label><input type="radio" id="gender-m" name="gender" value="male" /> Male</label>
+      <label><input type="radio" id="gender-f" name="gender" value="female" /> Female</label>
+    </div>
+    <button type="submit" id="btn-register">Register</button>
+  </form>
+  <div id="reg-status"></div>
+  <script>
+    function submitReg() {
+      const terms = document.getElementById("terms-chk").checked;
+      if (!terms) {
+        document.getElementById("reg-status").innerText = "FAILED: Must accept terms";
+        return;
+      }
+      document.getElementById("reg-status").innerText = "REGISTERED: " + document.getElementById("email").value;
+    }
+  </script>
+</body>
+</html>

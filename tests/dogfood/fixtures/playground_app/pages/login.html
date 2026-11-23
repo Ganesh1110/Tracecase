@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head><title>Login - Playground</title></head>
+<body>
+  <h2>User Login</h2>
+  <form id="login-form" onsubmit="event.preventDefault(); submitLogin();">
+    <div>
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" placeholder="Enter username" required />
+    </div>
+    <div>
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" placeholder="Enter password" required />
+    </div>
+    <button type="submit" id="btn-login">Sign In</button>
+  </form>
+  <div id="login-result" style="margin-top:15px; font-weight:bold;"></div>
+  <script>
+    async function submitLogin() {
+      const u = document.getElementById("username").value;
+      const p = document.getElementById("password").value;
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({username: u, password: p})
+      });
+      const data = await res.json();
+      const div = document.getElementById("login-result");
+      if (res.ok && data.authenticated) {
+        div.innerText = "SUCCESS: Authenticated as " + u;
+        div.style.color = "green";
+      } else {
+        div.innerText = "ERROR: " + (data.error || "Authentication failed");
+        div.style.color = "red";
+      }
+    }
+  </script>
+</body>
+</html>

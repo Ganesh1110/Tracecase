@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head><title>Network Endpoints Tester</title></head>
+<body>
+  <h2>Network Request Runner</h2>
+  <button id="btn-200" onclick="callApi("/api/status/200");">Fetch 200 OK</button>
+  <button id="btn-400" onclick="callApi("/api/status/400");">Fetch 400 Bad Request</button>
+  <button id="btn-403" onclick="callApi("/api/status/403");">Fetch 403 Forbidden</button>
+  <button id="btn-500" onclick="callApi("/api/status/500");">Fetch 500 Server Error</button>
+  <button id="btn-slow" onclick="callApi("/api/slow");">Fetch Slow Endpoint (1.5s)</button>
+  <form id="unvalidated-form" onsubmit="event.preventDefault(); submitUnvalidated();">
+    <input type="text" id="unval-input" value="some payload" />
+    <button type="submit" id="btn-unval-submit">Submit Form No Validation</button>
+  </form>
+  <div id="net-result">Ready</div>
+  <script>
+    async function callApi(url) {
+      document.getElementById("net-result").innerText = "Fetching...";
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        document.getElementById("net-result").innerText = "Status: " + res.status + ", Body: " + JSON.stringify(data);
+      } catch(e) {
+        document.getElementById("net-result").innerText = "Fetch Error: " + e.message;
+      }
+    }
+    async function submitUnvalidated() {
+      const val = document.getElementById("unval-input").value;
+      const res = await fetch("/api/submit-unvalidated", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({input: val})
+      });
+      const data = await res.json();
+      document.getElementById("net-result").innerText = "POST OK: " + JSON.stringify(data);
+    }
+  </script>
+</body>
+</html>

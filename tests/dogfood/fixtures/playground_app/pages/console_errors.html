@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head><title>Console & JS Errors</title></head>
+<body>
+  <h2>Console Logger</h2>
+  <button id="btn-log" onclick="console.log("Playground Info Message: test log");">Emit Console.log</button>
+  <button id="btn-warn" onclick="console.warn("Playground Warning: potential issue");">Emit Console.warn</button>
+  <button id="btn-error" onclick="console.error("Playground Error: failed to load resource");">Emit Console.error</button>
+  <button id="btn-throw" onclick="triggerUncaught();">Throw Uncaught JS Error</button>
+  <script>
+    function triggerUncaught() {
+      throw new Error("Uncaught Playground Exception: boom!");
+    }
+  </script>
+</body>
+</html>

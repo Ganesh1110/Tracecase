@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head><title>Interaction Actions</title></head>
+<body>
+  <h2>Action Types Test Target</h2>
+  <div id="hover-box" style="width:120px; height:40px; background:#e2e8f0; text-align:center; line-height:40px;"
+       onmouseover="this.innerText="Hovered!"; this.style.background="#86efac";"
+       onmouseout="this.innerText="Hover Over Me"; this.style.background="#e2e8f0";">
+    Hover Over Me
+  </div>
+  <button id="dblclick-btn" ondblclick="this.innerText="Double Clicked!"; this.style.color="blue";">Double Click Me</button>
+  <button id="wait-btn" onclick="startDelayed();">Wait Action Trigger</button>
+  <div id="wait-target" style="display:none; color:purple;">Dynamically Appeared after 300ms</div>
+
+  <div>
+    <label><input type="checkbox" id="toggle-chk" onchange="document.getElementById("chk-status").innerText = this.checked ? "CHECKED" : "UNCHECKED";" /> Toggle Checkbox</label>
+    <span id="chk-status">UNCHECKED</span>
+  </div>
+
+  <input type="text" id="key-input" placeholder="Type Enter, Escape or Tab"
+         onkeydown="handleKey(event);" />
+  <div id="key-result">None</div>
+
+  <a id="nav-link" href="/index">Navigate to Home</a>
+
+  <script>
+    function startDelayed() {
+      setTimeout(() => {
+        document.getElementById("wait-target").style.display = "block";
+      }, 300);
+    }
+    function handleKey(e) {
+      if (e.key === "Enter") document.getElementById("key-result").innerText = "KEY: Enter";
+      else if (e.key === "Escape") document.getElementById("key-result").innerText = "KEY: Escape";
+      else if (e.key === "Tab") document.getElementById("key-result").innerText = "KEY: Tab";
+    }
+  </script>
+</body>
+</html>

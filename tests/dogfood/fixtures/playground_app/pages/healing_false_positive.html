@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <div id="container">
+    <!-- Stale XPath /html/body/div/button[1] will match this CANCEL button instead of SUBMIT -->
+    <button id="btn-cancel" onclick="this.innerText="CANCELLED WRONGLY";">Cancel Order</button>
+    <button id="btn-submit" onclick="this.innerText="SUBMITTED CORRECTLY";">Submit Order</button>
+  </div>
+</body>
+</html>

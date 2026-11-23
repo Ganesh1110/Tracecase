@@ -1,812 +1,1185 @@
-# Tracecase Automated Flow Catalog Schema
-version: "1.0.0"
-updated_at: "2026-11-23T10:45:00Z"
+version: 1.0.0
+updated_at: '2026-11-23T10:45:00Z'
 total_flows: 183
-
 sections:
   A:
-    name: "Install and Environment"
+    name: Install and Environment
     flows:
-      - id: "A1"
-        title: "Pip install from source"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "A2"
-        title: "Playwright install chromium"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "A3"
-        title: "tracecase check: all OK"
-        method: "subprocess_cli"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "A3.1"
-        title: "tracecase check with browser missing"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "A4"
-        title: "tracecase version info"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "A5"
-        title: "--help renders for all 27 commands"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "A6"
-        title: "unknown command / bad args clear errors"
-        method: "subprocess_cli"
-        status: "PENDING"
-
+    - id: A1
+      title: Pip install from source
+      method: subprocess_cli
+      status: PENDING
+    - id: A2
+      title: Playwright install chromium
+      method: subprocess_cli
+      status: PENDING
+    - id: A3
+      title: 'tracecase check: all OK'
+      method: subprocess_cli
+      status: PENDING
+      critical_handwritten: true
+    - id: A3.1
+      title: tracecase check with browser missing
+      method: subprocess_cli
+      status: PENDING
+    - id: A4
+      title: tracecase version info
+      method: subprocess_cli
+      status: PENDING
+    - id: A5
+      title: --help renders for all 27 commands
+      method: subprocess_cli
+      status: PENDING
+    - id: A6
+      title: unknown command / bad args clear errors
+      method: subprocess_cli
+      status: PENDING
   B:
-    name: "CLI: Record"
+    name: 'CLI: Record'
     flows:
-      - id: "B1"
-        title: "record url -o dir minimal"
-        method: "subprocess_cli"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "B2"
-        title: "custom name -n option"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "B3"
-        title: "default name generated from URL"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "B4"
-        title: "record browser chromium"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "B5"
-        title: "record browser firefox"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "B6"
-        title: "record browser webkit"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "B7"
-        title: "record invalid browser option"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "B8"
-        title: "record headless mode flag"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "B9"
-        title: "record timeout option"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "B10"
-        title: "record missing output option"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "B11"
-        title: "record unreachable or invalid URL"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "B12"
-        title: "control panel start and stop lifecycle"
-        method: "programmatic_recorder"
-        status: "PENDING"
-      - id: "B13"
-        title: "stop recording with zero steps"
-        method: "programmatic_recorder"
-        status: "PENDING"
-      - id: "B14"
-        title: "close browser without pressing stop"
-        method: "programmatic_recorder"
-        status: "PENDING"
-      - id: "B15"
-        title: "panel excluded from step screenshots"
-        method: "programmatic_recorder"
-        status: "PENDING"
-      - id: "B16"
-        title: "captured action types (11 types)"
-        method: "programmatic_recorder"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "B17"
-        title: "element metadata capture"
-        method: "programmatic_recorder"
-        status: "PENDING"
-      - id: "B18"
-        title: "step screenshot with highlight outline"
-        method: "programmatic_recorder"
-        status: "PENDING"
-      - id: "B19"
-        title: "network capture attached to step"
-        method: "programmatic_recorder"
-        status: "PENDING"
-      - id: "B20"
-        title: "console log messages capture"
-        method: "programmatic_recorder"
-        status: "PENDING"
-      - id: "B21"
-        title: "page uncaught JS error capture"
-        method: "programmatic_recorder"
-        status: "PENDING"
-      - id: "B22"
-        title: "multi-tab target=_blank page_id tagging"
-        method: "programmatic_recorder"
-        status: "PENDING"
-      - id: "B23"
-        title: "outputs schema validation (json/md/html)"
-        method: "subprocess_cli"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "B24"
-        title: "testcase.html hostile script escaping"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "B25"
-        title: "output directory overwrite/merge"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "B26"
-        title: "output path with spaces and unicode"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "B27"
-        title: "password field masking audit"
-        method: "security_audit"
-        status: "PENDING"
-
+    - id: B1
+      title: record url -o dir minimal
+      method: subprocess_cli
+      status: PENDING
+      critical_handwritten: true
+    - id: B2
+      title: custom name -n option
+      method: subprocess_cli
+      status: PENDING
+    - id: B3
+      title: default name generated from URL
+      method: subprocess_cli
+      status: PENDING
+    - id: B4
+      title: record browser chromium
+      method: subprocess_cli
+      status: PENDING
+    - id: B5
+      title: record browser firefox
+      method: subprocess_cli
+      status: PENDING
+    - id: B6
+      title: record browser webkit
+      method: subprocess_cli
+      status: PENDING
+    - id: B7
+      title: record invalid browser option
+      method: subprocess_cli
+      status: PENDING
+    - id: B8
+      title: record headless mode flag
+      method: subprocess_cli
+      status: PENDING
+    - id: B9
+      title: record timeout option
+      method: subprocess_cli
+      status: PENDING
+    - id: B10
+      title: record missing output option
+      method: subprocess_cli
+      status: PENDING
+    - id: B11
+      title: record unreachable or invalid URL
+      method: subprocess_cli
+      status: PENDING
+    - id: B12
+      title: control panel start and stop lifecycle
+      method: programmatic_recorder
+      status: PENDING
+    - id: B13
+      title: stop recording with zero steps
+      method: programmatic_recorder
+      status: PENDING
+    - id: B14
+      title: close browser without pressing stop
+      method: programmatic_recorder
+      status: PENDING
+    - id: B15
+      title: panel excluded from step screenshots
+      method: programmatic_recorder
+      status: PENDING
+    - id: B16
+      title: captured action types (11 types)
+      method: programmatic_recorder
+      status: PENDING
+      critical_handwritten: true
+    - id: B17
+      title: element metadata capture
+      method: programmatic_recorder
+      status: PENDING
+    - id: B18
+      title: step screenshot with highlight outline
+      method: programmatic_recorder
+      status: PENDING
+    - id: B19
+      title: network capture attached to step
+      method: programmatic_recorder
+      status: PENDING
+    - id: B20
+      title: console log messages capture
+      method: programmatic_recorder
+      status: PENDING
+    - id: B21
+      title: page uncaught JS error capture
+      method: programmatic_recorder
+      status: PENDING
+    - id: B22
+      title: multi-tab target=_blank page_id tagging
+      method: programmatic_recorder
+      status: PENDING
+    - id: B23
+      title: outputs schema validation (json/md/html)
+      method: subprocess_cli
+      status: PENDING
+      critical_handwritten: true
+    - id: B24
+      title: testcase.html hostile script escaping
+      method: subprocess_cli
+      status: PENDING
+    - id: B25
+      title: output directory overwrite/merge
+      method: subprocess_cli
+      status: PENDING
+    - id: B26
+      title: output path with spaces and unicode
+      method: subprocess_cli
+      status: PENDING
+    - id: B27
+      title: password field masking audit
+      method: security_audit
+      status: PENDING
   C:
-    name: "CLI: Replay"
+    name: 'CLI: Replay'
     flows:
-      - id: "C1"
-        title: "basic headless replay"
-        method: "subprocess_cli"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "C2"
-        title: "headed replay"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "C3"
-        title: "replay output replay.json + screenshots"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "C4"
-        title: "exit code 0 pass, 1 assert fail, 2 infra error"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "C5"
-        title: "--assert vs --no-assert"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "C6"
-        title: "derived assertions evaluation"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "C7"
-        title: "timeout sensitivity on slow endpoints"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "C8"
-        title: "replay without --heal against version B"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "C9"
-        title: "replay with --heal against version B"
-        method: "subprocess_cli"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "C10"
-        title: "healing tiers isolated resolution chain"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "C11"
-        title: "--diff with identical UI passes"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "C12"
-        title: "--diff-threshold boundary and diff-fail flag"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "C13"
-        title: "offline replay with --from-har"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "C14"
-        title: "multi-tab replay popup context switching"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "C15"
-        title: "backward compatibility for legacy json without page_id"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "C16"
-        title: "replay browser matrix (firefox, webkit)"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "C17"
-        title: "replay mutated testcase variations"
-        method: "subprocess_cli"
-        status: "PENDING"
-
+    - id: C1
+      title: basic headless replay
+      method: subprocess_cli
+      status: PENDING
+      critical_handwritten: true
+    - id: C2
+      title: headed replay
+      method: subprocess_cli
+      status: PENDING
+    - id: C3
+      title: replay output replay.json + screenshots
+      method: subprocess_cli
+      status: PENDING
+    - id: C4
+      title: exit code 0 pass, 1 assert fail, 2 infra error
+      method: subprocess_cli
+      status: PENDING
+    - id: C5
+      title: --assert vs --no-assert
+      method: subprocess_cli
+      status: PENDING
+    - id: C6
+      title: derived assertions evaluation
+      method: subprocess_cli
+      status: PENDING
+    - id: C7
+      title: timeout sensitivity on slow endpoints
+      method: subprocess_cli
+      status: PENDING
+    - id: C8
+      title: replay without --heal against version B
+      method: subprocess_cli
+      status: PENDING
+    - id: C9
+      title: replay with --heal against version B
+      method: subprocess_cli
+      status: PENDING
+      critical_handwritten: true
+    - id: C10
+      title: healing tiers isolated resolution chain
+      method: subprocess_cli
+      status: PENDING
+    - id: C11
+      title: --diff with identical UI passes
+      method: subprocess_cli
+      status: PENDING
+    - id: C12
+      title: --diff-threshold boundary and diff-fail flag
+      method: subprocess_cli
+      status: PENDING
+    - id: C13
+      title: offline replay with --from-har
+      method: subprocess_cli
+      status: PENDING
+    - id: C14
+      title: multi-tab replay popup context switching
+      method: subprocess_cli
+      status: PENDING
+    - id: C15
+      title: backward compatibility for legacy json without page_id
+      method: subprocess_cli
+      status: PENDING
+    - id: C16
+      title: replay browser matrix (firefox, webkit)
+      method: subprocess_cli
+      status: PENDING
+    - id: C17
+      title: replay mutated testcase variations
+      method: subprocess_cli
+      status: PENDING
   D:
-    name: "CLI: Diff"
+    name: 'CLI: Diff'
     flows:
-      - id: "D1"
-        title: "identical images comparison exit 0"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "D2"
-        title: "different images comparison exit 1 and overlay"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "D3"
-        title: "diff threshold boundary"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "D4"
-        title: "different image dimensions handling"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "D5"
-        title: "missing or corrupt image handling"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "D6"
-        title: "diff without -o output option"
-        method: "subprocess_cli"
-        status: "PENDING"
-
+    - id: D1
+      title: identical images comparison exit 0
+      method: subprocess_cli
+      status: PENDING
+    - id: D2
+      title: different images comparison exit 1 and overlay
+      method: subprocess_cli
+      status: PENDING
+    - id: D3
+      title: diff threshold boundary
+      method: subprocess_cli
+      status: PENDING
+    - id: D4
+      title: different image dimensions handling
+      method: subprocess_cli
+      status: PENDING
+    - id: D5
+      title: missing or corrupt image handling
+      method: subprocess_cli
+      status: PENDING
+    - id: D6
+      title: diff without -o output option
+      method: subprocess_cli
+      status: PENDING
   E:
-    name: "CLI: Export HAR"
+    name: 'CLI: Export HAR'
     flows:
-      - id: "E1"
-        title: "export-har valid HAR 1.2 structure"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "E2"
-        title: "export HAR then replay --from-har"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "E3"
-        title: "export HAR for testcase with zero requests"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "E4"
-        title: "export HAR missing -o option"
-        method: "subprocess_cli"
-        status: "PENDING"
-
+    - id: E1
+      title: export-har valid HAR 1.2 structure
+      method: subprocess_cli
+      status: PENDING
+    - id: E2
+      title: export HAR then replay --from-har
+      method: subprocess_cli
+      status: PENDING
+    - id: E3
+      title: export HAR for testcase with zero requests
+      method: subprocess_cli
+      status: PENDING
+    - id: E4
+      title: export HAR missing -o option
+      method: subprocess_cli
+      status: PENDING
   F:
-    name: "CLI: Codegen"
+    name: 'CLI: Codegen'
     flows:
-      - id: "F1"
-        title: "codegen default output test_<name>.py"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "F2"
-        title: "codegen custom output path -o"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "F3"
-        title: "codegen --har route mocking"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "F4"
-        title: "run generated pytest code with pytest"
-        method: "subprocess_cli"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "F5"
-        title: "codegen for multi-tab testcase"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "F6"
-        title: "codegen derived assertions inclusion"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "F7"
-        title: "codegen sanitized identifiers"
-        method: "subprocess_cli"
-        status: "PENDING"
-
+    - id: F1
+      title: codegen default output test_<name>.py
+      method: subprocess_cli
+      status: PENDING
+    - id: F2
+      title: codegen custom output path -o
+      method: subprocess_cli
+      status: PENDING
+    - id: F3
+      title: codegen --har route mocking
+      method: subprocess_cli
+      status: PENDING
+    - id: F4
+      title: run generated pytest code with pytest
+      method: subprocess_cli
+      status: PENDING
+      critical_handwritten: true
+    - id: F5
+      title: codegen for multi-tab testcase
+      method: subprocess_cli
+      status: PENDING
+    - id: F6
+      title: codegen derived assertions inclusion
+      method: subprocess_cli
+      status: PENDING
+    - id: F7
+      title: codegen sanitized identifiers
+      method: subprocess_cli
+      status: PENDING
   G:
-    name: "CLI: Mutate"
+    name: 'CLI: Mutate'
     flows:
-      - id: "G1"
-        title: "mutate default strategies and limit 20"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "G2"
-        title: "mutate inputs strategy"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "G3"
-        title: "mutate actions strategy"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "G4"
-        title: "mutate network strategy"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "G5"
-        title: "mutate invalid strategy error"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "G6"
-        title: "mutate --limit flag respected"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "G7"
-        title: "mutate custom output directory"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "G8"
-        title: "validate each input mutation type"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "G9"
-        title: "validate each action mutation type"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "G10"
-        title: "validate each network mutation type"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "G11"
-        title: "mutated testcases schema validity and replay"
-        method: "subprocess_cli"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "G12"
-        title: "mutate testcase with no inputs or network"
-        method: "subprocess_cli"
-        status: "PENDING"
-
+    - id: G1
+      title: mutate default strategies and limit 20
+      method: subprocess_cli
+      status: PENDING
+    - id: G2
+      title: mutate inputs strategy
+      method: subprocess_cli
+      status: PENDING
+    - id: G3
+      title: mutate actions strategy
+      method: subprocess_cli
+      status: PENDING
+    - id: G4
+      title: mutate network strategy
+      method: subprocess_cli
+      status: PENDING
+    - id: G5
+      title: mutate invalid strategy error
+      method: subprocess_cli
+      status: PENDING
+    - id: G6
+      title: mutate --limit flag respected
+      method: subprocess_cli
+      status: PENDING
+    - id: G7
+      title: mutate custom output directory
+      method: subprocess_cli
+      status: PENDING
+    - id: G8
+      title: validate each input mutation type
+      method: subprocess_cli
+      status: PENDING
+    - id: G9
+      title: validate each action mutation type
+      method: subprocess_cli
+      status: PENDING
+    - id: G10
+      title: validate each network mutation type
+      method: subprocess_cli
+      status: PENDING
+    - id: G11
+      title: mutated testcases schema validity and replay
+      method: subprocess_cli
+      status: PENDING
+      critical_handwritten: true
+    - id: G12
+      title: mutate testcase with no inputs or network
+      method: subprocess_cli
+      status: PENDING
   H:
-    name: "CLI: Analyze"
+    name: 'CLI: Analyze'
     flows:
-      - id: "H1"
-        title: "analyze default offline heuristics"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "H2"
-        title: "analyze custom output directory"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "H3"
-        title: "analyze provider null explicitly"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "H4"
-        title: "analyze --ai with Ollama defaults against Fake LLM"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "H5"
-        title: "analyze --provider openai against Fake LLM"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "H6"
-        title: "graceful fallback on LLM 500 error"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "H7"
-        title: "verify analysis.json schema and sections"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "H8"
-        title: "verify each heuristic trigger rule"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "H9"
-        title: "analyze malformed base-url diagnostic"
-        method: "subprocess_cli"
-        status: "PENDING"
-
+    - id: H1
+      title: analyze default offline heuristics
+      method: subprocess_cli
+      status: PENDING
+    - id: H2
+      title: analyze custom output directory
+      method: subprocess_cli
+      status: PENDING
+    - id: H3
+      title: analyze provider null explicitly
+      method: subprocess_cli
+      status: PENDING
+    - id: H4
+      title: analyze --ai with Ollama defaults against Fake LLM
+      method: subprocess_cli
+      status: PENDING
+    - id: H5
+      title: analyze --provider openai against Fake LLM
+      method: subprocess_cli
+      status: PENDING
+    - id: H6
+      title: graceful fallback on LLM 500 error
+      method: subprocess_cli
+      status: PENDING
+    - id: H7
+      title: verify analysis.json schema and sections
+      method: subprocess_cli
+      status: PENDING
+    - id: H8
+      title: verify each heuristic trigger rule
+      method: subprocess_cli
+      status: PENDING
+    - id: H9
+      title: analyze malformed base-url diagnostic
+      method: subprocess_cli
+      status: PENDING
   I:
-    name: "Corpus (Index/Search/Coverage/Clean/MCP)"
+    name: Corpus (Index/Search/Coverage/Clean/MCP)
     flows:
-      - id: "I1"
-        title: "index testcase directory into FTS5"
-        method: "subprocess_cli"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "I2"
-        title: "index with custom DB path"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "I3"
-        title: "index with --clear flag"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "I4"
-        title: "re-indexing idempotency"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "I5"
-        title: "search BM25 ranking and snippets"
-        method: "subprocess_cli"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "I6"
-        title: "search limit flag"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "I7"
-        title: "search by selector, URL, input, button"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "I8"
-        title: "search with no results"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "I9"
-        title: "search special FTS5 characters"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "I10"
-        title: "coverage report display"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "I11"
-        title: "duplicate flow warning in coverage"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "I12"
-        title: "coverage on empty or missing DB"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "I13"
-        title: "clean --db deletes SQLite DB"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "I14"
-        title: "clean --all deletes DB and recordings"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "I15"
-        title: "clean selective flags"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "I16"
-        title: "bare clean command defaults to --db only"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "I17"
-        title: "MCP server stdio initialize handshake"
-        method: "mcp_client"
-        status: "PENDING"
-      - id: "I18"
-        title: "MCP tool search_testcases"
-        method: "mcp_client"
-        status: "PENDING"
-      - id: "I19"
-        title: "MCP tool get_testcase"
-        method: "mcp_client"
-        status: "PENDING"
-      - id: "I20"
-        title: "MCP tool coverage_report vs get_coverage"
-        method: "mcp_client"
-        status: "PENDING"
-      - id: "I21"
-        title: "MCP server with custom DB path"
-        method: "mcp_client"
-        status: "PENDING"
-      - id: "I22"
-        title: "MCP stdout protocol purity"
-        method: "mcp_client"
-        status: "PENDING"
-
+    - id: I1
+      title: index testcase directory into FTS5
+      method: subprocess_cli
+      status: PENDING
+      critical_handwritten: true
+    - id: I2
+      title: index with custom DB path
+      method: subprocess_cli
+      status: PENDING
+    - id: I3
+      title: index with --clear flag
+      method: subprocess_cli
+      status: PENDING
+    - id: I4
+      title: re-indexing idempotency
+      method: subprocess_cli
+      status: PENDING
+    - id: I5
+      title: search BM25 ranking and snippets
+      method: subprocess_cli
+      status: PENDING
+      critical_handwritten: true
+    - id: I6
+      title: search limit flag
+      method: subprocess_cli
+      status: PENDING
+    - id: I7
+      title: search by selector, URL, input, button
+      method: subprocess_cli
+      status: PENDING
+    - id: I8
+      title: search with no results
+      method: subprocess_cli
+      status: PENDING
+    - id: I9
+      title: search special FTS5 characters
+      method: subprocess_cli
+      status: PENDING
+    - id: I10
+      title: coverage report display
+      method: subprocess_cli
+      status: PENDING
+    - id: I11
+      title: duplicate flow warning in coverage
+      method: subprocess_cli
+      status: PENDING
+    - id: I12
+      title: coverage on empty or missing DB
+      method: subprocess_cli
+      status: PENDING
+    - id: I13
+      title: clean --db deletes SQLite DB
+      method: subprocess_cli
+      status: PENDING
+    - id: I14
+      title: clean --all deletes DB and recordings
+      method: subprocess_cli
+      status: PENDING
+    - id: I15
+      title: clean selective flags
+      method: subprocess_cli
+      status: PENDING
+    - id: I16
+      title: bare clean command defaults to --db only
+      method: subprocess_cli
+      status: PENDING
+    - id: I17
+      title: MCP server stdio initialize handshake
+      method: mcp_client
+      status: PENDING
+    - id: I18
+      title: MCP tool search_testcases
+      method: mcp_client
+      status: PENDING
+    - id: I19
+      title: MCP tool get_testcase
+      method: mcp_client
+      status: PENDING
+    - id: I20
+      title: MCP tool coverage_report vs get_coverage
+      method: mcp_client
+      status: PENDING
+    - id: I21
+      title: MCP server with custom DB path
+      method: mcp_client
+      status: PENDING
+    - id: I22
+      title: MCP stdout protocol purity
+      method: mcp_client
+      status: PENDING
   J:
-    name: "Regression and CI Intelligence"
+    name: Regression and CI Intelligence
     flows:
-      - id: "J1"
-        title: "changes command git diff detection"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J2"
-        title: "map command route and selector scanning"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J3"
-        title: "impact command confidence scoring"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J4"
-        title: "risk command predictive ranking"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J5"
-        title: "select command constraints and budget"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J6"
-        title: "explain command selection reasons"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J7"
-        title: "report command markdown and manifest"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J8"
-        title: "run command intelligent selection execution"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J9"
-        title: "ci command standard gate evaluation"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J10"
-        title: "ci command concurrency and matrix"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J11"
-        title: "ci baseline drift and preexisting tolerance"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J12"
-        title: "ci-upload manifest to Studio"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J13"
-        title: "benchmark sequential vs parallel vs pooled"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J14"
-        title: "storage command disk usage inspection"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J15"
-        title: "storage prune dry run"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J16"
-        title: "storage retention policy apply"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J17"
-        title: "storage failures-only filter"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J18"
-        title: "git errors non-git directory"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J19"
-        title: "ci command output reports junit and sarif"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "J20"
-        title: "ci command YAML config file loading"
-        method: "subprocess_cli"
-        status: "PENDING"
-
+    - id: J1
+      title: changes command git diff detection
+      method: subprocess_cli
+      status: PENDING
+    - id: J2
+      title: map command route and selector scanning
+      method: subprocess_cli
+      status: PENDING
+    - id: J3
+      title: impact command confidence scoring
+      method: subprocess_cli
+      status: PENDING
+    - id: J4
+      title: risk command predictive ranking
+      method: subprocess_cli
+      status: PENDING
+    - id: J5
+      title: select command constraints and budget
+      method: subprocess_cli
+      status: PENDING
+    - id: J6
+      title: explain command selection reasons
+      method: subprocess_cli
+      status: PENDING
+    - id: J7
+      title: report command markdown and manifest
+      method: subprocess_cli
+      status: PENDING
+    - id: J8
+      title: run command intelligent selection execution
+      method: subprocess_cli
+      status: PENDING
+    - id: J9
+      title: ci command standard gate evaluation
+      method: subprocess_cli
+      status: PENDING
+    - id: J10
+      title: ci command concurrency and matrix
+      method: subprocess_cli
+      status: PENDING
+    - id: J11
+      title: ci baseline drift and preexisting tolerance
+      method: subprocess_cli
+      status: PENDING
+    - id: J12
+      title: ci-upload manifest to Studio
+      method: subprocess_cli
+      status: PENDING
+    - id: J13
+      title: benchmark sequential vs parallel vs pooled
+      method: subprocess_cli
+      status: PENDING
+    - id: J14
+      title: storage command disk usage inspection
+      method: subprocess_cli
+      status: PENDING
+    - id: J15
+      title: storage prune dry run
+      method: subprocess_cli
+      status: PENDING
+    - id: J16
+      title: storage retention policy apply
+      method: subprocess_cli
+      status: PENDING
+    - id: J17
+      title: storage failures-only filter
+      method: subprocess_cli
+      status: PENDING
+    - id: J18
+      title: git errors non-git directory
+      method: subprocess_cli
+      status: PENDING
+    - id: J19
+      title: ci command output reports junit and sarif
+      method: subprocess_cli
+      status: PENDING
+    - id: J20
+      title: ci command YAML config file loading
+      method: subprocess_cli
+      status: PENDING
   K:
-    name: "Studio: Launch and Server"
+    name: 'Studio: Launch and Server'
     flows:
-      - id: "K1"
-        title: "ui launch default on 127.0.0.1:8000"
-        method: "subprocess_cli"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "K2"
-        title: "ui custom port option"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "K3"
-        title: "ui --no-browser flag"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "K4"
-        title: "ui host binding"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "K5"
-        title: "ui port collision clear error"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "K6"
-        title: "ui missing static directory fallback"
-        method: "http_client"
-        status: "PENDING"
-      - id: "K7"
-        title: "ui clean shutdown on SIGINT"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "K8"
-        title: "studio.db initialization and persistence"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "K9"
-        title: "OpenAPI schema valid at /openapi.json"
-        method: "http_client"
-        status: "PENDING"
-      - id: "K10"
-        title: "all errors return JSON not HTML"
-        method: "http_client"
-        status: "PENDING"
-
+    - id: K1
+      title: ui launch default on 127.0.0.1:8000
+      method: subprocess_cli
+      status: PENDING
+      critical_handwritten: true
+    - id: K2
+      title: ui custom port option
+      method: subprocess_cli
+      status: PENDING
+    - id: K3
+      title: ui --no-browser flag
+      method: subprocess_cli
+      status: PENDING
+    - id: K4
+      title: ui host binding
+      method: subprocess_cli
+      status: PENDING
+    - id: K5
+      title: ui port collision clear error
+      method: subprocess_cli
+      status: PENDING
+    - id: K6
+      title: ui missing static directory fallback
+      method: http_client
+      status: PENDING
+    - id: K7
+      title: ui clean shutdown on SIGINT
+      method: subprocess_cli
+      status: PENDING
+    - id: K8
+      title: studio.db initialization and persistence
+      method: subprocess_cli
+      status: PENDING
+    - id: K9
+      title: OpenAPI schema valid at /openapi.json
+      method: http_client
+      status: PENDING
+    - id: K10
+      title: all errors return JSON not HTML
+      method: http_client
+      status: PENDING
   L:
-    name: "Studio Modules"
+    name: Studio Modules
     flows:
-      - id: "L0"
-        title: "Studio navigation and theme switch"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L1"
-        title: "Overview KPI metrics and recent runs"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L2"
-        title: "Projects CRUD operations"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L3"
-        title: "Test Cases list, search, and detail"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L4"
-        title: "Test Suites create, reorder, and run"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L5"
-        title: "Browser Recorder studio flow"
-        method: "dogfood_recording"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "L6"
-        title: "Test Executions replay and matrix"
-        method: "dogfood_recording"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "L7"
-        title: "Execution History drilldown and healed badge"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L8"
-        title: "Reports generation and download"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L9"
-        title: "Visual Regression diff viewer"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L10"
-        title: "CI Quality Gate dashboard and drift"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L11"
-        title: "Smart Regression selection compute"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L12"
-        title: "Autonomous Exploration navigation graph"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L13"
-        title: "Requirements Planner user story mapping"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L14"
-        title: "AI Test Assistant repository chat"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L15"
-        title: "Test Analysis assertions and selector audit"
-        method: "dogfood_recording"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "L16"
-        title: "Negative Test Generation synthesis"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L17"
-        title: "Test Repository search and reindex"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L18"
-        title: "Code Generator script view and copy"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L19"
-        title: "Network Inspector traffic and bodies"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L20"
-        title: "MCP Integrations configuration copy"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L21"
-        title: "Studio Settings configuration save"
-        method: "dogfood_recording"
-        status: "PENDING"
-        critical_handwritten: true
-      - id: "L22"
-        title: "Storage Management usage and prune"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L23"
-        title: "Testcase Flakiness scoring"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L24"
-        title: "Journey Draft snapshot versioning & diff"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L25"
-        title: "Live Selector verification against browser"
-        method: "dogfood_recording"
-        status: "PENDING"
-      - id: "L26"
-        title: "Batch and Matrix execution cancellation"
-        method: "dogfood_recording"
-        status: "PENDING"
-
+    - id: L0
+      title: Studio navigation and theme switch
+      method: dogfood_recording
+      status: PENDING
+    - id: L1
+      title: Overview KPI metrics and recent runs
+      method: dogfood_recording
+      status: PENDING
+    - id: L2
+      title: Projects CRUD operations
+      method: dogfood_recording
+      status: PENDING
+    - id: L3
+      title: Test Cases list, search, and detail
+      method: dogfood_recording
+      status: PENDING
+    - id: L4
+      title: Test Suites create, reorder, and run
+      method: dogfood_recording
+      status: PENDING
+    - id: L5
+      title: Browser Recorder studio flow
+      method: dogfood_recording
+      status: PENDING
+      critical_handwritten: true
+    - id: L6
+      title: Test Executions replay and matrix
+      method: dogfood_recording
+      status: PENDING
+      critical_handwritten: true
+    - id: L7
+      title: Execution History drilldown and healed badge
+      method: dogfood_recording
+      status: PENDING
+    - id: L8
+      title: Reports generation and download
+      method: dogfood_recording
+      status: PENDING
+    - id: L9
+      title: Visual Regression diff viewer
+      method: dogfood_recording
+      status: PENDING
+    - id: L10
+      title: CI Quality Gate dashboard and drift
+      method: dogfood_recording
+      status: PENDING
+    - id: L11
+      title: Smart Regression selection compute
+      method: dogfood_recording
+      status: PENDING
+    - id: L12
+      title: Autonomous Exploration navigation graph
+      method: dogfood_recording
+      status: PENDING
+    - id: L13
+      title: Requirements Planner user story mapping
+      method: dogfood_recording
+      status: PENDING
+    - id: L14
+      title: AI Test Assistant repository chat
+      method: dogfood_recording
+      status: PENDING
+    - id: L15
+      title: Test Analysis assertions and selector audit
+      method: dogfood_recording
+      status: PENDING
+      critical_handwritten: true
+    - id: L16
+      title: Negative Test Generation synthesis
+      method: dogfood_recording
+      status: PENDING
+    - id: L17
+      title: Test Repository search and reindex
+      method: dogfood_recording
+      status: PENDING
+    - id: L18
+      title: Code Generator script view and copy
+      method: dogfood_recording
+      status: PENDING
+    - id: L19
+      title: Network Inspector traffic and bodies
+      method: dogfood_recording
+      status: PENDING
+    - id: L20
+      title: MCP Integrations configuration copy
+      method: dogfood_recording
+      status: PENDING
+    - id: L21
+      title: Studio Settings configuration save
+      method: dogfood_recording
+      status: PENDING
+      critical_handwritten: true
+    - id: L22
+      title: Storage Management usage and prune
+      method: dogfood_recording
+      status: PENDING
+    - id: L23
+      title: Testcase Flakiness scoring
+      method: dogfood_recording
+      status: PENDING
+    - id: L24
+      title: Journey Draft snapshot versioning & diff
+      method: dogfood_recording
+      status: PENDING
+    - id: L25
+      title: Live Selector verification against browser
+      method: dogfood_recording
+      status: PENDING
+    - id: L26
+      title: Batch and Matrix execution cancellation
+      method: dogfood_recording
+      status: PENDING
   M:
-    name: "Cross-Cutting Concerns"
+    name: Cross-Cutting Concerns
     flows:
-      - id: "M1"
-        title: "Privacy: zero network calls with provider null"
-        method: "network_monitor"
-        status: "PENDING"
-      - id: "M2"
-        title: "Privacy: AI metadata audit payload inspect"
-        method: "fake_llm_log"
-        status: "PENDING"
-      - id: "M3"
-        title: "Provenance: heuristic vs LLM labeling"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "M4"
-        title: "Hostile data escaping in Studio and reports"
-        method: "playwright_xss"
-        status: "PENDING"
-      - id: "M5"
-        title: "Large recording 500+ steps performance"
-        method: "stress_test"
-        status: "PENDING"
-      - id: "M6"
-        title: "Cross-platform path handling"
-        method: "subprocess_cli"
-        status: "PENDING"
-      - id: "M7"
-        title: "Concurrency: simultaneous record and replay"
-        method: "asyncio_test"
-        status: "PENDING"
-      - id: "M8"
-        title: "Path traversal protection on static/artifact APIs"
-        method: "security_test"
-        status: "PENDING"
-
+    - id: M1
+      title: 'Privacy: zero network calls with provider null'
+      method: network_monitor
+      status: PENDING
+    - id: M2
+      title: 'Privacy: AI metadata audit payload inspect'
+      method: fake_llm_log
+      status: PENDING
+    - id: M3
+      title: 'Provenance: heuristic vs LLM labeling'
+      method: subprocess_cli
+      status: PENDING
+    - id: M4
+      title: Hostile data escaping in Studio and reports
+      method: playwright_xss
+      status: PENDING
+    - id: M5
+      title: Large recording 500+ steps performance
+      method: stress_test
+      status: PENDING
+    - id: M6
+      title: Cross-platform path handling
+      method: subprocess_cli
+      status: PENDING
+    - id: M7
+      title: 'Concurrency: simultaneous record and replay'
+      method: asyncio_test
+      status: PENDING
+    - id: M8
+      title: Path traversal protection on static/artifact APIs
+      method: security_test
+      status: PENDING
   N:
-    name: "End-to-End Journeys"
+    name: End-to-End Journeys
     flows:
-      - id: "N1"
-        title: "E2E: Record -> Replay -> Analyze -> Assertions -> Codegen -> Pytest -> Index -> Search -> Coverage"
-        method: "e2e_journey"
-        status: "PENDING"
-      - id: "N2"
-        title: "E2E: Record -> Mutate -> Replay all mutations -> Studio verification"
-        method: "e2e_journey"
-        status: "PENDING"
-      - id: "N3"
-        title: "E2E: Record -> Export HAR -> Backend offline -> Replay --from-har"
-        method: "e2e_journey"
-        status: "PENDING"
-      - id: "N4"
-        title: "E2E: Record Ver-A -> Replay Ver-B (--heal) -> Visual Diff Ver-C"
-        method: "e2e_journey"
-        status: "PENDING"
-      - id: "N5"
-        title: "E2E: CLI <-> Studio bidirectional testcase sync"
-        method: "e2e_journey"
-        status: "PENDING"
-      - id: "N6"
-        title: "E2E: Exploration -> Synthesize Journeys -> Approve Draft -> Replay -> Codegen"
-        method: "e2e_journey"
-        status: "PENDING"
-      - id: "N7"
-        title: "E2E: Git Change -> Impact -> Select -> CI Gate -> Report -> ci-upload -> Studio"
-        method: "e2e_journey"
-        status: "PENDING"
-      - id: "N8"
-        title: "E2E: DEMO_GUIDE.md verbatim 20-min walkthrough"
-        method: "e2e_journey"
-        status: "PENDING"
+    - id: N1
+      title: 'E2E: Record -> Replay -> Analyze -> Assertions -> Codegen -> Pytest
+        -> Index -> Search -> Coverage'
+      method: e2e_journey
+      status: PENDING
+    - id: N2
+      title: 'E2E: Record -> Mutate -> Replay all mutations -> Studio verification'
+      method: e2e_journey
+      status: PENDING
+    - id: N3
+      title: 'E2E: Record -> Export HAR -> Backend offline -> Replay --from-har'
+      method: e2e_journey
+      status: PENDING
+    - id: N4
+      title: 'E2E: Record Ver-A -> Replay Ver-B (--heal) -> Visual Diff Ver-C'
+      method: e2e_journey
+      status: PENDING
+    - id: N5
+      title: 'E2E: CLI <-> Studio bidirectional testcase sync'
+      method: e2e_journey
+      status: PENDING
+    - id: N6
+      title: 'E2E: Exploration -> Synthesize Journeys -> Approve Draft -> Replay ->
+        Codegen'
+      method: e2e_journey
+      status: PENDING
+    - id: N7
+      title: 'E2E: Git Change -> Impact -> Select -> CI Gate -> Report -> ci-upload
+        -> Studio'
+      method: e2e_journey
+      status: PENDING
+    - id: N8
+      title: 'E2E: DEMO_GUIDE.md verbatim 20-min walkthrough'
+      method: e2e_journey
+      status: PENDING
+coverage_map:
+  cli_command:analyze: H1
+  cli_command:benchmark: J13
+  cli_command:changes: J1
+  cli_command:check: A3
+  cli_command:ci: J9
+  cli_command:ci-upload: J12
+  cli_command:clean: I13
+  cli_command:codegen: F1
+  cli_command:coverage: I10
+  cli_command:diff: D1
+  cli_command:explain: J6
+  cli_command:export-har: E1
+  cli_command:impact: J3
+  cli_command:index: I1
+  cli_command:map: J2
+  cli_command:mcp: I17
+  cli_command:mutate: G1
+  cli_command:record: B1
+  cli_command:replay: C1
+  cli_command:report: J7
+  cli_command:risk: J4
+  cli_command:run: J8
+  cli_command:search: I5
+  cli_command:select: J5
+  cli_command:storage: J14
+  cli_command:ui: K1
+  cli_command:version: A4
+  cli_option:analyze:--ai: H4
+  cli_option:analyze:--base-url: H5
+  cli_option:analyze:--model: H5
+  cli_option:analyze:--output: H2
+  cli_option:analyze:--provider: H5
+  cli_option:analyze:-m: H5
+  cli_option:analyze:-o: H2
+  cli_option:benchmark:--concurrency: J13
+  cli_option:benchmark:--iterations: J13
+  cli_option:benchmark:--output: J13
+  cli_option:benchmark:-c: J13
+  cli_option:benchmark:-n: J13
+  cli_option:benchmark:-o: J13
+  cli_option:changes:--base: J1
+  cli_option:changes:--json: J1
+  cli_option:changes:--staged: J1
+  cli_option:changes:-b: J1
+  cli_option:ci-upload:--token: J12
+  cli_option:ci-upload:--url: J12
+  cli_option:ci-upload:-t: J12
+  cli_option:ci-upload:-u: J12
+  cli_option:ci:--allow-preexisting: J11
+  cli_option:ci:--auto-run-baseline: J11
+  cli_option:ci:--base: J9
+  cli_option:ci:--baseline-ref: J11
+  cli_option:ci:--browser: J10
+  cli_option:ci:--budget: J9
+  cli_option:ci:--concurrency: J10
+  cli_option:ci:--config: J20
+  cli_option:ci:--gate: J9
+  cli_option:ci:--headed: J9
+  cli_option:ci:--include-critical-exceptions: J9
+  cli_option:ci:--json: J9
+  cli_option:ci:--junit: J19
+  cli_option:ci:--manifest: J19
+  cli_option:ci:--no-allow-preexisting: J11
+  cli_option:ci:--project: J9
+  cli_option:ci:--repo: J9
+  cli_option:ci:--report: J19
+  cli_option:ci:--retries: J9
+  cli_option:ci:--sarif: J19
+  cli_option:ci:--target: J9
+  cli_option:ci:--upload-token: J12
+  cli_option:ci:--upload-url: J12
+  cli_option:ci:-b: J9
+  cli_option:ci:-c: J9
+  cli_option:ci:-g: J9
+  cli_option:ci:-p: J9
+  cli_option:clean:--all: I14
+  cli_option:clean:--db: I13
+  cli_option:clean:--db-path: I16
+  cli_option:clean:--no-db: I13
+  cli_option:clean:--no-recordings: I15
+  cli_option:clean:--recordings: I15
+  cli_option:clean:-a: I16
+  cli_option:codegen:--har: F3
+  cli_option:codegen:--output: F2
+  cli_option:codegen:-o: F2
+  cli_option:coverage:--db: I10
+  cli_option:diff:--output: D2
+  cli_option:diff:--threshold: D3
+  cli_option:diff:-o: D2
+  cli_option:diff:-t: D3
+  cli_option:explain:--json: J6
+  cli_option:explain:--project: J6
+  cli_option:explain:-p: J6
+  cli_option:export-har:--output: E1
+  cli_option:export-har:-o: E1
+  cli_option:impact:--base: J3
+  cli_option:impact:--json: J3
+  cli_option:impact:--project: J3
+  cli_option:impact:--staged: J3
+  cli_option:impact:-b: J3
+  cli_option:impact:-p: J3
+  cli_option:index:--clear: I3
+  cli_option:index:--db: I2
+  cli_option:map:--project: J2
+  cli_option:map:-p: J2
+  cli_option:mcp:--db: I21
+  cli_option:mutate:--limit: G6
+  cli_option:mutate:--output: G7
+  cli_option:mutate:--strategy: G2
+  cli_option:mutate:-n: G6
+  cli_option:mutate:-o: G7
+  cli_option:mutate:-s: G2
+  cli_option:record:--browser: B4
+  cli_option:record:--headless: B8
+  cli_option:record:--name: B2
+  cli_option:record:--output: B1
+  cli_option:record:--timeout: B9
+  cli_option:record:-b: B4
+  cli_option:record:-n: B2
+  cli_option:record:-o: B1
+  cli_option:record:-t: B9
+  cli_option:replay:--assert: C5
+  cli_option:replay:--diff: C11
+  cli_option:replay:--diff-fail: C12
+  cli_option:replay:--diff-threshold: C12
+  cli_option:replay:--from-har: C13
+  cli_option:replay:--headed: C2
+  cli_option:replay:--heal: C9
+  cli_option:replay:--no-assert: C5
+  cli_option:replay:--no-diff: C11
+  cli_option:replay:--no-diff-fail: C12
+  cli_option:replay:--output: C3
+  cli_option:replay:--timeout: C7
+  cli_option:replay:-o: C3
+  cli_option:replay:-t: C7
+  cli_option:report:--format: J7
+  cli_option:report:--output: J7
+  cli_option:report:--project: J7
+  cli_option:report:-f: J7
+  cli_option:report:-o: J7
+  cli_option:report:-p: J7
+  cli_option:risk:--base: J4
+  cli_option:risk:--json: J4
+  cli_option:risk:--min-tier: J4
+  cli_option:risk:--project: J4
+  cli_option:risk:--staged: J4
+  cli_option:risk:-b: J4
+  cli_option:risk:-p: J4
+  cli_option:risk:-t: J4
+  cli_option:run:--browser: J8
+  cli_option:run:--budget: J8
+  cli_option:run:--ci: J8
+  cli_option:run:--concurrency: J8
+  cli_option:run:--include-critical-exceptions: J8
+  cli_option:run:--min-tier: J8
+  cli_option:run:--project: J8
+  cli_option:run:--repo: J8
+  cli_option:run:--retries: J8
+  cli_option:run:--select-smart: J8
+  cli_option:run:--top: J8
+  cli_option:run:--yes: J8
+  cli_option:run:-b: J8
+  cli_option:run:-c: J8
+  cli_option:run:-k: J8
+  cli_option:run:-p: J8
+  cli_option:run:-t: J8
+  cli_option:run:-y: J8
+  cli_option:search:--db: I5
+  cli_option:search:--limit: I6
+  cli_option:search:-n: I6
+  cli_option:select:--base: J5
+  cli_option:select:--budget: J5
+  cli_option:select:--include-critical-exceptions: J5
+  cli_option:select:--json: J5
+  cli_option:select:--min-tier: J5
+  cli_option:select:--project: J5
+  cli_option:select:--staged: J5
+  cli_option:select:--top: J5
+  cli_option:select:-b: J5
+  cli_option:select:-k: J5
+  cli_option:select:-p: J5
+  cli_option:select:-t: J5
+  cli_option:storage:--clean-runs: J14
+  cli_option:storage:--diffs: J14
+  cli_option:storage:--dry-run: J15
+  cli_option:storage:--failures-only: J17
+  cli_option:storage:--keep-latest: J16
+  cli_option:storage:--max-mb: J14
+  cli_option:storage:--older-than: J16
+  cli_option:ui:--browser: K3
+  cli_option:ui:--host: K4
+  cli_option:ui:--no-browser: K3
+  cli_option:ui:--port: K2
+  cli_option:ui:-h: K4
+  cli_option:ui:-p: K2
+  ui_route:/: L1
+  ui_route:/*: L0
+  ui_route:/ai-assistant: L14
+  ui_route:/ci: L10
+  ui_route:/ci/:runId: L10
+  ui_route:/codegen: L18
+  ui_route:/executions: L6
+  ui_route:/explore: L12
+  ui_route:/history: L7
+  ui_route:/mcp: L20
+  ui_route:/mutations: L16
+  ui_route:/network: L19
+  ui_route:/projects: L2
+  ui_route:/recorder: L5
+  ui_route:/regression-selection: L11
+  ui_route:/reports: L8
+  ui_route:/repository: L17
+  ui_route:/settings: L21
+  ui_route:/storage: L22
+  ui_route:/suites: L4
+  ui_route:/test-analysis: L15
+  ui_route:/testcases: L3
+  ui_route:/testcases/:id: L3
+  ui_route:/visual-diff: L9
+  api:DELETE:/api/autonomous/runs/{exploration_id}: L12
+  api:DELETE:/api/projects/{project_id}: L2
+  api:DELETE:/api/suites/{suite_id}: L4
+  api:DELETE:/api/suites/{suite_id}/testcases/{testcase_id}: L4
+  api:DELETE:/api/testcases/{identifier}: L3
+  api:DELETE:/api/testcases/{identifier}/assertions/{index}: L3
+  api:DELETE:/api/testcases/{identifier}/steps/{step_number}: L3
+  api:GET:/api/ai/analyses/{testcase_id}: L15
+  api:GET:/api/ai/coverage-insights: L15
+  api:GET:/api/autonomous/drafts: L12
+  api:GET:/api/autonomous/drafts/{draft_id}: L12
+  api:GET:/api/autonomous/drafts/{draft_id}/diff: L24
+  api:GET:/api/autonomous/drafts/{draft_id}/snapshots: L24
+  api:GET:/api/autonomous/drafts/{draft_id}/snapshots/{version}: L24
+  api:GET:/api/autonomous/drafts/{draft_id}/validation: L12
+  api:GET:/api/autonomous/drafts/{draft_id}/validations: L12
+  api:GET:/api/autonomous/runs: L12
+  api:GET:/api/autonomous/runs/{exploration_id}: L12
+  api:GET:/api/autonomous/runs/{exploration_id}/graph: L12
+  api:GET:/api/ci/analytics: L10
+  api:GET:/api/ci/runs: L10
+  api:GET:/api/ci/runs/{run_id}: L10
+  api:GET:/api/ci/runs/{run_id}/drift: L10
+  api:GET:/api/ci/runs/{run_id}/visual-diff/{testcase_id}: L10
+  api:GET:/api/dashboard/metrics: L1
+  api:GET:/api/diff/image: L9
+  api:GET:/api/engines/capabilities: L6
+  api:GET:/api/engines/{engine_id}: L6
+  api:GET:/api/executions: L6
+  api:GET:/api/executions/batches: L6
+  api:GET:/api/executions/batches/{batch_id}: L6
+  api:GET:/api/executions/matrices: L6
+  api:GET:/api/executions/matrices/{matrix_id}: L6
+  api:GET:/api/executions/{execution_id}: L6
+  api:GET:/api/executions/{execution_id}/attempts: L6
+  api:GET:/api/health: K1
+  api:GET:/api/intelligence/git-changes: L11
+  api:GET:/api/intelligence/mappings: L11
+  api:GET:/api/intelligence/risk/snapshots: L11
+  api:GET:/api/intelligence/selections: L11
+  api:GET:/api/intelligence/selections/{selection_id}: L11
+  api:GET:/api/intelligence/selections/{selection_id}/explanations: L11
+  api:GET:/api/intelligence/selections/{selection_id}/manifest: L11
+  api:GET:/api/intelligence/selections/{selection_id}/report: L11
+  api:GET:/api/metrics: L1
+  api:GET:/api/projects: L2
+  api:GET:/api/projects/{project_id}: L2
+  api:GET:/api/record/status: L5
+  api:GET:/api/record/stream/{session_id}: L5
+  api:GET:/api/repository/coverage: L17
+  api:GET:/api/repository/search: L17
+  api:GET:/api/settings: L21
+  api:GET:/api/storage/retention: L22
+  api:GET:/api/storage/stats: L22
+  api:GET:/api/storage/summary: L22
+  api:GET:/api/suites: L4
+  api:GET:/api/suites/{suite_id}: L4
+  api:GET:/api/suites/{suite_id}/executions: L4
+  api:GET:/api/testcases: L3
+  api:GET:/api/testcases/{identifier}: L3
+  api:GET:/api/testcases/{identifier}/har: L19
+  api:GET:/api/testcases/{identifier}/html: L3
+  api:GET:/api/testcases/{identifier}/screenshots/{filename:path}: L3
+  api:GET:/api/testcases/{identifier}/selectors/audit: L15
+  api:GET:/api/testcases/{testcase_id}/flakiness: L23
+  api:POST:/api/ai/analyze: L15
+  api:POST:/api/ai/chat: L14
+  api:POST:/api/ai/failure-analysis: L15
+  api:POST:/api/ai/generate-variations: L16
+  api:POST:/api/ai/suggest-assertions: L15
+  api:POST:/api/autonomous/drafts/{draft_id}/approve: L12
+  api:POST:/api/autonomous/drafts/{draft_id}/reject: L12
+  api:POST:/api/autonomous/drafts/{draft_id}/validate: L12
+  api:POST:/api/autonomous/drafts/{draft_id}/validation/cancel: L12
+  api:POST:/api/autonomous/explore: L12
+  api:POST:/api/autonomous/regression/select: L12
+  api:POST:/api/autonomous/requirements/plan: L13
+  api:POST:/api/autonomous/runs/{exploration_id}/cancel: L12
+  api:POST:/api/autonomous/runs/{exploration_id}/synthesize: L12
+  api:POST:/api/ci/ingest: L10
+  api:POST:/api/diff: L9
+  api:POST:/api/executions: L6
+  api:POST:/api/executions/batch: L6
+  api:POST:/api/executions/batches/{batch_id}/cancel: L6
+  api:POST:/api/executions/matrices/{matrix_id}/cancel: L6
+  api:POST:/api/executions/matrix: L6
+  api:POST:/api/executions/{execution_id}/cancel: L6
+  api:POST:/api/intelligence/impact: L11
+  api:POST:/api/intelligence/map: L11
+  api:POST:/api/intelligence/risk: L11
+  api:POST:/api/intelligence/select: L11
+  api:POST:/api/intelligence/selections/{selection_id}/execute: L11
+  api:POST:/api/intelligence/selections/{selection_id}/override: L11
+  api:POST:/api/mutations/generate: L16
+  api:POST:/api/projects: L2
+  api:POST:/api/record/pause: L5
+  api:POST:/api/record/resume: L5
+  api:POST:/api/record/start: L5
+  api:POST:/api/record/stop: L5
+  api:POST:/api/record/stream/start: L5
+  api:POST:/api/record/stream/{session_id}/stop: L5
+  api:POST:/api/replay: L6
+  api:POST:/api/repository/reindex: L17
+  api:POST:/api/storage/clean: L22
+  api:POST:/api/storage/prune: L22
+  api:POST:/api/suites: L4
+  api:POST:/api/suites/{suite_id}/run: L4
+  api:POST:/api/suites/{suite_id}/run_matrix: L4
+  api:POST:/api/suites/{suite_id}/testcases/{testcase_id}: L4
+  api:POST:/api/testcases: L3
+  api:POST:/api/testcases/{identifier}/assertions: L3
+  api:POST:/api/testcases/{identifier}/assertions/apply-suggestions: L3
+  api:POST:/api/testcases/{identifier}/codegen: L18
+  api:POST:/api/testcases/{identifier}/selectors/apply-fix: L15
+  api:POST:/api/testcases/{identifier}/selectors/verify-live: L15
+  api:POST:/api/testcases/{identifier}/steps: L3
+  api:POST:/api/testcases/{identifier}/steps/{step_number}/reorder: L3
+  api:POST:/api/testcases/{identifier}/steps/{step_number}/visual-diff: L9
+  api:PUT:/api/autonomous/drafts/{draft_id}: L12
+  api:PUT:/api/projects/{project_id}: L2
+  api:PUT:/api/settings: L21
+  api:PUT:/api/storage/retention: L22
+  api:PUT:/api/suites/{suite_id}: L4
+  api:PUT:/api/testcases/{identifier}: L3
+  api:PUT:/api/testcases/{identifier}/assertions/{index}: L3
+  api:PUT:/api/testcases/{identifier}/steps/{step_number}: L3
+  api:WS:/api/ws: L0
+  api:WS:/api/ws/batches/{batch_id}: L0
+  api:WS:/api/ws/executions/{execution_id}: L0
+  api:WS:/api/ws/explorations/{exploration_id}: L0
+  api:WS:/api/ws/matrices/{matrix_id}: L0
+  api:WS:/api/ws/record/stream/{session_id}: L0
+  action_type:check: B16
+  action_type:click: B16
+  action_type:dblclick: B16
+  action_type:hover: B16
+  action_type:input: B16
+  action_type:keypress: B16
+  action_type:navigate: B16
+  action_type:scroll: B16
+  action_type:select: B16
+  action_type:uncheck: B16
+  action_type:wait: B16
+  healing_tier:aria_label: C10
+  healing_tier:clean_selector: C10
+  healing_tier:css_selector: C10
+  healing_tier:data_testid: C10
+  healing_tier:id: C10
+  healing_tier:name: C10
+  healing_tier:placeholder: C10
+  healing_tier:role_name: C10
+  healing_tier:text: C10
+  healing_tier:xpath: C10
+  mutation_type:boundary_long: G8
+  mutation_type:double_click: G9
+  mutation_type:empty: G8
+  mutation_type:invalid_format: G8
+  mutation_type:network_error: G10
+  mutation_type:special_chars: G8
+  mutation_type:unicode: G8
+  selection_strategy:balanced: J5
+  selection_strategy:count_budget: J5
+  selection_strategy:highest_risk: J5
+  selection_strategy:pareto_optimal: J5
+  selection_strategy:time_budget: J5
