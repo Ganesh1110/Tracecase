@@ -300,6 +300,23 @@ def test_b14_close_browser_without_stop(isolated_workspace: Path, playground_ser
     assert not (out_dir / "testcase.json").exists()
 
 
+@pytest.mark.flow("B14")
+@pytest.mark.xfail(strict=True, reason="BUG-012: Closing browser without clicking Stop silently discards recording without saving or warning user")
+def test_b14_close_browser_without_stop_saves_or_warns(isolated_workspace: Path, playground_server_url: str):
+    """B14 / BUG-012 (Strict XFail Behavior): Closing browser early must save recording or notify user of discarded data."""
+    out_dir = isolated_workspace / "b14_save_warn"
+    url = f"{playground_server_url}/login.html"
+
+    async def actions(page, rec):
+        await page.fill("#username", "close_user")
+        await page.click("#btn-login")
+        await asyncio.sleep(0.1)
+
+    asyncio.run(_run_recorder(out_dir, url, actions_callback=actions, close_browser_early=True))
+    # Expected: The recording must be saved (data preservation) rather than silently lost
+    assert (out_dir / "testcase.json").exists(), "Recording was silently discarded upon browser close without Stop"
+
+
 @pytest.mark.flow("B15")
 def test_b15_panel_excluded_from_screenshots(isolated_workspace: Path, playground_server_url: str):
     """B15: Control panel elements are excluded/hidden from step screenshots."""
@@ -615,8 +632,11 @@ def test_b27_password_masking_json(isolated_workspace: Path, playground_server_u
     asyncio.run(_run_recorder(out_dir, url, actions_callback=actions))
     tc = TestCase.model_validate_json((out_dir / "testcase.json").read_text(encoding="utf-8"))
     pwd_step = next(s for s in tc.steps if s.element and s.element.attributes.get("type") == "password")
-    assert pwd_step.input_value != secret
-    assert all(c == "*" for c in (pwd_step.input_value or ""))
+    assert pwd_step.input_value != secret, "Password input must not be stored in plaintext"
+    assert secret not in str(pwd_step.input_value), "Plaintext password leaked in testcase.json"
+    val = pwd_step.input_value or ""
+    # Accepts any valid masking format (all asterisks, bullets, [REDACTED], or empty string) while failing on plaintext
+    assert any([all(c in "*•●" for c in val) and len(val) > 0, val in ("[REDACTED]", "***", "[MASKED]")]), "Input value was not properly masked"
 
 
 @pytest.mark.flow("B27")

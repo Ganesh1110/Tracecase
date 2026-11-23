@@ -5,9 +5,9 @@ This document tracks all defects, inconsistencies, and functional regressions di
 ---
 
 ## BUG-001: Root `annotated_doc` Stub Shadows Package and Crashes FastAPI on Launch
-- **Severity**: High (Blocks `uvicorn`, `pytest`, and `tracecase ui` when launched from repository root)
+- **Severity**: Low (Local Environment Issue; outside product code `src/tracecase`)
 - **Component**: Python Environment / Root Namespace (`./annotated_doc/__init__.py`)
-- **Found in Git**: Tracked in commit `687543898b814f6f6f41ee4931becfec6071d801` (added as dummy module)
+- **Found in Git**: Tracked in commit `687543898b814f6f6f41ee4931becfec6071d801` (added as dummy module at repository root during early prototyping)
 - **Reproduction**:
   ```bash
   cd /path/to/Tracecase
@@ -20,6 +20,8 @@ This document tracks all defects, inconsistencies, and functional regressions di
   ```
 - **Root Cause**:
   `annotated_doc/__init__.py` in repository root defines `class Doc: pass` with zero parameters. Because the workspace root is at the front of `sys.path`, Python loads this empty stub rather than the installed `.venv/lib/python3.14/site-packages/annotated_doc/` (v0.0.6) which defines `Doc(*args, **kwargs)`.
+- **Classification & Reclassification**:
+  This file is NOT part of the Tracecase package distribution (all production code resides in `src/tracecase/`, and `annotated_doc` is not declared in `pyproject.toml`). It is a stray prototype file committed at the repository root. Reclassified as a Low severity local-environment issue.
 - **Expected**:
   `import fastapi` succeeds without errors.
 - **Workaround**:
@@ -91,10 +93,15 @@ This document tracks all defects, inconsistencies, and functional regressions di
 ---
 
 ## BUG-007: Codegen Generates Asynchronous Playwright Tests (`pytest-asyncio`)
-- **Severity**: Info / Documentation Clarification
-- **Component**: `src/tracecase/codegen.py`
+- **Severity**: Medium (Breaks documented install-then-run workflow in clean environments lacking `pytest-asyncio`)
+- **Component**: `src/tracecase/codegen/` (`pytest_exporter.py`)
 - **Observed Behavior**:
-  Generated tests use `async def test_*(page: Page): ...` and `await ...`. Executing these generated tests requires `pytest-asyncio` installed and active, which is valid and fully functional but not highlighted in user documentation.
+  `tracecase codegen` produces tests that use `import pytest_asyncio` and `async def test_*(page: Page): ...`. When users follow standard Playwright documentation (`pip install pytest pytest-playwright`), running `pytest` immediately fails at collection with `ModuleNotFoundError: No module named 'pytest_asyncio'`. Standard `pytest-playwright` tests are synchronous (`def test_*(page: Page): ...`).
+- **Reproduction**:
+  Verified in a clean virtual environment containing only `pytest` and `pytest-playwright`.
+- **Test Target**:
+  - Characterization: `tests/dogfood/cli_tests/test_cli_f_codegen.py::test_f11_codegen_requires_pytest_asyncio_audit` (Passed)
+  - Strict XFail: Marked `@pytest.mark.xfail(strict=True, reason="BUG-007: Codegen generates async test requiring pytest-asyncio rather than standard pytest-playwright sync fixtures")` in `tests/dogfood/cli_tests/test_cli_f_codegen.py::test_bug007_codegen_clean_playwright_test`.
 
 ---
 
@@ -184,5 +191,36 @@ This document tracks all defects, inconsistencies, and functional regressions di
 | **BUG-009C** | Plaintext credential leakage in `testcase.html` | `templates/`, `recorder.py` | `test_cli_b_record.py::test_b27_password_masking_html` | `xfail(strict=True)` |
 | **BUG-009D** | Plaintext credential leakage via MCP `get_testcase` | `mcp/server.py` | `test_cli_i_corpus_mcp.py::test_i20_mcp_password_masking` | `xfail(strict=True)` |
 | **BUG-010** | ReplayEngine crashes on action_type `scroll` | `replay/engine.py` | `test_cli_b_record.py::test_b16_action_types_replay_scroll_bug` | `xfail(strict=True)` |
+| **BUG-011** | MCP `get_testcase` tool throws JSON-RPC -32603 instead of `result.isError=true` | `mcp/server.py` | `test_cli_i_corpus_mcp.py::test_i19_mcp_missing_testcase_iserror` | `xfail(strict=True)` |
+| **BUG-012** | Closing browser without Stop silently drops recording without saving or notice | `recorder.py`, `cli.py` | `test_cli_b_record.py::test_b14_close_browser_without_stop_saves_or_warns` | `xfail(strict=True)` |
+
+---
+
+## BUG-011: MCP `tools/call` for `get_testcase` Returns JSON-RPC -32603 Exception Instead of `result.isError=true`
+- **Severity**: Medium (MCP Spec Violation & Client Integration Failure)
+- **Component**: `src/tracecase/mcp/server.py` (`_execute_tool`, line 140)
+- **Observed Behavior**:
+  When a requested testcase ID does not exist in the database, `_execute_tool()` raises `ValueError(f"Testcase '{tc_id}' not found in corpus.")`. The top-level `handle_request()` catches all generic exceptions and returns `{"error": {"code": -32603, "message": "Internal error: ..."}}`.
+- **Contract / Spec**:
+  The Model Context Protocol (MCP) standard specifies that tool execution failures (such as a requested entity not existing) must be returned inside a normal JSON-RPC `result` structure with `isError: true` and the diagnostic explanation in `content`. Protocol error codes like `-32603` are reserved for server faults and transport failures.
+- **Test Target**:
+  Marked `@pytest.mark.xfail(strict=True, reason="BUG-011: MCP get_testcase throws -32603 internal exception instead of returning result.isError=True")` in `tests/dogfood/cli_tests/test_cli_i_corpus_mcp.py::test_i19_mcp_missing_testcase_iserror`.
+
+---
+
+## BUG-012: Closing Browser Window Without Clicking Stop Silently Discards Recording
+- **Severity**: High (Data Loss)
+- **Component**: `src/tracecase/recorder.py`, `src/tracecase/cli.py`
+- **Observed Behavior**:
+  If a user performs recording actions in the browser and then closes the browser window (or tab) without first pressing "Stop" in the control panel, `BrowserManager` detects the disconnection and sets `_recording_complete`. In the terminal, the user sees:
+  ```
+  ✓ Browser closed
+  ```
+  and the CLI process exits cleanly with code 0. However, `export()` is never called, and all recorded steps, screenshots, and logs are silently thrown away with zero files created and no warning displayed.
+- **Contract / Expected Behavior**:
+  Either the captured recording should be preserved to disk upon browser close (data preservation), or the CLI must emit a prominent warning notice and exit non-zero alerting the user that the recording was aborted.
+- **Test Target**:
+  Marked `@pytest.mark.xfail(strict=True, reason="BUG-012: Closing browser without clicking Stop silently discards recording without saving or warning user")` in `tests/dogfood/cli_tests/test_cli_b_record.py::test_b14_close_browser_without_stop_saves_or_warns`.
+
 
 

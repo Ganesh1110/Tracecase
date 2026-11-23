@@ -221,6 +221,66 @@ def test_c5_assert_vs_no_assert(
     assert "passed" in res_no_assert.stdout.lower()
 
 
+@pytest.mark.flow("C5")
+def test_c5_derived_assertions_flag(
+    isolated_workspace: Path,
+    isolated_env: dict[str, str],
+    playground_server_url: str,
+):
+    """C5 / FAULT-9 detector: Verify --assert flag evaluates custom/derived assertions and fails on mismatch."""
+    url = f"{playground_server_url}/login.html"
+    steps = [
+        Step(
+            number=1,
+            timestamp=datetime.now(),
+            action_type="navigate",
+            url=url,
+            description_short="Navigate",
+            description_detailed="Navigated to login",
+        )
+    ]
+    tc_path = _create_testcase(isolated_workspace, steps, start_url=url)
+    data = json.loads(tc_path.read_text(encoding="utf-8"))
+    data["custom_assertions"] = [
+        {"kind": "text", "target": "#btn-login", "expected": "Nonexistent Button Label", "step_number": 1}
+    ]
+    tc_path.write_text(json.dumps(data), encoding="utf-8")
+
+    res_assert = run_tracecase(["replay", str(tc_path), "--assert"], env=isolated_env)
+    assert res_assert.returncode == 1, "--assert must fail with exit code 1 when assertion fails"
+    assert "failed" in (res_assert.stdout + res_assert.stderr).lower()
+
+
+@pytest.mark.flow("C6")
+def test_c6_url_assertion_evaluation(
+    isolated_workspace: Path,
+    isolated_env: dict[str, str],
+    playground_server_url: str,
+):
+    """C6 / FAULT-9 detector: Verify URL assertion evaluates and fails when actual URL does not match."""
+    url = f"{playground_server_url}/login.html"
+    steps = [
+        Step(
+            number=1,
+            timestamp=datetime.now(),
+            action_type="navigate",
+            url=url,
+            description_short="Navigate",
+            description_detailed="Navigated to login",
+        )
+    ]
+    tc_path = _create_testcase(isolated_workspace, steps, start_url=url)
+    data = json.loads(tc_path.read_text(encoding="utf-8"))
+    data["custom_assertions"] = [
+        {"kind": "url", "expected": f"{playground_server_url}/nonexistent_target.html", "step_number": 1}
+    ]
+    tc_path.write_text(json.dumps(data), encoding="utf-8")
+
+    res_url_fail = run_tracecase(["replay", str(tc_path), "--assert"], env=isolated_env)
+    assert res_url_fail.returncode == 1, "URL assertion mismatch must fail replay with exit code 1"
+    assert "failed" in (res_url_fail.stdout + res_url_fail.stderr).lower()
+
+
 @pytest.mark.flow("C6")
 def test_c6_derived_assertions_evaluation(
     isolated_workspace: Path,
@@ -357,13 +417,62 @@ def test_c9_replay_with_heal_version_b(
         ),
     ]
     tc_path = _create_testcase(isolated_workspace, steps, start_url=url_b)
+    data = json.loads(tc_path.read_text(encoding="utf-8"))
+    # In version_b.html, clicking #checkout-btn sets its innerText to 'Order Placed!'
+    data["custom_assertions"] = [
+        {"kind": "text", "target": "#checkout-btn", "expected": "Order Placed!", "step_number": 2}
+    ]
+    tc_path.write_text(json.dumps(data), encoding="utf-8")
     out_dir = isolated_workspace / "c9_healed"
-    res_heal = run_tracecase(["replay", str(tc_path), "--heal", "-o", str(out_dir)], env=isolated_env)
+    res_heal = run_tracecase(["replay", str(tc_path), "--heal", "--assert", "-o", str(out_dir)], env=isolated_env)
     assert res_heal.returncode == 0
     report = json.loads((out_dir / "replay.json").read_text(encoding="utf-8"))
     assert report["steps"][1]["status"] in ("healed", "passed")
-    assert report["steps"][1]["selector_used"] is not None
-    assert report["steps"][1].get("healed_from") is not None
+    # Rigorously assert that the healed element was the intended one, not an arbitrary generic element
+    assert report["steps"][1]["selector_used"] in ("xpath=//button[@id='checkout-btn']", "#checkout-btn", '[data-testid="checkout-action"]')
+    assert report["steps"][1]["selector_used"] != "body *"
+    assert report["steps"][1].get("healed_from") == "button.btn-primary.is-active"
+
+
+@pytest.mark.flow("C10")
+@pytest.mark.xfail(strict=True, reason="BUG-002: Replay blindly heals to wrong element on stale XPath DOM shift without verification or failure")
+def test_bug002_dom_shift_wrong_element_heal_behavior(
+    isolated_workspace: Path,
+    isolated_env: dict[str, str],
+    playground_server_url: str,
+):
+    """BUG-002 (Strict XFail Behavior): On DOM shift where stale XPath resolves to wrong button, replay must refuse heal."""
+    url = f"{playground_server_url}/healing_false_positive.html"
+    steps = [
+        Step(
+            number=1,
+            timestamp=datetime.now(),
+            action_type="navigate",
+            url=url,
+            description_short="Navigate",
+            description_detailed="Navigated to false positive test page",
+        ),
+        Step(
+            number=2,
+            timestamp=datetime.now(),
+            action_type="click",
+            element=ElementInfo(
+                selector="button.submit-primary",  # Changed/missing
+                xpath="//div[@id='container']/button[1]",  # Stale XPath pointing to btn-cancel
+                tag_name="button",
+                text="Submit Order",
+                attributes={"id": "btn-submit"},
+                bounding_box={"x": 10, "y": 10, "width": 100, "height": 30},
+            ),
+            description_short="Click Submit",
+            description_detailed="Click submit button",
+        ),
+    ]
+    tc_path = _create_testcase(isolated_workspace, steps, start_url=url)
+    out_dir = isolated_workspace / "bug002_out"
+    res = run_tracecase(["replay", str(tc_path), "--heal", "-o", str(out_dir)], env=isolated_env)
+    report = json.loads((out_dir / "replay.json").read_text(encoding="utf-8")) if (out_dir / "replay.json").exists() else {}
+    assert res.returncode != 0 or report.get("steps", [{}])[-1].get("status") in ("failed", "error")
 
 
 @pytest.mark.flow("C10")

@@ -1,13 +1,11 @@
 --- a/tracecase/replay/healing.py
 +++ b/tracecase/replay/healing.py
-@@ -103,6 +103,10 @@
-         candidates = candidates[:1]
- 
-     result = HealResult(attempts=candidates)
-+    if heal and len(candidates) > 1:
-+        result.selector = 'body *'
-+        result.healed_from = step.element.selector
-+        return page.locator('button, a, input, div').first, result
-     for index, selector in enumerate(candidates):
+@@ -107,7 +107,7 @@
          locator = page.locator(selector)
          # Give candidate 0 time to mount (for SPAs), fallbacks check quickly
+         wait_ms = timeout_ms if index == 0 else 500
+-        if await _is_single_visible(locator, wait_ms=wait_ms):
++        if await locator.count() > 0:  # FAULT-2: accept first candidate matching ANY element, skipping checks
+             result.selector = selector
+             if index > 0:
+                 result.healed_from = step.element.selector

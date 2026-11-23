@@ -79,6 +79,33 @@ def test_e1_export_har_with_output_flag(
     assert data["log"]["entries"][0]["response"]["status"] == 200
 
 
+@pytest.mark.flow("E1")
+def test_e2_entry_fields(
+    isolated_workspace: Path,
+    isolated_env: dict[str, str],
+):
+    """E1 / FAULT-6 detector: Verify HAR log entries contains non-empty list with request/response fields."""
+    req = NetworkRequest(
+        method="GET",
+        url="http://127.0.0.1:9010/api/status/200",
+        status=200,
+        resource_type="fetch",
+        timing=12.5,
+        response_body='{"status":"ok"}',
+    )
+    tc_path = _create_har_testcase(isolated_workspace, [req])
+    har_out = isolated_workspace / "entries.har"
+    res = run_tracecase(["export-har", str(tc_path), "-o", str(har_out)], env=isolated_env)
+    assert res.returncode == 0
+    data = json.loads(har_out.read_text(encoding="utf-8"))
+    entries = data["log"]["entries"]
+    assert len(entries) > 0, "HAR entries list must not be empty"
+    entry = entries[0]
+    assert entry["request"]["method"] == "GET"
+    assert entry["request"]["url"] == req.url
+    assert entry["response"]["status"] == 200
+
+
 @pytest.mark.flow("E2")
 def test_e2_exported_har_replayability(
     isolated_workspace: Path,

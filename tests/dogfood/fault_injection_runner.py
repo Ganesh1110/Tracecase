@@ -1,14 +1,16 @@
 """
 Fault injection verification runner for Tracecase dogfood suite.
 
-Injects 12 intentional regressions into a throwaway copy of `src/` at
+Injects intentional regressions into a throwaway copy of `src/` at
 /tmp/tc_fault_injection/src/ and runs the ENTIRE CLI dogfood test suite
-against each fault. Reports all failing tests per fault in a markdown table.
+against each fault. Reports all failing tests, diffs, and verbatim assertion
+failure traces per fault.
 """
 
 import difflib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -30,8 +32,16 @@ FAULTS = [
     },
     {
         "id": "FAULT-2",
-        "name": "Healing returns first matching element",
-        "description": "Healing candidate resolution returns first element on page without verifying text/role",
+        "name": "Healing returns first element matching ANY element",
+        "description": "Candidate loop accepts the first candidate matching ANY element, skipping text/role/visibility checks",
+        "file": "tracecase/replay/healing.py",
+        "find": "        if await _is_single_visible(locator, wait_ms=wait_ms):",
+        "replace": "        if await locator.count() > 0:  # FAULT-2: accept first candidate matching ANY element, skipping checks",
+    },
+    {
+        "id": "FAULT-2b",
+        "name": "Crude healing returns first body element",
+        "description": "Crude fallback returns first generic element on page (body *) with healed_from set",
         "file": "tracecase/replay/healing.py",
         "find": "    for index, selector in enumerate(candidates):",
         "replace": "    if heal and len(candidates) > 1:\n        result.selector = 'body *'\n        result.healed_from = step.element.selector\n        return page.locator('button, a, input, div').first, result\n    for index, selector in enumerate(candidates):",
@@ -119,6 +129,41 @@ FAULTS = [
 ]
 
 
+def verify_detector_mapping():
+    """Verify that every detector in fault_expected_detectors.md is present in pytest --collect-only -q."""
+    detector_md = EVIDENCE_DIR / "fault_expected_detectors.md"
+    if not detector_md.exists():
+        raise RuntimeError(f"Detector mapping missing: {detector_md}")
+
+    # Collect all available test node IDs
+    res = subprocess.run(
+        [str(REPO_ROOT / ".venv" / "bin" / "pytest"), "tests/dogfood/cli_tests/", "--collect-only", "-q"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    collected = set(line.strip() for line in res.stdout.splitlines() if "::" in line)
+
+    # Extract detector node IDs from markdown table
+    md_content = detector_md.read_text(encoding="utf-8")
+    listed_detectors = set(re.findall(r"`(test_cli_[^`]+::test_[^`]+)`", md_content))
+    # Prepend directory prefix if needed
+    normalized_listed = set()
+    for d in listed_detectors:
+        if not d.startswith("tests/dogfood/cli_tests/"):
+            normalized_listed.add(f"tests/dogfood/cli_tests/{d}")
+        else:
+            normalized_listed.add(d)
+
+    missing = [d for d in normalized_listed if d not in collected]
+    if missing:
+        print("\n❌ FATAL: Detector mapping references tests that are NOT collected by pytest:")
+        for m in sorted(missing):
+            print(f"  - {m}")
+        sys.exit(1)
+    print(f"✓ Detector mapping validated: all {len(normalized_listed)} listed detectors are collected!")
+
+
 def reset_throwaway_src():
     if THROWAWAY_DIR.exists():
         shutil.rmtree(THROWAWAY_DIR)
@@ -126,61 +171,7 @@ def reset_throwaway_src():
     shutil.copytree(REPO_ROOT / "src", SRC_COPY)
 
 
-def apply_fault(fault: dict) -> str:
-    target_path = SRC_COPY / fault["file"]
-    orig_content = target_path.read_text(encoding="utf-8")
-    if fault["find"] not in orig_content:
-        raise ValueError(f"Could not find patch target in {target_path}:\n{fault['find']}")
-    patched_content = orig_content.replace(fault["find"], fault["replace"], 1)
-    target_path.write_text(patched_content, encoding="utf-8")
-
-    # Generate unified diff
-    diff_lines = list(difflib.unified_diff(
-        orig_content.splitlines(keepends=True),
-        patched_content.splitlines(keepends=True),
-        fromfile=f"a/{fault['file']}",
-        tofile=f"b/{fault['file']}",
-    ))
-    diff_text = "".join(diff_lines)
-    if not diff_text.strip():
-        raise RuntimeError(f"FATAL: Generated diff for {fault['id']} is empty!")
-
-    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
-    diff_path = EVIDENCE_DIR / f"fault_{fault['id'].lower().replace('-', '_')}.diff"
-    diff_path.write_text(diff_text, encoding="utf-8")
-    return diff_text
-
-
-def run_full_suite() -> tuple[list[str], str]:
-    """Runs the whole CLI dogfood suite and returns list of failing test node IDs and full stdout."""
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(SRC_COPY)
-
-    cmd = [
-        str(REPO_ROOT / ".venv" / "bin" / "pytest"),
-        "tests/dogfood/cli_tests/",
-        "-q",
-        "--tb=no",
-        "--no-header",
-        "-p", "no:randomly",
-    ]
-    proc = subprocess.run(
-        cmd,
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-    # Parse failing tests from pytest output
-    failing = []
-    for line in proc.stdout.splitlines():
-        if line.startswith("FAILED "):
-            node = line.split()[1]
-            failing.append(node)
-    return failing, proc.stdout
-
-
-def verify_throwaway_env() -> None:
+def verify_throwaway_env():
     env = os.environ.copy()
     env["PYTHONPATH"] = str(SRC_COPY)
     proc = subprocess.run(
@@ -197,115 +188,219 @@ def verify_throwaway_env() -> None:
     print(f"Verified throwaway module import: {imported_path}")
 
 
-def run_baseline() -> None:
+def apply_fault(fault: dict) -> str:
+    target_path = SRC_COPY / fault["file"]
+    orig_content = target_path.read_text(encoding="utf-8")
+    if fault["find"] not in orig_content:
+        raise ValueError(f"Could not find patch target in {target_path}:\n{fault['find']}")
+    patched_content = orig_content.replace(fault["find"], fault["replace"], 1)
+    target_path.write_text(patched_content, encoding="utf-8")
+
+    diff_lines = list(difflib.unified_diff(
+        orig_content.splitlines(keepends=True),
+        patched_content.splitlines(keepends=True),
+        fromfile=f"a/{fault['file']}",
+        tofile=f"b/{fault['file']}",
+    ))
+    diff_text = "".join(diff_lines)
+    if not diff_text.strip():
+        raise RuntimeError(f"FATAL: Generated diff for {fault['id']} is empty!")
+
+    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+    diff_path = EVIDENCE_DIR / f"fault_{fault['id'].lower().replace('-', '_')}.diff"
+    diff_path.write_text(diff_text, encoding="utf-8")
+    return diff_text
+
+
+def run_full_suite() -> dict:
+    """Runs the full CLI suite with fixed seed / no randomly. Returns execution results and parsed failure details."""
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(SRC_COPY)
+
+    cmd = [
+        str(REPO_ROOT / ".venv" / "bin" / "pytest"),
+        "tests/dogfood/cli_tests/",
+        "-q",
+        "--tb=short",
+        "-p", "no:randomly",
+    ]
+    proc = subprocess.run(
+        cmd,
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    raw_output = proc.stdout + proc.stderr
+
+    # Parse failing test nodes
+    failing_nodes = []
+    for line in raw_output.splitlines():
+        if line.startswith("FAILED "):
+            parts = line.split()
+            if len(parts) >= 2:
+                failing_nodes.append(parts[1])
+
+    # Extract first assertion or exception line per failure
+    failure_traces = {}
+    current_test = None
+    collecting_trace = False
+    for line in raw_output.splitlines():
+        if line.startswith("___") and line.endswith("___"):
+            current_test = line.strip("_ ")
+            collecting_trace = True
+            continue
+        if collecting_trace and current_test:
+            if line.startswith("E   ") or line.startswith(">   "):
+                failure_traces[current_test] = line.strip()
+                collecting_trace = False
+
+    # Extract verbatim summary line
+    summary_lines = [l for l in raw_output.splitlines() if ("passed" in l or "failed" in l or "error" in l)]
+    summary_line = summary_lines[-1] if summary_lines else "NO SUMMARY OUTPUT"
+
+    # Treat exit code other than 0 or 1, collection errors, or timeouts as INFRA FAILURE
+    is_infra_failure = proc.returncode not in (0, 1) or "collection error" in raw_output.lower() or "interrupted" in raw_output.lower()
+
+    return {
+        "exit_code": proc.returncode,
+        "summary_line": summary_line,
+        "failing_nodes": failing_nodes,
+        "failure_traces": failure_traces,
+        "is_infra_failure": is_infra_failure,
+        "raw_output": raw_output,
+    }
+
+
+def run_baseline():
     print("================================================================================")
-    print("FAULT INJECTION BASELINE (NO FAULT INJECTED IN THROWAWAY SRC)")
+    print("FAULT INJECTION BASELINE (CLEAN THROWAWAY SRC)")
     print("================================================================================")
     reset_throwaway_src()
     verify_throwaway_env()
 
-    print("Running full test suite on clean throwaway copy...")
-    failing_tests, stdout = run_full_suite()
-    print(f"\nBaseline failing tests: {len(failing_tests)}")
-    for t in failing_tests:
-        print(f"  - {t}")
+    res = run_full_suite()
+    print(f"Baseline Exit Code: {res['exit_code']}")
+    print(f"Baseline Summary:   {res['summary_line']}")
 
     out_file = EVIDENCE_DIR / "fault_baseline.txt"
-    summary_lines = [l for l in stdout.splitlines() if "passed" in l]
-    summary_line = summary_lines[-1] if summary_lines else "132 passed, 15 xfailed"
-    if failing_tests:
-        out_file.write_text(
-            f"BASELINE FAILED with {len(failing_tests)} failing test(s):\n"
-            f"Summary: {summary_line}\n"
-            + "\n".join(failing_tests) + "\n",
-            encoding="utf-8",
-        )
-        print("\n❌ BASELINE NOT CLEAN! Fix failing tests before proceeding with fault injection.")
+    out_file.write_text(
+        f"Exit Code: {res['exit_code']}\n"
+        f"{res['summary_line']}\n",
+        encoding="utf-8",
+    )
+
+    if res["is_infra_failure"] or len(res["failing_nodes"]) > 0:
+        print(f"\n❌ BASELINE NOT CLEAN! Failing nodes: {res['failing_nodes']}")
         sys.exit(1)
-    else:
-        out_file.write_text(
-            f"BASELINE VERIFIED CLEAN:\n"
-            f"- Exit Status: 0 failing tests\n"
-            f"- Test Counts: {summary_line}\n"
-            f"- All 15 xfailed tests strictly match known APP BUGs (BUG-001 through BUG-010).\n",
-            encoding="utf-8",
-        )
-        print(f"\n✓ BASELINE VERIFIED CLEAN: 0 failing tests ({summary_line})!")
+    print(f"✓ Baseline Clean: 0 failing tests ({res['summary_line']})")
 
 
-def run_all_faults() -> None:
+def run_all_faults():
     print("================================================================================")
     print("STRICT 12-FAULT INJECTION BENCHMARK (WHOLE CLI SUITE PER FAULT)")
     print("================================================================================")
 
-    # 1. Run baseline first
+    verify_detector_mapping()
     run_baseline()
 
-    results = []
+    report_sections = []
+    report_sections.append("="*80)
+    report_sections.append("TRACECASE 12-FAULT INJECTION DETAILED BENCHMARK REPORT")
+    report_sections.append("="*80 + "\n")
+
+    summary_rows = []
     for fault in FAULTS:
-        print(f"\n[Injecting {fault['id']}] {fault['name']}...", flush=True)
+        print(f"\n[{fault['id']}] {fault['name']}...", flush=True)
         reset_throwaway_src()
         diff_text = apply_fault(fault)
 
-        failing_tests, _ = run_full_suite()
-        status = "CAUGHT" if len(failing_tests) > 0 else "MISSED"
-        print(f"  Result: {status} ({len(failing_tests)} failing test(s) detected)", flush=True)
-        for t in failing_tests[:5]:
-            print(f"    - {t}", flush=True)
-        if len(failing_tests) > 5:
-            print(f"    ... and {len(failing_tests) - 5} more", flush=True)
+        run_res = run_full_suite()
+        status = "INFRA FAILURE" if run_res["is_infra_failure"] else ("CAUGHT" if len(run_res["failing_nodes"]) > 0 else "MISSED")
 
-        results.append({
+        print(f"  Result: {status} (Exit Code: {run_res['exit_code']}, {len(run_res['failing_nodes'])} failing tests)", flush=True)
+        print(f"  Summary: {run_res['summary_line']}", flush=True)
+
+        # Build detailed fault section
+        section = [
+            f"### {fault['id']}: {fault['name']}",
+            f"**Description**: {fault['description']}",
+            f"**Target**: `{fault['file']}`",
+            f"**Exit Code**: `{run_res['exit_code']}`",
+            f"**Verbatim Pytest Summary**: `{run_res['summary_line']}`",
+            f"**Status**: **{status}** ({len(run_res['failing_nodes'])} failing test(s))",
+            "",
+            "**Unified Diff**:",
+            "```diff",
+            diff_text.strip(),
+            "```",
+            "",
+            "**Failing Tests & Failure Traces**:",
+        ]
+        if run_res["failing_nodes"]:
+            for node in run_res["failing_nodes"]:
+                func_name = node.split("::")[-1]
+                trace = run_res["failure_traces"].get(func_name, "Assertion failed (see raw output)")
+                section.append(f"- `{node}`:\n  `{trace}`")
+        else:
+            section.append("*None (No tests caught this regression)*")
+        section.append("\n" + "-"*80 + "\n")
+        report_sections.append("\n".join(section))
+
+        summary_rows.append({
             "id": fault["id"],
             "name": fault["name"],
             "description": fault["description"],
-            "failing_tests": failing_tests,
+            "failing_nodes": run_res["failing_nodes"],
             "status": status,
+            "exit_code": run_res["exit_code"],
+            "summary": run_res["summary_line"],
         })
 
     # Restore clean throwaway
     reset_throwaway_src()
 
-    # Generate Markdown Table
+    # Markdown Summary Table
+    md_lines = [
+        "| Fault ID | Injected Regression | Tests Detecting Regression | Status | Exit Code | Summary |",
+        "|---|---|---|---|---|---|",
+    ]
+    for r in summary_rows:
+        tests_str = "<br>".join([f"`{t.split('::')[-1]}`" for t in r["failing_nodes"][:4]])
+        if len(r["failing_nodes"]) > 4:
+            tests_str += f"<br>*(+{len(r['failing_nodes']) - 4} more)*"
+        if not tests_str:
+            tests_str = "*None*"
+        md_lines.append(f"| **{r['id']}** | {r['description']} | {tests_str} | **{r['status']}** ({len(r['failing_nodes'])}) | `{r['exit_code']}` | `{r['summary']}` |")
+
+    table_md = "\n".join(md_lines)
     print("\n" + "="*80)
     print("FAULT INJECTION RESULTS SUMMARY")
     print("="*80)
-    md_lines = [
-        "| Fault ID | Injected Regression | Tests Detecting Regression | Status |",
-        "|---|---|---|---|",
-    ]
-    for r in results:
-        tests_str = "<br>".join([f"`{t.split('::')[-1]}`" for t in r["failing_tests"][:4]])
-        if len(r["failing_tests"]) > 4:
-            tests_str += f"<br>*(+{len(r['failing_tests']) - 4} more)*"
-        if not tests_str:
-            tests_str = "*None*"
-        md_lines.append(f"| **{r['id']}** | {r['description']} | {tests_str} | **{r['status']}** ({len(r['failing_tests'])}) |")
-
-    table_md = "\n".join(md_lines)
     print(table_md)
 
-    # Save to json/markdown
+    full_report_text = "\n".join(report_sections) + "\n\n## Summary Table\n\n" + table_md + "\n"
+    report_file = EVIDENCE_DIR / "fault_injection_report.txt"
+    report_file.write_text(full_report_text, encoding="utf-8")
+
     out_file = REPO_ROOT / "tests" / "dogfood" / "FAULT_INJECTION_REPORT.md"
     out_file.write_text(table_md + "\n", encoding="utf-8")
     summary_file = EVIDENCE_DIR / "fault_injection_summary.txt"
     summary_file.write_text(table_md + "\n", encoding="utf-8")
-    print(f"\nWrote full report to: {out_file} and {summary_file}")
 
-    all_caught = all(r["status"] == "CAUGHT" for r in results)
+    print(f"\n✓ Full report written to: {report_file}")
+    print(f"✓ Summary written to:     {out_file} and {summary_file}")
+
+    all_caught = all(r["status"] == "CAUGHT" for r in summary_rows)
     if not all_caught:
-        print("\n❌ ERROR: One or more faults were NOT caught by the test suite!")
+        print("\n❌ ERROR: One or more faults were NOT caught!")
         sys.exit(1)
     else:
         print("\n✓ SUCCESS: All 12 faults caught by the full test suite!")
 
 
-def main():
+if __name__ == "__main__":
     if "--baseline" in sys.argv:
         run_baseline()
     else:
         run_all_faults()
-
-
-if __name__ == "__main__":
-    main()

@@ -219,6 +219,61 @@ def test_f7_name_sanitization(
 
 
 @pytest.mark.flow("F1")
+def test_f8_all_recorded_steps_emitted(
+    isolated_workspace: Path,
+    isolated_env: dict[str, str],
+):
+    """F1 / FAULT-3 detector: Verify that every recorded step in testcase.json is emitted in generated code."""
+    steps = [
+        Step(
+            number=1,
+            timestamp=datetime.now(),
+            action_type="navigate",
+            url="http://127.0.0.1:9010/login.html",
+            description_short="Navigate to login",
+            description_detailed="Navigated to login",
+        ),
+        Step(
+            number=2,
+            timestamp=datetime.now(),
+            action_type="input",
+            element=ElementInfo(
+                selector="#username",
+                xpath="//input[@id='username']",
+                tag_name="input",
+                attributes={"id": "username"},
+                bounding_box={"x": 10, "y": 10, "width": 100, "height": 30},
+            ),
+            input_value="alice",
+            description_short="Fill username",
+            description_detailed="Filled alice into username",
+        ),
+        Step(
+            number=3,
+            timestamp=datetime.now(),
+            action_type="click",
+            element=ElementInfo(
+                selector="#btn-submit",
+                xpath="//button[@id='btn-submit']",
+                tag_name="button",
+                attributes={"id": "btn-submit"},
+                bounding_box={"x": 10, "y": 50, "width": 80, "height": 30},
+            ),
+            description_short="Click submit button",
+            description_detailed="Clicked submit button",
+        ),
+    ]
+    tc_path = _create_codegen_testcase(isolated_workspace, steps=steps)
+    out_file = isolated_workspace / "test_all_steps.py"
+    res = run_tracecase(["codegen", str(tc_path), "-o", str(out_file)], env=isolated_env)
+    assert res.returncode == 0
+    content = out_file.read_text(encoding="utf-8")
+    assert "goto" in content or "page.goto" in content
+    assert "username" in content
+    assert "btn-submit" in content or "submit" in content
+
+
+@pytest.mark.flow("F1")
 def test_f11_codegen_requires_pytest_asyncio_audit(isolated_workspace: Path, isolated_env: dict[str, str]):
     """F1 / BUG-007 (Characterization): Assert that generated code uses async def requiring pytest-asyncio."""
     tc_path = _create_codegen_testcase(isolated_workspace)

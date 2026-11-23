@@ -363,6 +363,39 @@ def test_i19_mcp_get_testcase_tool(isolated_workspace: Path, isolated_env: dict[
         proc.wait(timeout=2.0)
 
 
+@pytest.mark.flow("I19")
+@pytest.mark.xfail(strict=True, reason="BUG-011: MCP get_testcase throws -32603 internal exception instead of returning result.isError=True")
+def test_i19_mcp_missing_testcase_iserror(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I19 / BUG-011 (Strict XFail): Missing testcase over MCP tools/call must return result with isError=True per MCP spec."""
+    custom_db = isolated_workspace / "mcp_missing.db"
+    run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+
+    proc = subprocess.Popen(
+        [str(REPO_ROOT / ".venv" / "bin" / "tracecase"), "mcp", "--db", str(custom_db)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=isolated_env,
+        cwd=REPO_ROOT,
+    )
+    try:
+        req = json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "get_testcase", "arguments": {"testcase_id": "tc_nonexistent_999"}}
+        })
+        proc.stdin.write(req + "\n")
+        proc.stdin.flush()
+        resp = json.loads(proc.stdout.readline())
+        # MCP spec: Tool execution errors must return a normal JSON-RPC result with isError: true, NOT an RPC protocol exception (-32603)
+        assert "result" in resp, f"Expected result payload with isError per MCP spec, got RPC error: {resp.get('error')}"
+        assert resp["result"].get("isError") is True
+    finally:
+        proc.stdin.close()
+        proc.terminate()
+        proc.wait(timeout=2.0)
+
+
 @pytest.mark.flow("I20")
 def test_i20_mcp_tool_naming_coverage_report(isolated_workspace: Path, isolated_env: dict[str, str]):
     """I20 (Discrepancy): Verify MCP tool is named coverage_report (code) vs get_coverage (docs)."""

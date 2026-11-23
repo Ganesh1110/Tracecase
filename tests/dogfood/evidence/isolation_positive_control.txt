@@ -1,0 +1,17 @@
+=== POSITIVE CONTROL VERIFICATION ===
+Planting positive control artifact: /Users/ganeshjayaprakash/experimental/Tracecase/recordings/CONTROL.txt
+diff -u snapshot_before.txt snapshot_after.txt:
+--- /Users/ganeshjayaprakash/experimental/Tracecase/tests/dogfood/evidence/snapshot_before.txt	2026-11-23 17:14:25
++++ /Users/ganeshjayaprakash/experimental/Tracecase/tests/dogfood/evidence/snapshot_after.txt	2026-11-23 17:14:25
+@@ -1,5 +1,6 @@
+ --- HOME_TRACECASE_DIR ---
+-NO_REPO_RECORDINGS_DIR
++--- REPO_RECORDINGS_DIR ---
++d87ebebf8b7323e6e595372680609be3390d8d93de401e7c2619f423cddbc2b0  /Users/ganeshjayaprakash/experimental/Tracecase/recordings/CONTROL.txt
+ --- REPO_DOT_TRACECASE_DIR ---
+ 0685c5ca9268e4e0ed4d8b91bddc0c4a676e5c682b26e2260b7444eb0e44c0e6  /Users/ganeshjayaprakash/experimental/Tracecase/.tracecase/explorations/exp_2c91c88b/node_2.png
+ 08421c9b3b6144b1128e7598cf69b7526dd076508caf4ba0a8358635155686bd  /Users/ganeshjayaprakash/experimental/Tracecase/.tracecase/explorations/exp_2c91c88b/node_10.png
+
+✓ Positive control correctly caught: diff is non-empty.
+Removing /Users/ganeshjayaprakash/experimental/Tracecase/recordings/CONTROL.txt
+✓ Clean state restored: diff is empty (0 bytes).
