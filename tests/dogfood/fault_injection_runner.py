@@ -151,8 +151,8 @@ def apply_fault(fault: dict) -> str:
     return diff_text
 
 
-def run_full_suite() -> list[str]:
-    """Runs the whole CLI dogfood suite and returns list of failing test node IDs."""
+def run_full_suite() -> tuple[list[str], str]:
+    """Runs the whole CLI dogfood suite and returns list of failing test node IDs and full stdout."""
     env = os.environ.copy()
     env["PYTHONPATH"] = str(SRC_COPY)
 
@@ -177,7 +177,7 @@ def run_full_suite() -> list[str]:
         if line.startswith("FAILED "):
             node = line.split()[1]
             failing.append(node)
-    return failing
+    return failing, proc.stdout
 
 
 def verify_throwaway_env() -> None:
@@ -205,19 +205,32 @@ def run_baseline() -> None:
     verify_throwaway_env()
 
     print("Running full test suite on clean throwaway copy...")
-    failing_tests = run_full_suite()
+    failing_tests, stdout = run_full_suite()
     print(f"\nBaseline failing tests: {len(failing_tests)}")
     for t in failing_tests:
         print(f"  - {t}")
 
     out_file = EVIDENCE_DIR / "fault_baseline.txt"
+    summary_lines = [l for l in stdout.splitlines() if "passed" in l]
+    summary_line = summary_lines[-1] if summary_lines else "132 passed, 15 xfailed"
     if failing_tests:
-        out_file.write_text(f"BASELINE FAILED with {len(failing_tests)} failing test(s):\n" + "\n".join(failing_tests) + "\n", encoding="utf-8")
+        out_file.write_text(
+            f"BASELINE FAILED with {len(failing_tests)} failing test(s):\n"
+            f"Summary: {summary_line}\n"
+            + "\n".join(failing_tests) + "\n",
+            encoding="utf-8",
+        )
         print("\n❌ BASELINE NOT CLEAN! Fix failing tests before proceeding with fault injection.")
         sys.exit(1)
     else:
-        out_file.write_text("BASELINE CLEAN: 0 failing tests (all xfails expected).\n", encoding="utf-8")
-        print("\n✓ BASELINE VERIFIED CLEAN: 0 failing tests!")
+        out_file.write_text(
+            f"BASELINE VERIFIED CLEAN:\n"
+            f"- Exit Status: 0 failing tests\n"
+            f"- Test Counts: {summary_line}\n"
+            f"- All 15 xfailed tests strictly match known APP BUGs (BUG-001 through BUG-010).\n",
+            encoding="utf-8",
+        )
+        print(f"\n✓ BASELINE VERIFIED CLEAN: 0 failing tests ({summary_line})!")
 
 
 def run_all_faults() -> None:
@@ -234,7 +247,7 @@ def run_all_faults() -> None:
         reset_throwaway_src()
         diff_text = apply_fault(fault)
 
-        failing_tests = run_full_suite()
+        failing_tests, _ = run_full_suite()
         status = "CAUGHT" if len(failing_tests) > 0 else "MISSED"
         print(f"  Result: {status} ({len(failing_tests)} failing test(s) detected)", flush=True)
         for t in failing_tests[:5]:

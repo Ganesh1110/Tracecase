@@ -266,4 +266,101 @@ This document tracks all modifications made to test assertions during Phase 2, r
      - **Root Cause**: Multiple workers collided on fixed ports 9010/9110 (`[Errno 48] Address already in use`).
      - **Fix**: Added `_get_worker_offset()` in `conftest.py` allocating isolated port bands (`9010 + offset * 10`, `9110 + offset * 10`).
 
+---
+
+### Entry 18: Control Panel Legacy `__qa_` Prefix Audit (`test_b12_control_panel_legacy_qa_ids_audit`, `test_bug006_control_panel_clean_ids`)
+- **File**: `tests/dogfood/cli_tests/test_cli_b_record.py`
+- **Original / Characterization Assertion**:
+  ```python
+  assert "__qa_start_btn__" in CONTROL_PANEL_JS
+  assert "__qa_stop_btn__" in CONTROL_PANEL_JS
+  ```
+- **Strict Final Assertion**:
+  ```python
+  @pytest.mark.xfail(strict=True, reason="BUG-006: Control panel internal elements retain legacy __qa_ prefixes instead of tracecase branding")
+  def test_bug006_control_panel_clean_ids():
+      assert "__qa_" not in CONTROL_PANEL_JS, "Control panel JS contains legacy __qa_ prefixes"
+  ```
+- **Classification**: **APP BUG (BUG-006)**
+- **Rationale**: `src/tracecase/control_panel.py` retains legacy internal element prefixes (`__qa_start_btn__`, `__qa_stop_btn__`) from an older codebase name rather than current `tracecase` branding. Strict xfail maintained.
+
+---
+
+### Entry 19: MCP Password Masking Audit (`test_i20_mcp_password_masking`)
+- **File**: `tests/dogfood/cli_tests/test_cli_i_corpus_mcp.py`
+- **Test Setup Fix**:
+  - The test initially set up a testcase in an unindexed directory causing `testcase not found`. Fixed to use `_create_sample_testcase` helper, attach password attribute to step, and index the database. (Classification: **TEST BUG** in setup).
+- **Strict Final Assertion**:
+  ```python
+  @pytest.mark.xfail(strict=True, reason="BUG-009D: MCP get_testcase returns plaintext password credentials")
+  def test_i20_mcp_password_masking(...):
+      ...
+      assert "SuperSecretPassword123!" not in res_str, "Plaintext password leaked in MCP response"
+  ```
+- **Classification**: **APP BUG (BUG-009D)**
+- **Rationale**: The MCP server's `get_testcase` tool reads and returns raw `testcase.json` contents without sanitizing password input values, leaking secrets via JSON-RPC. Strict xfail maintained without weakening assertion.
+
+---
+
+### Entry 20: Root `annotated_doc` Shadowing Audit (`test_bug001_annotated_doc_correct_behavior`)
+- **File**: `tests/dogfood/cli_tests/test_cli_a_install_env.py`
+- **Strict Final Assertion**:
+  ```python
+  @pytest.mark.xfail(strict=True, reason="BUG-001: root annotated_doc stub shadows real package causing fastapi import failure")
+  def test_bug001_annotated_doc_correct_behavior():
+      res = subprocess.run([sys.executable, "-c", "import fastapi; print('FASTAPI_IMPORTED')"], ...)
+      assert res.returncode == 0
+      assert "FASTAPI_IMPORTED" in res.stdout
+  ```
+- **Classification**: **APP BUG (BUG-001)**
+- **Rationale**: The repo root contains an untracked stub `annotated_doc/` that shadows the third-party dependency, crashing any FastAPI imports when run with repository root on sys.path. Strict xfail maintained.
+
+---
+
+### Entry 21: Healing Candidate Fallback Priority Audit (`test_bug002_healing_order_correct_behavior`)
+- **File**: `tests/dogfood/cli_tests/test_cli_c_replay_healing.py`
+- **Strict Final Assertion**:
+  ```python
+  @pytest.mark.xfail(strict=True, reason="BUG-002: healing priority inverts fallback order placing xpath before ID and testid")
+  def test_bug002_healing_order_correct_behavior():
+      candidates = candidate_selectors(elem)
+      id_index = candidates.index("#btn-id")
+      xpath_index = candidates.index("xpath=//button[1]")
+      assert id_index < xpath_index, "Robust ID selector must precede fragile XPath selector"
+  ```
+- **Classification**: **APP BUG (BUG-002)**
+- **Rationale**: `tracecase/replay/healing.py` places fragile absolute XPath ahead of robust attributes (`id`, `data-testid`), risking false-positive heals on shifted DOM layouts. Strict xfail maintained.
+
+---
+
+### Entry 22: Codegen Standard Sync Playwright Fixture Audit (`test_bug007_codegen_clean_playwright_test`)
+- **File**: `tests/dogfood/cli_tests/test_cli_f_codegen.py`
+- **Strict Final Assertion**:
+  ```python
+  @pytest.mark.xfail(strict=True, reason="BUG-007: Codegen generates async test requiring pytest-asyncio rather than standard pytest-playwright sync fixtures")
+  def test_bug007_codegen_clean_playwright_test(...):
+      assert not content.startswith("import pytest_asyncio")
+      assert "async def test_" not in content, "Generated code uses async functions requiring pytest-asyncio"
+  ```
+- **Classification**: **APP BUG (BUG-007)**
+- **Rationale**: `tracecase codegen` produces asynchronous pytest test functions requiring `pytest-asyncio`, whereas standard pytest-playwright uses synchronous fixtures. Strict xfail maintained.
+
+---
+
+### Entry 23: Multi-Format Credential Leak Audit (`test_b27_password_masking_markdown`, `test_b27_password_masking_html`)
+- **File**: `tests/dogfood/cli_tests/test_cli_b_record.py`
+- **Strict Final Assertions**:
+  ```python
+  @pytest.mark.xfail(strict=True, reason="BUG-009B: Plaintext password leaked in exported testcase.md")
+  def test_b27_password_masking_markdown(...):
+      assert secret not in md_content, "Plaintext password leaked in testcase.md"
+
+  @pytest.mark.xfail(strict=True, reason="BUG-009C: Plaintext password leaked in exported testcase.html")
+  def test_b27_password_masking_html(...):
+      assert secret not in html_content, "Plaintext password leaked in testcase.html"
+  ```
+- **Classification**: **APP BUG (BUG-009B, BUG-009C)**
+- **Rationale**: `Recorder.export()` writes unmasked password values directly into `testcase.md` and `testcase.html`. Strict xfail maintained.
+
+
 
