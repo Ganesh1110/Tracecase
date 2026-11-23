@@ -13,6 +13,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from tracecase.models import NetworkRequest, Step, TestCase
 from tests.dogfood.cli_tests.conftest import run_tracecase
 
@@ -49,6 +50,7 @@ def _create_har_testcase(tmp_path: Path, requests: list[NetworkRequest]) -> Path
     return tc_path
 
 
+@pytest.mark.flow("E1")
 def test_e1_export_har_with_output_flag(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -77,6 +79,7 @@ def test_e1_export_har_with_output_flag(
     assert data["log"]["entries"][0]["response"]["status"] == 200
 
 
+@pytest.mark.flow("E2")
 def test_e2_exported_har_replayability(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -125,11 +128,11 @@ def test_e2_exported_har_replayability(
     run_tracecase(["export-har", str(tc_path), "-o", str(har_path)], env=isolated_env)
     assert har_path.exists()
 
-    # Replay --from-har
     res_rep = run_tracecase(["replay", str(tc_path), "--from-har", str(har_path)], env=isolated_env)
     assert res_rep.returncode == 0
 
 
+@pytest.mark.flow("E3")
 def test_e3_testcase_zero_network_requests(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -146,6 +149,7 @@ def test_e3_testcase_zero_network_requests(
     assert data["log"]["entries"] == []
 
 
+@pytest.mark.flow("E4")
 def test_e4_missing_output_flag_defaults(
     isolated_workspace: Path,
     isolated_env: dict[str, str],

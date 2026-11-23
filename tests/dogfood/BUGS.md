@@ -10,7 +10,7 @@ This document tracks all defects, inconsistencies, and functional regressions di
 - **Found in Git**: Tracked in commit `687543898b814f6f6f41ee4931becfec6071d801` (added as dummy module)
 - **Reproduction**:
   ```bash
-  cd /Users/ganeshjayaprakash/experimental/Tracecase
+  cd /path/to/Tracecase
   .venv/bin/python -c "import fastapi"
   ```
 - **Error Output**:
@@ -35,4 +35,88 @@ This document tracks all defects, inconsistencies, and functional regressions di
 - **Risk**:
   When a page undergoes structural redesign or DOM shifts, a stale absolute XPath can resolve to an unintended element (e.g. adjacent table cell or button) and execute silently without error.
 - **Test Target**:
-  Verified in `tests/dogfood/cli_tests/test_c10_healing_order.py` with false-positive shift assertions.
+  Verified in `tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c10_healing_tiers_and_false_positive_audit` with false-positive shift assertions.
+
+---
+
+## BUG-003: Replay Exits with Code 2 Instead of Code 1 on Missing Element Without Heal
+- **Severity**: Medium (Conflates test failure with infrastructure error in CI pipelines)
+- **Component**: `src/tracecase/cli.py` & `src/tracecase/replay/engine.py`
+- **Observed Behavior**:
+  When an element is missing on replay without `--heal`, `ReplayEngine` raises `ReplayError("Element not found")`. `cli.py` catches this as a fatal command error and exits with `code 2` (status="error") rather than `code 1` (status="failed").
+- **Documentation Contract**:
+  The CLI contract states:
+  - Exit code 0: Replay passed successfully.
+  - Exit code 1: Replay failed (assertion failure or missing element).
+  - Exit code 2: Infrastructure / CLI command error (syntax, missing file, browser crash).
+- **Test Target**:
+  Marked `@pytest.mark.xfail(strict=True, reason="BUG-003: replay exits with code 2 instead of code 1 when element is missing without heal")` in `tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c8_replay_without_heal_version_b`.
+
+---
+
+## BUG-004: Visual Diff Automatically Pads Dimension Mismatch Without Warning
+- **Severity**: Low-Medium (Hides critical UI layout regressions)
+- **Component**: `src/tracecase/replay/visual.py` (`compute_diff`)
+- **Observed Behavior**:
+  When comparison images differ in dimension (e.g. 100x100 vs 200x200), `compute_diff` silently expands the smaller image by black-padding and computes pixel differences without surfacing a specific dimension mismatch warning or error flag.
+- **Expected Behavior**:
+  The tool should explicitly warn or flag when viewport or image dimensions do not match baseline dimensions.
+- **Test Target**:
+  Marked `@pytest.mark.xfail(strict=True, reason="BUG-004: tracecase diff pads canvas without warning on dimension mismatch")` in `tests/dogfood/cli_tests/test_cli_d_diff.py::test_d4_dimension_mismatch_warning_reported`.
+
+---
+
+## BUG-005: Incomplete Mutation Strategies in MutationEngine
+- **Severity**: Medium (Missing documented mutation capabilities)
+- **Component**: `src/tracecase/engines/mutation.py`
+- **Observed Behavior**:
+  `MutationEngine` currently only generates:
+  - `double_click` for actions
+  - `500` status error for network requests
+  Strategies promised in documentation (`skip_action`, `reorder_inputs`, `latency`, `403`, `429`) are unimplemented.
+- **Test Target**:
+  Marked `@pytest.mark.xfail(strict=True)` in:
+  - `tests/dogfood/cli_tests/test_cli_g_mutate.py::test_g3_missing_skip_action_mutation`
+  - `tests/dogfood/cli_tests/test_cli_g_mutate.py::test_g3_missing_reorder_inputs_mutation`
+  - `tests/dogfood/cli_tests/test_cli_g_mutate.py::test_g4_missing_latency_fault_mutation`
+
+---
+
+## BUG-006: Legacy `__qa_` DOM Identifiers in Injected Control Panel
+- **Severity**: Low (Branding / Code Hygiene Inconsistency)
+- **Component**: `src/tracecase/control_panel.py`
+- **Observed Behavior**:
+  The control panel container uses `#__tracecase_panel__`, but internal elements retain legacy naming: `#__qa_start_btn__`, `#__qa_stop_btn__`, `#__qa_status_dot__`, `#__qa_steps_count__`, and CSS `@keyframes __qa_pulse`. Leftover artifacts from the previous `qa_auto` product name.
+
+---
+
+## BUG-007: Codegen Generates Asynchronous Playwright Tests (`pytest-asyncio`)
+- **Severity**: Info / Documentation Clarification
+- **Component**: `src/tracecase/codegen.py`
+- **Observed Behavior**:
+  Generated tests use `async def test_*(page: Page): ...` and `await ...`. Executing these generated tests requires `pytest-asyncio` installed and active, which is valid and fully functional but not highlighted in user documentation.
+
+---
+
+## BUG-008: Unhandled Connection Exception Dumps Raw Python Traceback on Unreachable URL
+- **Severity**: Medium (CLI Error Handling Violation)
+- **Component**: `src/tracecase/cli.py` (record command)
+- **Observed Behavior**:
+  Running `tracecase record http://127.0.0.1:19999/unreachable` fails with an unhandled `playwright._impl._errors.Error: net::ERR_CONNECTION_REFUSED` that dumps a full Python / Rich traceback to stderr.
+- **Contract**:
+  Flow A6 and CLI design specify clean, user-friendly error messages on failure without raw unhandled exception tracebacks.
+- **Test Target**:
+  Marked `@pytest.mark.xfail(strict=True, reason="BUG-008: Unhandled connection exception dumps Python traceback on unreachable URL")` in `tests/dogfood/cli_tests/test_cli_b_record.py::test_b11_unreachable_url`.
+
+---
+
+## BUG-009: Plaintext Credential Leakage in Test Case Recordings
+- **Severity**: Critical (Security Vulnerability)
+- **Component**: `src/tracecase/events.py` (line 178) & `src/tracecase/recorder.py`
+- **Observed Behavior**:
+  When recording interactions on password fields (`<input type="password">`), the injected JavaScript event listener reads `lastInputValue[selector] = el.value` without checking the input's `type` attribute. As a result, the recorded `testcase.json` stores the user's plaintext password in `step.input_value`.
+- **Contract / Specification**:
+  `src/tracecase/requirements/validation/sandbox.py:73` explicitly specifies:
+  > "Traces, screenshots, and logs are safely stored with credential masking."
+- **Test Target**:
+  Marked `@pytest.mark.xfail(strict=True, reason="BUG-009: Password input values stored in plaintext without credential masking")` in `tests/dogfood/cli_tests/test_cli_b_record.py::test_b27_password_masking_audit`.

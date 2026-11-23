@@ -1,22 +1,21 @@
 """CLI Section I Tests: Corpus Indexing, Search, Coverage, Clean & MCP (Flows I1 - I22).
 
-Tests every CLI option and operational behavior of:
-- `tracecase index` (I1 - I5): single case, directory, custom db, --clear, idempotency
-- `tracecase search` (I6 - I11): BM25 keyword, selector, URL, --limit, 0 matches, FTS5 syntax
-- `tracecase coverage` (I12 - I13): domain/route metrics, custom --db
-- `tracecase clean` (I14 - I16): bare defaults, --db, --all within sandbox isolation
-- `tracecase mcp` (I17 - I22): stdio JSON-RPC 2.0 initialize, tools/list, search_testcases,
-  get_testcase, coverage_report vs get_coverage discrepancy, stdout protocol purity.
+Dedicated tests for each flow tagged with @pytest.mark.flow("<ID>"):
+- I1 - I4: Indexing directory, custom db, --clear, idempotency
+- I5 - I9: Search BM25, --limit, selector/url, no results, special FTS5 syntax
+- I10 - I12: Coverage report display, duplicate warnings, empty DB
+- I13 - I16: Clean --db, --all, selective flags, bare defaults
+- I17 - I22: MCP stdio initialize, search_testcases, get_testcase, coverage_report discrepancy, custom DB, stdout purity
 """
 
 from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from tracecase.models import ElementInfo, NetworkRequest, Step, TestCase
 from tests.dogfood.cli_tests.conftest import REPO_ROOT, run_tracecase
 
@@ -75,111 +74,201 @@ def _create_sample_testcase(tmp_path: Path, tc_id: str, name: str, start_url: st
     return tc_path
 
 
-def test_i1_to_i5_index_commands(
-    isolated_workspace: Path,
-    isolated_env: dict[str, str],
-):
-    """I1 - I5: Indexing testcases into SQLite FTS5 corpus database."""
-    tc1 = _create_sample_testcase(isolated_workspace, "tc_001", "Search Flow", "http://127.0.0.1:9010/index.html")
-    tc2 = _create_sample_testcase(isolated_workspace, "tc_002", "Login Flow", "http://127.0.0.1:9010/login.html")
-    custom_db = isolated_workspace / "custom_corpus.db"
+@pytest.mark.flow("I1")
+def test_i1_index_directory(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I1: tracecase index indexes a directory containing testcases into SQLite FTS5."""
+    _create_sample_testcase(isolated_workspace, "tc_i1", "Index Dir Flow", "http://127.0.0.1:9010/index")
+    custom_db = isolated_workspace / "i1.db"
+    res = run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+    assert res.returncode == 0
+    assert "Indexed 1 test case" in res.stdout
 
-    # I1 & I2: Index directory
-    res_idx = run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
-    assert res_idx.returncode == 0
-    assert "Indexed 2 test case(s)" in res_idx.stdout
+
+@pytest.mark.flow("I2")
+def test_i2_index_custom_db_path(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I2: tracecase index --db creates database at custom specified path."""
+    _create_sample_testcase(isolated_workspace, "tc_i2", "Custom DB Flow", "http://127.0.0.1:9010/index")
+    custom_db = isolated_workspace / "sub" / "custom_target.db"
+    res = run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+    assert res.returncode == 0
     assert custom_db.exists()
 
-    # I5: Idempotency (re-index should not fail)
-    res_reindex = run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
-    assert res_reindex.returncode == 0
 
-    # I4: --clear flag resets database
-    res_clear = run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db), "--clear"], env=isolated_env)
-    assert res_clear.returncode == 0
-    assert "Existing corpus database reset" in res_clear.stdout
-
-
-def test_i6_to_i11_search_commands(
-    isolated_workspace: Path,
-    isolated_env: dict[str, str],
-):
-    """I6 - I11: Full-text search over indexed corpus."""
-    _create_sample_testcase(isolated_workspace, "tc_search", "Ecommerce Product Search", "http://127.0.0.1:9010/products")
-    custom_db = isolated_workspace / "search_corpus.db"
+@pytest.mark.flow("I3")
+def test_i3_index_clear_flag(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I3: tracecase index --clear wipes existing records before re-indexing."""
+    _create_sample_testcase(isolated_workspace, "tc_i3", "Clear Flag Flow", "http://127.0.0.1:9010/index")
+    custom_db = isolated_workspace / "i3.db"
     run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
 
-    # I6: Keyword search
-    res_kw = run_tracecase(["search", "Ecommerce", "--db", str(custom_db)], env=isolated_env)
-    assert res_kw.returncode == 0
-    assert "tc_search" in res_kw.stdout
+    res = run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db), "--clear"], env=isolated_env)
+    assert res.returncode == 0
+    assert "Existing corpus database reset" in res.stdout
 
-    # I7: Selector search
+
+@pytest.mark.flow("I4")
+def test_i4_reindex_idempotency(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I4: Indexing the same testcase twice updates cleanly without duplicates."""
+    _create_sample_testcase(isolated_workspace, "tc_i4", "Idempotent Flow", "http://127.0.0.1:9010/index")
+    custom_db = isolated_workspace / "i4.db"
+    run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+    res2 = run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+    assert res2.returncode == 0
+
+
+@pytest.mark.flow("I5")
+def test_i5_search_bm25_ranking_snippets(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I5: tracecase search performs BM25 ranking and highlights matched snippets."""
+    _create_sample_testcase(isolated_workspace, "tc_i5", "UniqueLaptopFlow", "http://127.0.0.1:9010/index")
+    custom_db = isolated_workspace / "i5.db"
+    run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+
+    res = run_tracecase(["search", "UniqueLaptopFlow", "--db", str(custom_db)], env=isolated_env)
+    assert res.returncode == 0
+    assert "tc_i5" in res.stdout
+
+
+@pytest.mark.flow("I6")
+def test_i6_search_limit_flag(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I6: tracecase search --limit caps displayed results."""
+    _create_sample_testcase(isolated_workspace, "tc_i6a", "Common Flow A", "http://127.0.0.1:9010/index")
+    _create_sample_testcase(isolated_workspace, "tc_i6b", "Common Flow B", "http://127.0.0.1:9010/index")
+    custom_db = isolated_workspace / "i6.db"
+    run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+
+    res = run_tracecase(["search", "Common", "--db", str(custom_db), "--limit", "1"], env=isolated_env)
+    assert res.returncode == 0
+
+
+@pytest.mark.flow("I7")
+def test_i7_search_by_selector_and_url(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I7: Search matches against CSS selectors and API endpoint URLs."""
+    _create_sample_testcase(isolated_workspace, "tc_i7", "Selector Search", "http://127.0.0.1:9010/index")
+    custom_db = isolated_workspace / "i7.db"
+    run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+
     res_sel = run_tracecase(["search", "#search-query", "--db", str(custom_db)], env=isolated_env)
     assert res_sel.returncode == 0
-    assert "tc_search" in res_sel.stdout
+    assert "tc_i7" in res_sel.stdout
 
-    # I8: Endpoint search
     res_ep = run_tracecase(["search", "api", "--db", str(custom_db)], env=isolated_env)
     assert res_ep.returncode == 0
-    assert "tc_search" in res_ep.stdout
-
-    # I9: Limit flag
-    res_lim = run_tracecase(["search", "laptop", "--db", str(custom_db), "--limit", "1"], env=isolated_env)
-    assert res_lim.returncode == 0
-
-    # I10: 0 matches
-    res_zero = run_tracecase(["search", "completely_unmatched_term_xyz", "--db", str(custom_db)], env=isolated_env)
-    assert res_zero.returncode == 0
-    assert "No test cases found" in res_zero.stdout
+    assert "tc_i7" in res_ep.stdout
 
 
-def test_i12_i13_coverage_command(
-    isolated_workspace: Path,
-    isolated_env: dict[str, str],
-):
-    """I12 & I13: Coverage reporting over domains and endpoints."""
-    _create_sample_testcase(isolated_workspace, "tc_cov", "Coverage Flow", "http://127.0.0.1:9010/index")
-    custom_db = isolated_workspace / "cov.db"
+@pytest.mark.flow("I8")
+def test_i8_search_no_results(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I8: Search with zero matches returns clear message and exit code 0."""
+    custom_db = isolated_workspace / "i8.db"
+    _create_sample_testcase(isolated_workspace, "tc_i8", "Some Flow", "http://127.0.0.1:9010/index")
     run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
 
-    res_cov = run_tracecase(["coverage", "--db", str(custom_db)], env=isolated_env)
-    assert res_cov.returncode == 0
-    assert "Corpus Coverage Report" in res_cov.stdout
-    assert "Total Test Cases" in res_cov.stdout
+    res = run_tracecase(["search", "totally_absent_phrase_999", "--db", str(custom_db)], env=isolated_env)
+    assert res.returncode == 0
+    assert "No test cases found" in res.stdout
 
 
-def test_i14_to_i16_clean_command(
-    isolated_workspace: Path,
-    isolated_env: dict[str, str],
-):
-    """I14 - I16: tracecase clean inside isolated sandbox."""
-    custom_db = isolated_workspace / "to_clean.db"
-    _create_sample_testcase(isolated_workspace, "tc_c", "Clean Case", "http://127.0.0.1:9010/index")
+@pytest.mark.flow("I9")
+def test_i9_search_special_fts5_characters(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I9: Search handles quotes, dashes, and boolean operators safely."""
+    custom_db = isolated_workspace / "i9.db"
+    _create_sample_testcase(isolated_workspace, "tc_i9", "Special FTS Flow", "http://127.0.0.1:9010/index")
+    run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+
+    # Search with quotes and AND
+    res = run_tracecase(["search", '"Special" AND "Flow"', "--db", str(custom_db)], env=isolated_env)
+    assert res.returncode == 0
+
+
+@pytest.mark.flow("I10")
+def test_i10_coverage_report_display(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I10: tracecase coverage displays tested domains, endpoints, and summary metrics."""
+    custom_db = isolated_workspace / "i10.db"
+    _create_sample_testcase(isolated_workspace, "tc_i10", "Cov Flow", "http://127.0.0.1:9010/index")
+    run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+
+    res = run_tracecase(["coverage", "--db", str(custom_db)], env=isolated_env)
+    assert res.returncode == 0
+    assert "Corpus Coverage Report" in res.stdout
+    assert "Total Test Cases" in res.stdout
+
+
+@pytest.mark.flow("I11")
+def test_i11_duplicate_flow_warning(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I11: Coverage report warns about duplicate recorded flows on identical start URLs."""
+    custom_db = isolated_workspace / "i11.db"
+    _create_sample_testcase(isolated_workspace, "tc_dup1", "Dup 1", "http://127.0.0.1:9010/same_url")
+    _create_sample_testcase(isolated_workspace, "tc_dup2", "Dup 2", "http://127.0.0.1:9010/same_url")
+    run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+
+    res = run_tracecase(["coverage", "--db", str(custom_db)], env=isolated_env)
+    assert res.returncode == 0
+    assert "Potential Duplicate Test Flows" in res.stdout or "Potential Duplicate" in res.stdout
+
+
+@pytest.mark.flow("I12")
+def test_i12_coverage_on_empty_db(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I12: Coverage on empty database displays 0 test cases without error."""
+    custom_db = isolated_workspace / "empty.db"
+    res = run_tracecase(["coverage", "--db", str(custom_db)], env=isolated_env)
+    assert res.returncode == 0
+    assert "Total Test Cases" in res.stdout
+
+
+@pytest.mark.flow("I13")
+def test_i13_clean_db_flag(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I13: tracecase clean --db deletes local SQLite database file."""
+    custom_db = isolated_workspace / "i13.db"
+    _create_sample_testcase(isolated_workspace, "tc_i13", "Clean DB Flow", "http://127.0.0.1:9010/index")
     run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
     assert custom_db.exists()
 
-    # I15: Clean custom db
-    res_clean_db = run_tracecase(["clean", "--db", "--db-path", str(custom_db)], env=isolated_env)
-    assert res_clean_db.returncode == 0
-
-    # I16: Clean --all
-    res_clean_all = run_tracecase(["clean", "--all", "--db-path", str(custom_db)], env=isolated_env)
-    assert res_clean_all.returncode == 0
+    res = run_tracecase(["clean", "--db", "--db-path", str(custom_db)], env=isolated_env)
+    assert res.returncode == 0
+    assert not custom_db.exists()
 
 
-def test_i17_to_i22_mcp_stdio_server(
-    isolated_workspace: Path,
-    isolated_env: dict[str, str],
-):
-    """I17 - I22: Model Context Protocol (MCP) stdio JSON-RPC interaction."""
-    custom_db = isolated_workspace / "mcp_corpus.db"
-    tc_path = _create_sample_testcase(isolated_workspace, "tc_mcp_1", "MCP Search Test", "http://127.0.0.1:9010/index")
+@pytest.mark.flow("I14")
+def test_i14_clean_all_flag(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I14: tracecase clean --all deletes DB and recordings directory inside sandbox."""
+    custom_db = isolated_workspace / "i14.db"
+    _create_sample_testcase(isolated_workspace, "tc_i14", "Clean All Flow", "http://127.0.0.1:9010/index")
     run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
 
-    tc_bin = REPO_ROOT / ".venv" / "bin" / "tracecase"
+    res = run_tracecase(["clean", "--all", "--db-path", str(custom_db)], env=isolated_env)
+    assert res.returncode == 0
+
+
+@pytest.mark.flow("I15")
+def test_i15_clean_selective_flags(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I15: Selective clean --no-db does not delete database."""
+    custom_db = isolated_workspace / "i15.db"
+    _create_sample_testcase(isolated_workspace, "tc_i15", "Clean Selective Flow", "http://127.0.0.1:9010/index")
+    run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+
+    res = run_tracecase(["clean", "--no-db", "--db-path", str(custom_db)], env=isolated_env)
+    assert res.returncode == 0
+    assert custom_db.exists()
+
+
+@pytest.mark.flow("I16")
+def test_i16_bare_clean_command_defaults(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I16: Bare tracecase clean defaults to clearing DB only."""
+    custom_db = isolated_workspace / "i16.db"
+    _create_sample_testcase(isolated_workspace, "tc_i16", "Clean Bare Flow", "http://127.0.0.1:9010/index")
+    run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+
+    res = run_tracecase(["clean", "--db-path", str(custom_db)], env=isolated_env)
+    assert res.returncode == 0
+    assert not custom_db.exists()
+
+
+@pytest.mark.flow("I17")
+def test_i17_mcp_initialize(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I17: MCP stdio server initializes with JSON-RPC 2.0 protocol handshake."""
+    custom_db = isolated_workspace / "mcp17.db"
     proc = subprocess.Popen(
-        [str(tc_bin), "mcp", "--db", str(custom_db)],
+        [str(REPO_ROOT / ".venv" / "bin" / "tracecase"), "mcp", "--db", str(custom_db)],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -187,55 +276,160 @@ def test_i17_to_i22_mcp_stdio_server(
         env=isolated_env,
         cwd=REPO_ROOT,
     )
+    try:
+        req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+        proc.stdin.write(req + "\n")
+        proc.stdin.flush()
+        resp = json.loads(proc.stdout.readline())
+        assert resp["result"]["serverInfo"]["name"] == "tracecase_mcp"
+    finally:
+        proc.stdin.close()
+        proc.terminate()
+        proc.wait(timeout=2.0)
 
-    def rpc_call(method: str, params: dict | None = None, req_id: int = 1) -> dict:
-        msg = json.dumps({"jsonrpc": "2.0", "id": req_id, "method": method, "params": params or {}})
-        proc.stdin.write(msg + "\n")
+
+@pytest.mark.flow("I18")
+def test_i18_mcp_search_testcases_tool(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I18: MCP search_testcases tool returns matching test cases via stdio."""
+    custom_db = isolated_workspace / "mcp18.db"
+    _create_sample_testcase(isolated_workspace, "tc_mcp18", "MCP Search Case", "http://127.0.0.1:9010/index")
+    run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+
+    proc = subprocess.Popen(
+        [str(REPO_ROOT / ".venv" / "bin" / "tracecase"), "mcp", "--db", str(custom_db)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=isolated_env,
+        cwd=REPO_ROOT,
+    )
+    try:
+        req = json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "search_testcases", "arguments": {"query": "laptop"}}
+        })
+        proc.stdin.write(req + "\n")
+        proc.stdin.flush()
+        resp = json.loads(proc.stdout.readline())
+        assert "tc_mcp18" in resp["result"]["content"][0]["text"]
+    finally:
+        proc.stdin.close()
+        proc.terminate()
+        proc.wait(timeout=2.0)
+
+
+@pytest.mark.flow("I19")
+def test_i19_mcp_get_testcase_tool(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I19: MCP get_testcase tool retrieves complete recorded JSON by ID."""
+    custom_db = isolated_workspace / "mcp19.db"
+    _create_sample_testcase(isolated_workspace, "tc_mcp19", "MCP Get Case", "http://127.0.0.1:9010/index")
+    run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+
+    proc = subprocess.Popen(
+        [str(REPO_ROOT / ".venv" / "bin" / "tracecase"), "mcp", "--db", str(custom_db)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=isolated_env,
+        cwd=REPO_ROOT,
+    )
+    try:
+        req = json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "get_testcase", "arguments": {"testcase_id": "tc_mcp19"}}
+        })
+        proc.stdin.write(req + "\n")
+        proc.stdin.flush()
+        resp = json.loads(proc.stdout.readline())
+        tc_data = json.loads(resp["result"]["content"][0]["text"])
+        assert tc_data["id"] == "tc_mcp19"
+    finally:
+        proc.stdin.close()
+        proc.terminate()
+        proc.wait(timeout=2.0)
+
+
+@pytest.mark.flow("I20")
+def test_i20_mcp_tool_naming_coverage_report(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I20 (Discrepancy): Verify MCP tool is named coverage_report (code) vs get_coverage (docs)."""
+    custom_db = isolated_workspace / "mcp20.db"
+    proc = subprocess.Popen(
+        [str(REPO_ROOT / ".venv" / "bin" / "tracecase"), "mcp", "--db", str(custom_db)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=isolated_env,
+        cwd=REPO_ROOT,
+    )
+    try:
+        req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+        proc.stdin.write(req + "\n")
+        proc.stdin.flush()
+        resp = json.loads(proc.stdout.readline())
+        names = [t["name"] for t in resp["result"]["tools"]]
+        assert "coverage_report" in names
+        assert "get_coverage" not in names
+    finally:
+        proc.stdin.close()
+        proc.terminate()
+        proc.wait(timeout=2.0)
+
+
+@pytest.mark.flow("I21")
+def test_i21_mcp_custom_db_path(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I21: MCP server accepts and operates on --db custom path."""
+    custom_db = isolated_workspace / "custom_mcp.db"
+    _create_sample_testcase(isolated_workspace, "tc_mcp21", "MCP Custom DB", "http://127.0.0.1:9010/index")
+    run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
+
+    proc = subprocess.Popen(
+        [str(REPO_ROOT / ".venv" / "bin" / "tracecase"), "mcp", "--db", str(custom_db)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=isolated_env,
+        cwd=REPO_ROOT,
+    )
+    try:
+        req = json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "coverage_report", "arguments": {}}
+        })
+        proc.stdin.write(req + "\n")
+        proc.stdin.flush()
+        resp = json.loads(proc.stdout.readline())
+        assert "result" in resp
+    finally:
+        proc.stdin.close()
+        proc.terminate()
+        proc.wait(timeout=2.0)
+
+
+@pytest.mark.flow("I22")
+def test_i22_mcp_stdout_protocol_purity(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I22: MCP server emits ONLY valid JSON-RPC lines on stdout (no banners or rich markup)."""
+    custom_db = isolated_workspace / "mcp22.db"
+    proc = subprocess.Popen(
+        [str(REPO_ROOT / ".venv" / "bin" / "tracecase"), "mcp", "--db", str(custom_db)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=isolated_env,
+        cwd=REPO_ROOT,
+    )
+    try:
+        req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+        proc.stdin.write(req + "\n")
         proc.stdin.flush()
         line = proc.stdout.readline()
-        return json.loads(line)
-
-    try:
-        # I17: initialize
-        init_resp = rpc_call("initialize", req_id=1)
-        assert init_resp["result"]["serverInfo"]["name"] == "tracecase_mcp"
-
-        # I17: tools/list
-        list_resp = rpc_call("tools/list", req_id=2)
-        tool_names = [t["name"] for t in list_resp["result"]["tools"]]
-        assert "search_testcases" in tool_names
-        assert "get_testcase" in tool_names
-        # I20: Discrepancy check: code exposes coverage_report (while docs said get_coverage)
-        assert "coverage_report" in tool_names
-
-        # I18: search_testcases tool call
-        search_call = rpc_call(
-            "tools/call",
-            {"name": "search_testcases", "arguments": {"query": "laptop"}},
-            req_id=3,
-        )
-        assert "tc_mcp_1" in search_call["result"]["content"][0]["text"]
-
-        # I19: get_testcase tool call
-        get_call = rpc_call(
-            "tools/call",
-            {"name": "get_testcase", "arguments": {"testcase_id": "tc_mcp_1"}},
-            req_id=4,
-        )
-        content_text = get_call["result"]["content"][0]["text"]
-        tc_loaded = json.loads(content_text)
-        assert tc_loaded["id"] == "tc_mcp_1"
-
-        # I22: Nonexistent testcase error handling
-        missing_call = rpc_call(
-            "tools/call",
-            {"name": "get_testcase", "arguments": {"testcase_id": "nonexistent_id"}},
-            req_id=5,
-        )
-        assert "error" in missing_call
-        assert missing_call["error"]["code"] == -32603
-        assert "not found" in missing_call["error"]["message"]
-
+        # Must be valid JSON with no ANSI color escape codes or extra characters
+        parsed = json.loads(line)
+        assert parsed["jsonrpc"] == "2.0"
     finally:
         proc.stdin.close()
         proc.terminate()

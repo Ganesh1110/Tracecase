@@ -27,6 +27,13 @@ from tests.dogfood.fixtures.playground_app.server import create_playground_serve
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TRACECASE_BIN = REPO_ROOT / ".venv" / "bin" / "tracecase"
+# Resolve real browser cache path before test HOME override
+REAL_PLAYWRIGHT_BROWSERS_PATH = os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or str(Path.home() / "Library" / "Caches" / "ms-playwright")
+
+
+def pytest_configure(config):
+    """Register custom flow marker for dogfood traceability."""
+    config.addinivalue_line("markers", "flow(id): Flow ID mapped from flows.yaml")
 
 
 @pytest.fixture
@@ -43,8 +50,9 @@ def isolated_env(isolated_workspace: Path) -> dict[str, str]:
     env = os.environ.copy()
     env["HOME"] = str(isolated_workspace)
     env["TRACECASE_HOME"] = str(isolated_workspace / ".tracecase")
-    env["PYTHONPATH"] = str(REPO_ROOT / "src")
-    env["PLAYWRIGHT_BROWSERS_PATH"] = os.path.expanduser("~/Library/Caches/ms-playwright")
+    env["PYTHONPATH"] = os.environ.get("PYTHONPATH") or str(REPO_ROOT / "src")
+    if Path(REAL_PLAYWRIGHT_BROWSERS_PATH).exists():
+        env["PLAYWRIGHT_BROWSERS_PATH"] = REAL_PLAYWRIGHT_BROWSERS_PATH
     # Exclude root from python path
     return env
 
@@ -80,9 +88,10 @@ def git_fixture_repo() -> Generator[dict[str, str], None, None]:
 def run_tracecase(args: list[str], env: dict[str, str] | None = None, cwd: Path | str | None = None) -> subprocess.CompletedProcess[str]:
     """Execute tracecase CLI command in subprocess."""
     cmd = [str(TRACECASE_BIN)] + args
+    effective_cwd = cwd or (Path(env["HOME"]) if (env and "HOME" in env) else REPO_ROOT)
     return subprocess.run(
         cmd,
-        cwd=cwd or REPO_ROOT,
+        cwd=effective_cwd,
         env=env,
         capture_output=True,
         text=True,

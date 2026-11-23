@@ -21,6 +21,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from tracecase.models import ElementInfo, NetworkRequest, Step, TestCase
 from tests.dogfood.cli_tests.conftest import run_tracecase
 
@@ -108,6 +109,7 @@ def _create_mutable_testcase(
     return tc_path
 
 
+@pytest.mark.flow("G1")
 def test_g1_default_mutate(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -122,6 +124,7 @@ def test_g1_default_mutate(
     assert len(mutations) > 0
 
 
+@pytest.mark.flow("G2")
 def test_g2_strategy_inputs(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -133,11 +136,11 @@ def test_g2_strategy_inputs(
     mut_dir = tc_path.parent / "mutations"
     for f in mut_dir.glob("*/testcase.json"):
         tc = TestCase.model_validate_json(f.read_text(encoding="utf-8"))
-        # Verify inputs are mutated
         input_steps = [s for s in tc.steps if s.action_type == "input"]
         assert len(input_steps) > 0
 
 
+@pytest.mark.flow("G3")
 def test_g3_strategy_actions(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -148,6 +151,7 @@ def test_g3_strategy_actions(
     assert res.returncode == 0
 
 
+@pytest.mark.flow("G4")
 def test_g4_strategy_network(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -158,6 +162,7 @@ def test_g4_strategy_network(
     assert res.returncode == 0
 
 
+@pytest.mark.flow("G5")
 def test_g5_invalid_strategy_handling(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -168,6 +173,7 @@ def test_g5_invalid_strategy_handling(
     assert res.returncode == 0
 
 
+@pytest.mark.flow("G6")
 def test_g6_limit_flag(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -181,6 +187,7 @@ def test_g6_limit_flag(
     assert 0 < len(mutations) <= 3
 
 
+@pytest.mark.flow("G7")
 def test_g7_custom_output_directory(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -194,6 +201,7 @@ def test_g7_custom_output_directory(
     assert len(list(custom_dir.glob("*/testcase.json"))) > 0
 
 
+@pytest.mark.flow("G8")
 def test_g8_verify_input_probe_variety(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -208,22 +216,40 @@ def test_g8_verify_input_probe_variety(
         for s in tc.steps:
             if s.input_value is not None:
                 values.add(s.input_value)
-    # Check that SQLi or boundary probes were generated
     assert any("'" in v or "<script" in v or v == "" or len(v) > 200 for v in values)
 
 
-def test_g9_g10_action_and_network_mutations(
+@pytest.mark.flow("G9")
+def test_g9_action_mutations_detail(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
 ):
-    """G9 & G10: Verify action and network mutation details."""
+    """G9: Verify action mutation generates double_click variation."""
     tc_path = _create_mutable_testcase(isolated_workspace)
     out_dir = isolated_workspace / "g9_muts"
-    run_tracecase(["mutate", str(tc_path), "-o", str(out_dir)], env=isolated_env)
-    # At least some files exist
-    assert len(list(out_dir.glob("*/testcase.json"))) > 0
+    run_tracecase(["mutate", str(tc_path), "--strategy", "actions", "-o", str(out_dir)], env=isolated_env)
+    meta_files = list(out_dir.glob("*/mutation_meta.json"))
+    assert len(meta_files) > 0
+    metas = [json.loads(f.read_text(encoding="utf-8")) for f in meta_files]
+    assert any(m.get("mutation_type") == "double_click" for m in metas)
 
 
+@pytest.mark.flow("G10")
+def test_g10_network_fault_detail(
+    isolated_workspace: Path,
+    isolated_env: dict[str, str],
+):
+    """G10: Verify network fault mutation injects HTTP 500 error."""
+    tc_path = _create_mutable_testcase(isolated_workspace)
+    out_dir = isolated_workspace / "g10_muts"
+    run_tracecase(["mutate", str(tc_path), "--strategy", "network", "-o", str(out_dir)], env=isolated_env)
+    meta_files = list(out_dir.glob("*/mutation_meta.json"))
+    assert len(meta_files) > 0
+    metas = [json.loads(f.read_text(encoding="utf-8")) for f in meta_files]
+    assert any(m.get("mutation_type") == "network_error" for m in metas)
+
+
+@pytest.mark.flow("G11")
 def test_g11_schema_validity(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -238,6 +264,7 @@ def test_g11_schema_validity(
         assert len(tc.steps) > 0
 
 
+@pytest.mark.flow("G12")
 def test_g12_zero_inputs_handled_gracefully(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -247,3 +274,38 @@ def test_g12_zero_inputs_handled_gracefully(
     res = run_tracecase(["mutate", str(tc_path)], env=isolated_env)
     assert res.returncode == 0
     assert "No mutations generated" in res.stdout or "Synthesized" in res.stdout
+
+
+# --- Missing Documented Mutation Types (BUG-005) ---
+
+@pytest.mark.flow("G3")
+@pytest.mark.xfail(strict=True, reason="APP BUG-005: skip_action mutation promised in docs is missing in code")
+def test_g3_missing_skip_action_mutation(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """G3 (Discrepancy): Assert that promised skip_action strategy exists."""
+    from tracecase.mutation.actions import mutate_actions
+    tc = TestCase.model_validate_json(_create_mutable_testcase(isolated_workspace).read_text(encoding="utf-8"))
+    mutations = mutate_actions(tc)
+    types = [m.metadata.mutation_type for m in mutations]
+    assert "skip_action" in types
+
+
+@pytest.mark.flow("G3")
+@pytest.mark.xfail(strict=True, reason="APP BUG-005: reorder_inputs mutation promised in docs is missing in code")
+def test_g3_missing_reorder_inputs_mutation(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """G3 (Discrepancy): Assert that promised reorder_inputs strategy exists."""
+    from tracecase.mutation.actions import mutate_actions
+    tc = TestCase.model_validate_json(_create_mutable_testcase(isolated_workspace).read_text(encoding="utf-8"))
+    mutations = mutate_actions(tc)
+    types = [m.metadata.mutation_type for m in mutations]
+    assert "reorder_inputs" in types
+
+
+@pytest.mark.flow("G4")
+@pytest.mark.xfail(strict=True, reason="APP BUG-005: latency fault mutation promised in docs is missing in code")
+def test_g4_missing_latency_fault_mutation(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """G4 (Discrepancy): Assert that promised latency fault strategy exists."""
+    from tracecase.mutation.network import mutate_network_faults
+    tc = TestCase.model_validate_json(_create_mutable_testcase(isolated_workspace).read_text(encoding="utf-8"))
+    mutations = mutate_network_faults(tc)
+    types = [m.metadata.mutation_type for m in mutations]
+    assert "latency" in types or "high_latency" in types

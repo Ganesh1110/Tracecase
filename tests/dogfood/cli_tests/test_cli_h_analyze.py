@@ -18,6 +18,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from tracecase.models import ConsoleLog, ElementInfo, NetworkRequest, PageError, Step, TestCase
 from tests.dogfood.cli_tests.conftest import run_tracecase
 
@@ -89,11 +90,12 @@ def _create_analyzable_testcase(tmp_path: Path) -> Path:
     return tc_path
 
 
-def test_h1_h3_offline_heuristics_provider_null(
+@pytest.mark.flow("H1")
+def test_h1_offline_heuristics(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
 ):
-    """H1 & H3: analyze with provider: null runs entirely offline and produces analysis."""
+    """H1: analyze with provider: null runs entirely offline and produces analysis."""
     tc_path = _create_analyzable_testcase(isolated_workspace)
     res = run_tracecase(["analyze", str(tc_path), "--provider", "null"], env=isolated_env)
     assert res.returncode == 0
@@ -101,6 +103,7 @@ def test_h1_h3_offline_heuristics_provider_null(
     assert "Summary" in res.stdout
 
 
+@pytest.mark.flow("H2")
 def test_h2_custom_output_directory(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -114,6 +117,19 @@ def test_h2_custom_output_directory(
     assert analysis_file.exists()
 
 
+@pytest.mark.flow("H3")
+def test_h3_provider_null_makes_zero_network_calls(
+    isolated_workspace: Path,
+    isolated_env: dict[str, str],
+):
+    """H3: Provider null does not invoke any network or external LLM endpoint."""
+    tc_path = _create_analyzable_testcase(isolated_workspace)
+    # Give a bogus base-url; provider null must not touch it
+    res = run_tracecase(["analyze", str(tc_path), "--provider", "null", "--base-url", "http://127.0.0.1:19999"], env=isolated_env)
+    assert res.returncode == 0
+
+
+@pytest.mark.flow("H4")
 def test_h4_ollama_provider_against_fake_llm(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -129,6 +145,7 @@ def test_h4_ollama_provider_against_fake_llm(
     assert "Analyzing" in res.stdout
 
 
+@pytest.mark.flow("H5")
 def test_h5_openai_provider_against_fake_llm(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -143,6 +160,7 @@ def test_h5_openai_provider_against_fake_llm(
     assert res.returncode == 0
 
 
+@pytest.mark.flow("H6")
 def test_h6_llm_failure_fallback(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -150,15 +168,14 @@ def test_h6_llm_failure_fallback(
 ):
     """H6: When AI server returns 500 error, heuristics fallback still succeeds."""
     tc_path = _create_analyzable_testcase(isolated_workspace)
-    # Target fake LLM with error header or invalid port
     res = run_tracecase(
         ["analyze", str(tc_path), "--ai", "--provider", "openai", "--base-url", "http://127.0.0.1:9199/v1"],
         env=isolated_env,
     )
-    # Should not crash entirely, or fallback to heuristics
     assert res.returncode in (0, 1, 2)
 
 
+@pytest.mark.flow("H7")
 def test_h7_schema_validation(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -175,6 +192,7 @@ def test_h7_schema_validation(
     assert "negative_scenarios" in analysis
 
 
+@pytest.mark.flow("H8")
 def test_h8_heuristic_risk_detection(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -188,6 +206,7 @@ def test_h8_heuristic_risk_detection(
     assert "500" in risks or "error" in risks.lower() or len(analysis["risks"]) > 0
 
 
+@pytest.mark.flow("H9")
 def test_h9_unreachable_endpoint_handling(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -198,5 +217,4 @@ def test_h9_unreachable_endpoint_handling(
         ["analyze", str(tc_path), "--ai", "--provider", "openai", "--base-url", "http://127.0.0.1:9999/v1"],
         env=isolated_env,
     )
-    # Exit gracefully
     assert res.returncode in (0, 1, 2)

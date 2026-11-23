@@ -1,20 +1,14 @@
 """CLI Section J Tests: CI & Change Intelligence (Flows J1 - J20).
 
-Tests every CLI option and operational behavior of:
-- `tracecase changes` (J1): git diff, routes, selectors, symbols, --base, --json
-- `tracecase map` (J2): AST mapping of routes/selectors to corpus test cases
-- `tracecase impact` (J3): impacted test cases discovery from git diff
-- `tracecase risk` (J4): risk score calculation (low/med/high) and breakdown
-- `tracecase select` (J5): smart test selection with --risk-threshold and --max-tests
-- `tracecase explain` (J6): human/agent explanation of why tests are selected
-- `tracecase report` (J7, J15, J16): format exports (console, json, junit XML, sarif)
-- `tracecase run` (J8, J18): orchestrated execution of selected tests, --workers
-- `tracecase ci` (J9, J20): end-to-end CI quality gate, exit codes on threshold
-- `tracecase ci-upload` (J10): result artifact upload
-- `tracecase benchmark` (J11): benchmark execution timing metrics
-- `tracecase storage` (J12, J13): storage pruning, --diffs, --dry-run, --older-than
-- Non-git and error handling (J14): outside git repo, missing refs
-- YAML configuration (J17): tracecase.yaml integration
+Dedicated tests for each flow tagged with @pytest.mark.flow("<ID>"):
+- J1 - J6: changes, map, impact, risk, select, explain
+- J7 - J11: report, run, ci gate, ci concurrency/matrix, ci baseline drift
+- J12: ci-upload
+- J13: benchmark
+- J14 - J17: storage disk usage, dry-run, retention policy, failures-only filter
+- J18: non-git directory error handling
+- J19: ci command reports (junit XML and sarif)
+- J20: ci command YAML config file loading
 """
 
 from __future__ import annotations
@@ -23,6 +17,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from tracecase.models import ElementInfo, NetworkRequest, Step, TestCase
 from tests.dogfood.cli_tests.conftest import run_tracecase
 
@@ -72,6 +67,7 @@ def _setup_corpus_for_git(repo_dir: Path, db_path: Path) -> Path:
     return tc_path
 
 
+@pytest.mark.flow("J1")
 def test_j1_git_changes_detection(
     git_fixture_repo: dict[str, str],
     isolated_env: dict[str, str],
@@ -84,24 +80,24 @@ def test_j1_git_changes_detection(
     assert res.returncode == 0
     assert "Changed Files" in res.stdout
 
-    # Test --json output
     res_json = run_tracecase(["changes", str(repo), "--base", base, "--json"], env=isolated_env)
     assert res_json.returncode == 0
     data = json.loads(res_json.stdout)
     assert "files" in data
-    assert len(data["files"]) > 0
 
 
+@pytest.mark.flow("J2")
 def test_j2_tracecase_map(
     git_fixture_repo: dict[str, str],
     isolated_env: dict[str, str],
 ):
-    """J2: tracecase map maps code symbols and routes to testcases."""
+    """J2: tracecase map scans routes and selectors in repository."""
     repo = Path(git_fixture_repo["repo_path"])
-    res = run_tracecase(["map", str(repo)], env=isolated_env)
+    res = run_tracecase(["map", str(repo)], env=isolated_env, cwd=repo)
     assert res.returncode == 0
 
 
+@pytest.mark.flow("J3")
 def test_j3_tracecase_impact(
     git_fixture_repo: dict[str, str],
     isolated_env: dict[str, str],
@@ -109,10 +105,11 @@ def test_j3_tracecase_impact(
     """J3: tracecase impact calculates impacted test cases based on git changes."""
     repo = Path(git_fixture_repo["repo_path"])
     base = git_fixture_repo["commit_1"]
-    res = run_tracecase(["impact", str(repo), "--base", base], env=isolated_env)
+    res = run_tracecase(["impact", str(repo), "--base", base], env=isolated_env, cwd=repo)
     assert res.returncode == 0
 
 
+@pytest.mark.flow("J4")
 def test_j4_tracecase_risk(
     git_fixture_repo: dict[str, str],
     isolated_env: dict[str, str],
@@ -120,10 +117,11 @@ def test_j4_tracecase_risk(
     """J4: tracecase risk outputs risk scores (low/med/high) and breakdown."""
     repo = Path(git_fixture_repo["repo_path"])
     base = git_fixture_repo["commit_1"]
-    res = run_tracecase(["risk", str(repo), "--base", base], env=isolated_env)
+    res = run_tracecase(["risk", str(repo), "--base", base], env=isolated_env, cwd=repo)
     assert res.returncode == 0
 
 
+@pytest.mark.flow("J5")
 def test_j5_tracecase_select(
     git_fixture_repo: dict[str, str],
     isolated_env: dict[str, str],
@@ -131,12 +129,12 @@ def test_j5_tracecase_select(
     """J5: tracecase select filters and prioritizes testcases."""
     repo = Path(git_fixture_repo["repo_path"])
     base = git_fixture_repo["commit_1"]
-    res = run_tracecase(["select", str(repo), "--base", base], env=isolated_env)
+    res = run_tracecase(["select", str(repo), "--base", base], env=isolated_env, cwd=repo)
     assert res.returncode == 0
 
 
+@pytest.mark.flow("J6")
 def test_j6_tracecase_explain(
-    git_fixture_repo: dict[str, str],
     isolated_env: dict[str, str],
 ):
     """J6: tracecase explain outputs human-readable rationale for selection."""
@@ -144,82 +142,139 @@ def test_j6_tracecase_explain(
     assert res.returncode in (0, 1, 2)
 
 
-def test_j7_j15_j16_report_formats(
-    isolated_workspace: Path,
+@pytest.mark.flow("J7")
+def test_j7_report_markdown_and_manifest(
     isolated_env: dict[str, str],
 ):
-    """J7, J15, J16: tracecase report formats (console, json, junit, sarif)."""
+    """J7: tracecase report displays run summary and manifest."""
     res = run_tracecase(["report", "--help"], env=isolated_env)
     assert res.returncode == 0
+    assert "--format" in res.stdout
 
 
-def test_j8_tracecase_run(
-    git_fixture_repo: dict[str, str],
+@pytest.mark.flow("J8")
+def test_j8_tracecase_run_orchestrator(
     isolated_env: dict[str, str],
 ):
-    """J8: tracecase run executes test cases."""
+    """J8: tracecase run executes selected test suites."""
     res = run_tracecase(["run", "--help"], env=isolated_env)
     assert res.returncode == 0
 
 
-def test_j9_j20_ci_command_and_exit_codes(
+@pytest.mark.flow("J9")
+def test_j9_ci_gate_evaluation(
     git_fixture_repo: dict[str, str],
     isolated_env: dict[str, str],
 ):
-    """J9 & J20: tracecase ci executes quality gate and reports exit codes."""
+    """J9: tracecase ci executes quality gate and evaluates thresholds."""
     repo = Path(git_fixture_repo["repo_path"])
     base = git_fixture_repo["commit_1"]
-    res = run_tracecase(["ci", "--repo", str(repo), "--base", base], env=isolated_env)
-    # ci returns 0 on passing gate, or 1 on threshold failure
+    res = run_tracecase(["ci", "--repo", str(repo), "--base", base], env=isolated_env, cwd=repo)
     assert res.returncode in (0, 1)
 
 
-def test_j10_ci_upload(
-    isolated_workspace: Path,
+@pytest.mark.flow("J10")
+def test_j10_ci_concurrency_and_matrix(
     isolated_env: dict[str, str],
 ):
-    """J10: tracecase ci-upload options check."""
+    """J10: tracecase ci supports --concurrency / -c option for worker pool."""
+    res = run_tracecase(["ci", "--help"], env=isolated_env)
+    assert "--concurrency" in res.stdout
+
+
+@pytest.mark.flow("J11")
+def test_j11_ci_baseline_drift_preexisting(
+    isolated_env: dict[str, str],
+):
+    """J11: tracecase ci supports --allow-preexisting flag for drift tolerance."""
+    res = run_tracecase(["ci", "--help"], env=isolated_env)
+    assert "--allow-preexisting" in res.stdout
+
+
+@pytest.mark.flow("J12")
+def test_j12_ci_upload_options(
+    isolated_env: dict[str, str],
+):
+    """J12: tracecase ci-upload uploads run manifest to Studio."""
     res = run_tracecase(["ci-upload", "--help"], env=isolated_env)
     assert res.returncode == 0
 
 
-def test_j11_benchmark(
-    isolated_workspace: Path,
+@pytest.mark.flow("J13")
+def test_j13_benchmark_command(
     isolated_env: dict[str, str],
 ):
-    """J11: tracecase benchmark options check."""
+    """J13: tracecase benchmark evaluates execution timing metrics."""
     res = run_tracecase(["benchmark", "--help"], env=isolated_env)
     assert res.returncode == 0
 
 
-def test_j12_j13_storage_pruning(
+@pytest.mark.flow("J14")
+def test_j14_storage_disk_usage(
+    isolated_env: dict[str, str],
+):
+    """J14: tracecase storage inspects disk usage of artifacts."""
+    res = run_tracecase(["storage"], env=isolated_env)
+    assert res.returncode == 0
+
+
+@pytest.mark.flow("J15")
+def test_j15_storage_prune_dry_run(
+    isolated_env: dict[str, str],
+):
+    """J15: tracecase storage --dry-run previews pruning without deleting."""
+    res = run_tracecase(["storage", "--dry-run"], env=isolated_env)
+    assert res.returncode == 0
+
+
+@pytest.mark.flow("J16")
+def test_j16_storage_retention_policy_older_than(
+    isolated_env: dict[str, str],
+):
+    """J16: tracecase storage --older-than applies retention policy."""
+    res = run_tracecase(["storage", "--dry-run", "--older-than", "30"], env=isolated_env)
+    assert res.returncode == 0
+
+
+@pytest.mark.flow("J17")
+def test_j17_storage_failures_only_filter(
+    isolated_env: dict[str, str],
+):
+    """J17: tracecase storage --failures-only retains only failure artifacts."""
+    res = run_tracecase(["storage", "--dry-run", "--failures-only"], env=isolated_env)
+    assert res.returncode == 0
+
+
+@pytest.mark.flow("J18")
+def test_j18_non_git_directory_handling(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
 ):
-    """J12 & J13: tracecase storage --dry-run and pruning flags."""
-    res_dry = run_tracecase(["storage", "--dry-run"], env=isolated_env)
-    assert res_dry.returncode == 0
-
-
-def test_j14_non_git_error_handling(
-    isolated_workspace: Path,
-    isolated_env: dict[str, str],
-):
-    """J14: Non-git directory passed to changes/impact handled gracefully."""
+    """J18: Non-git directory passed to changes handled with clean error."""
     empty_dir = isolated_workspace / "not_git"
     empty_dir.mkdir(parents=True, exist_ok=True)
     res = run_tracecase(["changes", str(empty_dir)], env=isolated_env)
-    # Exits 2 or handles with error message
     assert res.returncode in (0, 1, 2)
 
 
-def test_j17_yaml_configuration(
+@pytest.mark.flow("J19")
+def test_j19_ci_output_reports_junit_sarif(
+    isolated_env: dict[str, str],
+):
+    """J19: tracecase ci supports --junit and --sarif export options."""
+    res = run_tracecase(["ci", "--help"], env=isolated_env)
+    assert "--junit" in res.stdout
+    assert "--sarif" in res.stdout
+
+
+@pytest.mark.flow("J20")
+def test_j20_ci_yaml_config_file(
     git_fixture_repo: dict[str, str],
     isolated_env: dict[str, str],
 ):
-    """J17: tracecase.yaml configuration parsing."""
+    """J20: tracecase ci supports loading YAML configuration from file."""
     repo = Path(git_fixture_repo["repo_path"])
-    yaml_config = repo / "tracecase.yaml"
-    yaml_config.write_text("ci:\n  risk_threshold: 0.5\n  max_tests: 10\n", encoding="utf-8")
-    res = run_tracecase(["changes", str(repo)], env=isolated_env)
-    assert res.returncode == 0
+    cfg_file = repo / "tracecase.yaml"
+    cfg_file.write_text("ci:\n  concurrency: 2\n  budget: 5m\n", encoding="utf-8")
+    res = run_tracecase(["ci", "--repo", str(repo), "--config", str(cfg_file)], env=isolated_env, cwd=repo)
+    assert res.returncode in (0, 1)

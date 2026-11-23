@@ -4,7 +4,7 @@ Tests every CLI option and operational behavior of `tracecase codegen`:
 - F1: Default codegen generates test_<slug>.py in testcase folder
 - F2: Custom output path (-o / --output)
 - F3: --har flag embeds offline HAR route mocking
-- F4: Critical Dogfood Loop: Actually execute generated test file with pytest!
+- F4: Critical Dogfood Loop: Actually execute generated test file with pytest! (Sync vs Async check)
 - F5: Multi-tab testcase codegen (page_id context switching)
 - F6: Derived and custom assertions translated to Playwright expect() calls
 - F7: Name sanitization (slugifying test names with symbols and special characters)
@@ -13,10 +13,10 @@ Tests every CLI option and operational behavior of `tracecase codegen`:
 from __future__ import annotations
 
 import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from tracecase.models import ElementInfo, Step, TestCase
 from tests.dogfood.cli_tests.conftest import REPO_ROOT, run_tracecase
 
@@ -73,6 +73,7 @@ def _create_codegen_testcase(
     return tc_path
 
 
+@pytest.mark.flow("F1")
 def test_f1_default_codegen(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -86,8 +87,11 @@ def test_f1_default_codegen(
     content = expected_file.read_text(encoding="utf-8")
     assert "async def test_" in content
     assert "page.goto" in content
+    assert "# Step 2: " in content
+    assert '.fill("alice")' in content
 
 
+@pytest.mark.flow("F2")
 def test_f2_custom_output_path(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -100,6 +104,7 @@ def test_f2_custom_output_path(
     assert custom_out.exists()
 
 
+@pytest.mark.flow("F3")
 def test_f3_har_offline_route_mocking(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -116,6 +121,7 @@ def test_f3_har_offline_route_mocking(
     assert "route_from_har" in content or "har" in content
 
 
+@pytest.mark.flow("F4")
 def test_f4_execute_generated_test_with_pytest(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -129,7 +135,12 @@ def test_f4_execute_generated_test_with_pytest(
     assert res_gen.returncode == 0
     assert test_file.exists()
 
-    # Run pytest on the generated test file
+    # Verify generated test uses async syntax (docs match)
+    code = test_file.read_text(encoding="utf-8")
+    assert "async def test_" in code
+    assert "pytest_asyncio" in code or "async_playwright" in code
+
+    # Execute generated test using pytest
     pytest_bin = REPO_ROOT / ".venv" / "bin" / "pytest"
     res_run = subprocess.run(
         [str(pytest_bin), str(test_file), "-v"],
@@ -141,6 +152,7 @@ def test_f4_execute_generated_test_with_pytest(
     assert res_run.returncode == 0, f"Generated test failed to execute:\nSTDOUT:\n{res_run.stdout}\nSTDERR:\n{res_run.stderr}"
 
 
+@pytest.mark.flow("F5")
 def test_f5_multitab_codegen(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -178,6 +190,7 @@ def test_f5_multitab_codegen(
     assert out_file.exists()
 
 
+@pytest.mark.flow("F6")
 def test_f6_assertions_in_generated_code(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -190,6 +203,7 @@ def test_f6_assertions_in_generated_code(
     assert "expect" in content
 
 
+@pytest.mark.flow("F7")
 def test_f7_name_sanitization(
     isolated_workspace: Path,
     isolated_env: dict[str, str],
@@ -198,7 +212,6 @@ def test_f7_name_sanitization(
     tc_path = _create_codegen_testcase(isolated_workspace, name="Payment & Checkout @ 2026 / $100 #test!")
     res = run_tracecase(["codegen", str(tc_path)], env=isolated_env)
     assert res.returncode == 0
-    # Expected filename without invalid characters
     found = list(tc_path.parent.glob("test_*.py"))
     assert len(found) >= 1
     generated_name = found[0].name
