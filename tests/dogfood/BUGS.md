@@ -120,3 +120,35 @@ This document tracks all defects, inconsistencies, and functional regressions di
   > "Traces, screenshots, and logs are safely stored with credential masking."
 - **Test Target**:
   Marked `@pytest.mark.xfail(strict=True, reason="BUG-009: Password input values stored in plaintext without credential masking")` in `tests/dogfood/cli_tests/test_cli_b_record.py::test_b27_password_masking_audit`.
+
+---
+
+## BUG-010: ActionType `scroll` Unhandled in ReplayEngine and Missing Browser Event Listeners
+- **Severity**: Medium (Missing Core Action Support in Replay & Recorder)
+- **Component**: `src/tracecase/replay/engine.py` (`_perform`) & `src/tracecase/events.py`
+- **Observed Behavior**:
+  1. `models.py:ActionType` defines 11 action types: `click`, `dblclick`, `input`, `select`, `check`, `uncheck`, `navigate`, `scroll`, `hover`, `keypress`, `wait`.
+  2. However, `ReplayEngine._perform` lacks a handler for `"scroll"`. Replaying any test case containing a `scroll` step immediately crashes with `ValueError: Unsupported action type: scroll`.
+  3. Furthermore, `events.py:EVENT_LISTENER_JS` contains no event listeners for `scroll` or `mouseenter`/`mouseover`, meaning user scrolling and hover interactions can never be recorded from the browser.
+- **Expected Behavior**:
+  `ReplayEngine._perform` should support scrolling (e.g. `await page.evaluate("window.scrollBy(...)")` or `page.mouse.wheel`), and `events.py` should attach debounced listeners for page scroll and hover.
+- **Test Target**:
+  Marked `@pytest.mark.xfail(strict=True, reason="BUG-010: ReplayEngine._perform raises ValueError for action_type='scroll'")` in `tests/dogfood/cli_tests/test_cli_b_record.py::test_b16_action_types_replay_scroll_bug`.
+
+---
+
+## Tracecase Bug-to-Test Traceability Matrix (BUG-001 to BUG-010)
+
+| Bug ID | Title | Component | Dedicated Test Node ID | Test Marker |
+|---|---|---|---|---|
+| **BUG-001** | Root `annotated_doc` stub shadows package | `annotated_doc/` | `test_cli_a_help.py::test_a1_root_annotated_doc_shadowing_bug` | `xfail(strict=True)` |
+| **BUG-002** | Healing candidate order prioritizes XPath over ID | `replay/healing.py` | `test_cli_c_replay_healing.py::test_c10_healing_tiers_and_false_positive_audit` | Passed (audit assertion) |
+| **BUG-003** | Replay exits with code 2 on missing element | `cli.py`, `replay/` | `test_cli_c_replay_healing.py::test_c8_replay_without_heal_version_b` | `xfail(strict=True)` |
+| **BUG-004** | Diff pads canvas without warning on dimension mismatch | `replay/visual.py` | `test_cli_d_diff.py::test_d4_dimension_mismatch_warning_reported` | `xfail(strict=True)` |
+| **BUG-005** | Incomplete mutation strategies (skip, reorder, latency) | `mutation.py` | `test_cli_g_mutate.py::test_g3_missing_skip_action_mutation`<br>`test_cli_g_mutate.py::test_g3_missing_reorder_inputs_mutation`<br>`test_cli_g_mutate.py::test_g4_missing_latency_fault_mutation` | `xfail(strict=True)` (3 tests) |
+| **BUG-006** | Legacy `__qa_` DOM IDs in injected control panel | `control_panel.py` | `test_cli_b_record.py::test_b12_control_panel_legacy_qa_ids_audit` | Passed (audit assertion) |
+| **BUG-007** | Codegen generates async test requiring `pytest-asyncio` | `codegen/` | `test_cli_f_codegen.py::test_f11_codegen_requires_pytest_asyncio_audit` | Passed (audit assertion) |
+| **BUG-008** | Unhandled connection error dumps raw Python traceback | `cli.py` (record) | `test_cli_b_record.py::test_b11_unreachable_url` | `xfail(strict=True)` |
+| **BUG-009** | Plaintext credential leakage in password input | `events.py` | `test_cli_b_record.py::test_b27_password_masking_audit` | `xfail(strict=True)` |
+| **BUG-010** | ReplayEngine crashes on action_type `scroll` | `replay/engine.py` | `test_cli_b_record.py::test_b16_action_types_replay_scroll_bug` | `xfail(strict=True)` |
+

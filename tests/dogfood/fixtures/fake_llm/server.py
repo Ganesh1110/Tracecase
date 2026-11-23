@@ -181,8 +181,13 @@ class FakeLLMHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
+class ReusableFakeLLMServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 def create_fake_llm_server(host: str = "127.0.0.1", port: int = 9100) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer((host, port), FakeLLMHandler)
+    return ReusableFakeLLMServer((host, port), FakeLLMHandler)
 
 
 if __name__ == "__main__":

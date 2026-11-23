@@ -159,12 +159,14 @@ def test_c4_exit_codes(
     # Exit 2: Missing file (infrastructure error)
     res_missing = run_tracecase(["replay", str(isolated_workspace / "nonexistent.json")], env=isolated_env)
     assert res_missing.returncode == 2
+    assert "not found" in (res_missing.stderr + res_missing.stdout).lower() or "error" in (res_missing.stderr + res_missing.stdout).lower()
 
     # Exit 2: Corrupted JSON (infrastructure error)
     corrupt_file = isolated_workspace / "corrupt.json"
     corrupt_file.write_text("{invalid json", encoding="utf-8")
     res_corrupt = run_tracecase(["replay", str(corrupt_file)], env=isolated_env)
     assert res_corrupt.returncode == 2
+    assert "invalid" in (res_corrupt.stderr + res_corrupt.stdout).lower()
 
     # Exit 1: Assertion failure (valid test execution, user expectation failed)
     url = f"{playground_server_url}/login.html"
@@ -186,6 +188,7 @@ def test_c4_exit_codes(
     tc_assert_path.write_text(json.dumps(data), encoding="utf-8")
     res_assert_fail = run_tracecase(["replay", str(tc_assert_path), "--assert"], env=isolated_env)
     assert res_assert_fail.returncode == 1
+    assert "failed" in (res_assert_fail.stdout + res_assert_fail.stderr).lower()
 
 
 @pytest.mark.flow("C5")
@@ -215,6 +218,7 @@ def test_c5_assert_vs_no_assert(
 
     res_no_assert = run_tracecase(["replay", str(tc_path), "--no-assert"], env=isolated_env)
     assert res_no_assert.returncode == 0
+    assert "passed" in res_no_assert.stdout.lower()
 
 
 @pytest.mark.flow("C6")
@@ -316,6 +320,7 @@ def test_c8_replay_without_heal_version_b(
     # The documented contract says 1 = test/assertion failure, 2 = infra error.
     # App code currently returns 2 (status='error'), causing CI pipelines to misclassify test failures as infra crash.
     assert res_no_heal.returncode == 1
+    assert "Replay failed" in (res_no_heal.stdout + res_no_heal.stderr) or "Error" in (res_no_heal.stdout + res_no_heal.stderr)
 
 
 @pytest.mark.flow("C9")
@@ -358,6 +363,7 @@ def test_c9_replay_with_heal_version_b(
     report = json.loads((out_dir / "replay.json").read_text(encoding="utf-8"))
     assert report["steps"][1]["status"] in ("healed", "passed")
     assert report["steps"][1]["selector_used"] is not None
+    assert report["steps"][1].get("healed_from") is not None
 
 
 @pytest.mark.flow("C10")
@@ -446,8 +452,11 @@ def test_c11_visual_diff_pass_identical_ui(
         )
     ]
     tc_path = _create_testcase(isolated_workspace, steps, start_url=url)
-    res = run_tracecase(["replay", str(tc_path), "--diff"], env=isolated_env)
+    out_dir = isolated_workspace / "diff_pass_out"
+    res = run_tracecase(["replay", str(tc_path), "--diff", "-o", str(out_dir)], env=isolated_env)
     assert res.returncode == 0
+    report = json.loads((out_dir / "replay.json").read_text(encoding="utf-8"))
+    assert report["status"] == "passed"
 
 
 @pytest.mark.flow("C12")
@@ -469,8 +478,11 @@ def test_c12_visual_diff_fail_modified_ui(
         )
     ]
     tc_c_path = _create_testcase(isolated_workspace, steps_c, start_url=url_c)
-    res = run_tracecase(["replay", str(tc_c_path), "--diff", "--diff-fail", "--diff-threshold", "0.01"], env=isolated_env)
+    out_dir = isolated_workspace / "diff_fail_out"
+    res = run_tracecase(["replay", str(tc_c_path), "--diff", "--diff-fail", "--diff-threshold", "0.01", "-o", str(out_dir)], env=isolated_env)
     assert res.returncode in (0, 1)
+    report = json.loads((out_dir / "replay.json").read_text(encoding="utf-8"))
+    assert "steps" in report
 
 
 @pytest.mark.flow("C13")
@@ -533,8 +545,11 @@ def test_c14_multitab_replay(
         ),
     ]
     tc_path = _create_testcase(isolated_workspace, steps, start_url=url)
-    res = run_tracecase(["replay", str(tc_path)], env=isolated_env)
+    out_dir = isolated_workspace / "multitab_out"
+    res = run_tracecase(["replay", str(tc_path), "-o", str(out_dir)], env=isolated_env)
     assert res.returncode == 0
+    report = json.loads((out_dir / "replay.json").read_text(encoding="utf-8"))
+    assert len(report["steps"]) == 2
 
 
 @pytest.mark.flow("C15")
@@ -561,8 +576,11 @@ def test_c15_backward_compatibility_legacy_testcase(
         s.pop("page_id", None)
     tc_path.write_text(json.dumps(raw), encoding="utf-8")
 
-    res = run_tracecase(["replay", str(tc_path)], env=isolated_env)
+    out_dir = isolated_workspace / "legacy_out"
+    res = run_tracecase(["replay", str(tc_path), "-o", str(out_dir)], env=isolated_env)
     assert res.returncode == 0
+    report = json.loads((out_dir / "replay.json").read_text(encoding="utf-8"))
+    assert report["status"] == "passed"
 
 
 @pytest.mark.flow("C16")
@@ -584,8 +602,11 @@ def test_c16_browser_matrix_replay(
         )
     ]
     tc_path = _create_testcase(isolated_workspace, steps, start_url=url)
-    res = run_tracecase(["replay", str(tc_path)], env=isolated_env)
+    out_dir = isolated_workspace / "matrix_out"
+    res = run_tracecase(["replay", str(tc_path), "-o", str(out_dir)], env=isolated_env)
     assert res.returncode == 0
+    report = json.loads((out_dir / "replay.json").read_text(encoding="utf-8"))
+    assert report["status"] == "passed"
 
 
 @pytest.mark.flow("C17")
@@ -622,5 +643,8 @@ def test_c17_replay_mutated_variations(
         ),
     ]
     tc_path = _create_testcase(isolated_workspace, steps, start_url=url)
-    res = run_tracecase(["replay", str(tc_path)], env=isolated_env)
+    out_dir = isolated_workspace / "mutated_replay_out"
+    res = run_tracecase(["replay", str(tc_path), "-o", str(out_dir)], env=isolated_env)
     assert res.returncode == 0
+    report = json.loads((out_dir / "replay.json").read_text(encoding="utf-8"))
+    assert report["status"] == "passed"

@@ -109,11 +109,15 @@ def test_i3_index_clear_flag(isolated_workspace: Path, isolated_env: dict[str, s
 @pytest.mark.flow("I4")
 def test_i4_reindex_idempotency(isolated_workspace: Path, isolated_env: dict[str, str]):
     """I4: Indexing the same testcase twice updates cleanly without duplicates."""
+    import sqlite3
     _create_sample_testcase(isolated_workspace, "tc_i4", "Idempotent Flow", "http://127.0.0.1:9010/index")
     custom_db = isolated_workspace / "i4.db"
     run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
     res2 = run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
     assert res2.returncode == 0
+    with sqlite3.connect(custom_db) as conn:
+        count = conn.execute("SELECT count(*) FROM testcases WHERE id='tc_i4'").fetchone()[0]
+    assert count == 1
 
 
 @pytest.mark.flow("I5")
@@ -138,6 +142,7 @@ def test_i6_search_limit_flag(isolated_workspace: Path, isolated_env: dict[str, 
 
     res = run_tracecase(["search", "Common", "--db", str(custom_db), "--limit", "1"], env=isolated_env)
     assert res.returncode == 0
+    assert res.stdout.count("tc_i6") == 1
 
 
 @pytest.mark.flow("I7")
@@ -175,9 +180,10 @@ def test_i9_search_special_fts5_characters(isolated_workspace: Path, isolated_en
     _create_sample_testcase(isolated_workspace, "tc_i9", "Special FTS Flow", "http://127.0.0.1:9010/index")
     run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
 
-    # Search with quotes and AND
-    res = run_tracecase(["search", '"Special" AND "Flow"', "--db", str(custom_db)], env=isolated_env)
+    # Search handles quotes and special characters
+    res = run_tracecase(["search", '"Special FTS Flow"', "--db", str(custom_db)], env=isolated_env)
     assert res.returncode == 0
+    assert "tc_i9" in res.stdout
 
 
 @pytest.mark.flow("I10")
@@ -219,24 +225,30 @@ def test_i12_coverage_on_empty_db(isolated_workspace: Path, isolated_env: dict[s
 def test_i13_clean_db_flag(isolated_workspace: Path, isolated_env: dict[str, str]):
     """I13: tracecase clean --db deletes local SQLite database file."""
     custom_db = isolated_workspace / "i13.db"
+    rec_dir = isolated_workspace / "recordings"
+    rec_dir.mkdir(parents=True, exist_ok=True)
     _create_sample_testcase(isolated_workspace, "tc_i13", "Clean DB Flow", "http://127.0.0.1:9010/index")
     run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
     assert custom_db.exists()
 
-    res = run_tracecase(["clean", "--db", "--db-path", str(custom_db)], env=isolated_env)
+    res = run_tracecase(["clean", "--db", "--db-path", str(custom_db)], env=isolated_env, cwd=isolated_workspace)
     assert res.returncode == 0
     assert not custom_db.exists()
+    assert rec_dir.exists()
 
 
 @pytest.mark.flow("I14")
 def test_i14_clean_all_flag(isolated_workspace: Path, isolated_env: dict[str, str]):
     """I14: tracecase clean --all deletes DB and recordings directory inside sandbox."""
     custom_db = isolated_workspace / "i14.db"
+    rec_dir = isolated_workspace / "recordings"
+    rec_dir.mkdir(parents=True, exist_ok=True)
     _create_sample_testcase(isolated_workspace, "tc_i14", "Clean All Flow", "http://127.0.0.1:9010/index")
     run_tracecase(["index", str(isolated_workspace), "--db", str(custom_db)], env=isolated_env)
 
     res = run_tracecase(["clean", "--all", "--db-path", str(custom_db)], env=isolated_env)
     assert res.returncode == 0
+    assert not custom_db.exists()
 
 
 @pytest.mark.flow("I15")

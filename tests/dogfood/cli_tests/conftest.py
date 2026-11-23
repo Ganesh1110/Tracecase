@@ -57,24 +57,38 @@ def isolated_env(isolated_workspace: Path) -> dict[str, str]:
     return env
 
 
+def _get_worker_offset() -> int:
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
+    if worker.startswith("gw"):
+        try:
+            return int(worker[2:])
+        except ValueError:
+            return 0
+    return 0
+
+
 @pytest.fixture(scope="session")
 def playground_server_url() -> Generator[str, None, None]:
-    server = create_playground_server(host="127.0.0.1", port=9010)
+    port = 9010 + _get_worker_offset() * 10
+    server = create_playground_server(host="127.0.0.1", port=port)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
-    yield "http://127.0.0.1:9010"
+    yield f"http://127.0.0.1:{port}"
     server.shutdown()
+    server.server_close()
 
 
 @pytest.fixture(scope="session")
 def fake_llm_server_url() -> Generator[str, None, None]:
-    server = create_fake_llm_server(host="127.0.0.1", port=9110)
+    port = 9110 + _get_worker_offset() * 10
+    server = create_fake_llm_server(host="127.0.0.1", port=port)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
-    yield "http://127.0.0.1:9110"
+    yield f"http://127.0.0.1:{port}"
     server.shutdown()
+    server.server_close()
 
 
 @pytest.fixture

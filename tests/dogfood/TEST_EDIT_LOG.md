@@ -206,3 +206,43 @@ This document tracks all modifications made to test assertions during Phase 2, r
 - **Classification**: **TEST BUG**
 - **Rationale**: Typer option `--older-than` takes an integer representing the number of days (`<int>`), not a duration string with suffix (`"30d"`). Corrected to pass integer argument `"30"`.
 
+---
+
+### Entry 14: ActionType `scroll` Unhandled in ReplayEngine (`test_b16_action_types_replay_scroll_bug`)
+- **File**: `tests/dogfood/cli_tests/test_cli_b_record.py`
+- **Hardened Final Assertion**:
+  ```python
+  @pytest.mark.xfail(strict=True, reason="BUG-010: ReplayEngine._perform raises ValueError for action_type='scroll'")
+  def test_b16_action_types_replay_scroll_bug(...):
+      ...
+      res = asyncio.run(engine.run())
+      assert res.status == "passed"
+  ```
+- **Classification**: **APP BUG (BUG-010)**
+- **Rationale**: ActionType `scroll` is defined in `tracecase.models.ActionType`, but `ReplayEngine._perform` lacks a handler for it and raises `ValueError: Unsupported action type: scroll`. Test explicitly tests replaying a scroll step and is marked strict `xfail`.
+
+---
+
+### Entry 15: Rich Output Destination in Image Diff Error Handling (`test_d5_corrupt_file`)
+- **File**: `tests/dogfood/cli_tests/test_cli_d_diff.py`
+- **Original Assertion**:
+  ```python
+  assert "not found" in res_missing.stderr.lower()
+  ```
+- **New Assertion**:
+  ```python
+  assert "not found" in (res_missing.stdout + res_missing.stderr).lower()
+  ```
+- **Classification**: **TEST BUG**
+- **Rationale**: `tracecase diff` outputs error messages via Rich console `console.print(f"[red]✗ Baseline not found:[/red] ...")` which streams to `stdout` rather than `stderr`. Checking only `stderr` caused a false failure when the error message was correctly rendered to stdout.
+
+---
+
+### Entry 16: Elimination of Returncode-Only Asserts Across CLI Test Suite
+- **Files**: `test_cli_b_record.py`, `test_cli_c_replay_healing.py`, `test_cli_d_diff.py`, `test_cli_g_mutate.py`, `test_cli_h_analyze.py`, `test_cli_i_corpus_mcp.py`, `test_cli_j_ci_intelligence.py`
+- **Original Assertion**: `assert res.returncode == 0` without verifying output text or side-effect files.
+- **Updated Assertions**: Replaced with assertions on process output, generated artifact schema, or database state.
+- **Classification**: **TEST QUALITY HARDENING**
+- **Rationale**: Enforces that tests do not merely check process exit status, but rigorously assert on the observable output, file system side-effects, and database content. Verified via `tests/dogfood/check_assertion_quality.py`.
+
+

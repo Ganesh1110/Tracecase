@@ -147,8 +147,10 @@ def test_g3_strategy_actions(
 ):
     """G3: --strategy actions generates action-level mutations (e.g. double_click)."""
     tc_path = _create_mutable_testcase(isolated_workspace)
-    res = run_tracecase(["mutate", str(tc_path), "--strategy", "actions"], env=isolated_env)
+    out_dir = isolated_workspace / "mut_actions"
+    res = run_tracecase(["mutate", str(tc_path), "--strategy", "actions", "-o", str(out_dir)], env=isolated_env)
     assert res.returncode == 0
+    assert len(list(out_dir.glob("*/testcase.json"))) >= 1
 
 
 @pytest.mark.flow("G4")
@@ -158,8 +160,10 @@ def test_g4_strategy_network(
 ):
     """G4: --strategy network injects 500 error faults into network requests."""
     tc_path = _create_mutable_testcase(isolated_workspace)
-    res = run_tracecase(["mutate", str(tc_path), "--strategy", "network"], env=isolated_env)
+    out_dir = isolated_workspace / "mut_network"
+    res = run_tracecase(["mutate", str(tc_path), "--strategy", "network", "-o", str(out_dir)], env=isolated_env)
     assert res.returncode == 0
+    assert len(list(out_dir.glob("*/testcase.json"))) >= 1
 
 
 @pytest.mark.flow("G5")
@@ -169,8 +173,10 @@ def test_g5_invalid_strategy_handling(
 ):
     """G5: Unknown strategy falls back to all strategies without crashing."""
     tc_path = _create_mutable_testcase(isolated_workspace)
-    res = run_tracecase(["mutate", str(tc_path), "--strategy", "nonexistent_strategy"], env=isolated_env)
+    out_dir = isolated_workspace / "mut_fallback"
+    res = run_tracecase(["mutate", str(tc_path), "--strategy", "nonexistent_strategy", "-o", str(out_dir)], env=isolated_env)
     assert res.returncode == 0
+    assert len(list(out_dir.glob("*/testcase.json"))) >= 1
 
 
 @pytest.mark.flow("G6")

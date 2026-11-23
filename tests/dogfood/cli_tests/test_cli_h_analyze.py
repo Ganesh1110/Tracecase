@@ -127,6 +127,7 @@ def test_h3_provider_null_makes_zero_network_calls(
     # Give a bogus base-url; provider null must not touch it
     res = run_tracecase(["analyze", str(tc_path), "--provider", "null", "--base-url", "http://127.0.0.1:19999"], env=isolated_env)
     assert res.returncode == 0
+    assert "Analysis Results" in res.stdout
 
 
 @pytest.mark.flow("H4")
@@ -158,6 +159,7 @@ def test_h5_openai_provider_against_fake_llm(
         env=isolated_env,
     )
     assert res.returncode == 0
+    assert "Analyzing" in res.stdout or (tc_path / "analysis.json").exists()
 
 
 @pytest.mark.flow("H6")
@@ -173,6 +175,7 @@ def test_h6_llm_failure_fallback(
         env=isolated_env,
     )
     assert res.returncode in (0, 1, 2)
+    assert "Traceback" not in res.stderr
 
 
 @pytest.mark.flow("H7")
@@ -185,6 +188,7 @@ def test_h7_schema_validation(
     out_dir = isolated_workspace / "schema_check"
     run_tracecase(["analyze", str(tc_path), "-o", str(out_dir), "--provider", "null"], env=isolated_env)
     analysis = json.loads((out_dir / "analysis.json").read_text(encoding="utf-8"))
+    assert analysis.get("provider") in ("null", "heuristics")
     assert "summary" in analysis
     assert "risks" in analysis
     assert isinstance(analysis["risks"], list)
@@ -218,3 +222,4 @@ def test_h9_unreachable_endpoint_handling(
         env=isolated_env,
     )
     assert res.returncode in (0, 1, 2)
+    assert "Traceback" not in res.stderr

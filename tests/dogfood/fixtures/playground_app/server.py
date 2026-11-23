@@ -119,8 +119,13 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
+class ReusableThreadingServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 def create_playground_server(host: str = "127.0.0.1", port: int = 9000) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer((host, port), PlaygroundHandler)
+    return ReusableThreadingServer((host, port), PlaygroundHandler)
 
 
 if __name__ == "__main__":

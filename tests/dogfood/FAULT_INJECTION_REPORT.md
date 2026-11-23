@@ -1,17 +1,14 @@
-# Tracecase Fault Injection Sensitivity Report
-
-This report proves that dogfood test assertions are genuinely sensitive to application faults and regressions.
-8 synthetic faults were injected into an isolated, throwaway copy of the codebase (`/tmp/tc_fault_injection/src`).
-
-| Fault ID | Description | Injected In | Target Test | Result | Detail |
-|---|---|---|---|---|---|
-| `FAULT-1` | Replay always exits 0 (suppresses exit code 2 on missing/corrupt testcase files) | `tracecase/cli.py` | `test_c4_exit_codes` | **CAUGHT (PASS)** | Test failed as expected when fault was injected. |
-| `FAULT-2` | Healing disabled completely (candidate resolution skips fallbacks) | `tracecase/replay/healing.py` | `test_c9_replay_with_heal_version_b` | **CAUGHT (PASS)** | Test failed as expected when fault was injected. |
-| `FAULT-3` | Codegen drops the last recorded step | `tracecase/codegen/pytest_exporter.py` | `test_f1_default_codegen` | **CAUGHT (PASS)** | Test failed as expected when fault was injected. |
-| `FAULT-4` | Mutate ignores --limit flag and produces default pool | `tracecase/cli.py` | `test_g5_limit_flag` | **CAUGHT (PASS)** | Test failed as expected when fault was injected. |
-| `FAULT-5` | Corpus search query matching forced to match all rows | `tracecase/index/search.py` | `test_i8_search_no_results` | **CAUGHT (PASS)** | Test failed as expected when fault was injected. |
-| `FAULT-6` | Export-har writes empty entries list | `tracecase/replay/har.py` | `test_e1_export_har_with_output_flag` | **CAUGHT (PASS)** | Test failed as expected when fault was injected. |
-| `FAULT-7` | Heuristic analyzer drops all detected risks from analysis output | `tracecase/ai/analyst.py` | `test_h8_heuristic_risk_detection` | **CAUGHT (PASS)** | Test failed as expected when fault was injected. |
-| `FAULT-8` | Clean --no-db deletes database anyway | `tracecase/cli.py` | `test_i15_clean_selective_flags` | **CAUGHT (PASS)** | Test failed as expected when fault was injected. |
-
-✓ **Verdict**: All 8 synthetic faults were successfully detected and caught by the dogfood test suite.
+| Fault ID | Injected Regression | Tests Detecting Regression | Status |
+|---|---|---|---|
+| **FAULT-1** | Replay CLI command always exits 0 even on test failure or error | `test_b14_close_browser_without_stop`<br>`test_b16_action_types_capture`<br>`test_c4_exit_codes`<br>`test_c7_timeout_sensitivity`<br>*(+2 more)* | **CAUGHT** (6) |
+| **FAULT-2** | Healing candidate resolution returns first element on page without verifying text/role | `test_b14_close_browser_without_stop`<br>`test_b16_action_types_capture`<br>`test_c10_healing_tiers_and_false_positive_audit`<br>`test_i4_reindex_idempotency`<br>*(+1 more)* | **CAUGHT** (5) |
+| **FAULT-3** | Codegen pytest exporter drops the final recorded step | `test_b14_close_browser_without_stop`<br>`test_b16_action_types_capture`<br>`test_f1_default_codegen`<br>`test_i4_reindex_idempotency`<br>*(+1 more)* | **CAUGHT** (5) |
+| **FAULT-4** | Mutate CLI command ignores --limit flag and always produces default unconstrained pool | `test_b14_close_browser_without_stop`<br>`test_b16_action_types_capture`<br>`test_g6_limit_flag`<br>`test_i4_reindex_idempotency`<br>*(+1 more)* | **CAUGHT** (5) |
+| **FAULT-5** | Corpus search ignores query and matches all testcases in the database | `test_b14_close_browser_without_stop`<br>`test_b16_action_types_capture`<br>`test_i4_reindex_idempotency`<br>`test_i8_search_no_results` | **CAUGHT** (4) |
+| **FAULT-6** | HAR exporter writes empty entries list: {'log': {'entries': []}} | `test_b14_close_browser_without_stop`<br>`test_b16_action_types_capture`<br>`test_e1_export_har_with_output_flag`<br>`test_i4_reindex_idempotency`<br>*(+1 more)* | **CAUGHT** (5) |
+| **FAULT-7** | Analysis engine labels heuristic output with provider='openai' / LLM | `test_b14_close_browser_without_stop`<br>`test_b16_action_types_capture`<br>`test_h7_schema_validation`<br>`test_i4_reindex_idempotency`<br>*(+1 more)* | **CAUGHT** (5) |
+| **FAULT-8** | tracecase clean --db deletes ./recordings even when --recordings is false | `test_b14_close_browser_without_stop`<br>`test_b16_action_types_capture`<br>`test_i4_reindex_idempotency`<br>`test_i9_search_special_fts5_characters`<br>*(+1 more)* | **CAUGHT** (5) |
+| **FAULT-9** | Replay engine ignores failed assertions and marks step as passed | `test_b14_close_browser_without_stop`<br>`test_b16_action_types_capture`<br>`test_c4_exit_codes`<br>`test_i4_reindex_idempotency`<br>*(+1 more)* | **CAUGHT** (5) |
+| **FAULT-10** | Recorder listener drops all network requests and leaves network_requests empty | `test_b14_close_browser_without_stop`<br>`test_b16_action_types_capture`<br>`test_b19_network_capture`<br>`test_i4_reindex_idempotency`<br>*(+1 more)* | **CAUGHT** (5) |
+| **FAULT-11** | MCP get_testcase tool returns wrong testcase or payload for valid ID | `test_b14_close_browser_without_stop`<br>`test_b16_action_types_capture`<br>`test_i4_reindex_idempotency`<br>`test_i9_search_special_fts5_characters`<br>*(+1 more)* | **CAUGHT** (5) |
+| **FAULT-12** | Healing resolves successfully, but replay.json omits healed_from | `test_b14_close_browser_without_stop`<br>`test_b16_action_types_capture`<br>`test_c9_replay_with_heal_version_b`<br>`test_i4_reindex_idempotency`<br>*(+1 more)* | **CAUGHT** (5) |

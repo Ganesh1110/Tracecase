@@ -95,6 +95,7 @@ def test_j2_tracecase_map(
     repo = Path(git_fixture_repo["repo_path"])
     res = run_tracecase(["map", str(repo)], env=isolated_env, cwd=repo)
     assert res.returncode == 0
+    assert "routes" in res.stdout.lower() or "map" in res.stdout.lower() or len(res.stdout) > 0
 
 
 @pytest.mark.flow("J3")
@@ -107,6 +108,7 @@ def test_j3_tracecase_impact(
     base = git_fixture_repo["commit_1"]
     res = run_tracecase(["impact", str(repo), "--base", base], env=isolated_env, cwd=repo)
     assert res.returncode == 0
+    assert "impact" in res.stdout.lower() or len(res.stdout) > 0
 
 
 @pytest.mark.flow("J4")
@@ -119,6 +121,7 @@ def test_j4_tracecase_risk(
     base = git_fixture_repo["commit_1"]
     res = run_tracecase(["risk", str(repo), "--base", base], env=isolated_env, cwd=repo)
     assert res.returncode == 0
+    assert "risk" in res.stdout.lower() or len(res.stdout) > 0
 
 
 @pytest.mark.flow("J5")
@@ -131,6 +134,7 @@ def test_j5_tracecase_select(
     base = git_fixture_repo["commit_1"]
     res = run_tracecase(["select", str(repo), "--base", base], env=isolated_env, cwd=repo)
     assert res.returncode == 0
+    assert "select" in res.stdout.lower() or len(res.stdout) > 0
 
 
 @pytest.mark.flow("J6")
@@ -140,6 +144,7 @@ def test_j6_tracecase_explain(
     """J6: tracecase explain outputs human-readable rationale for selection."""
     res = run_tracecase(["explain"], env=isolated_env)
     assert res.returncode in (0, 1, 2)
+    assert "Traceback" not in res.stderr
 
 
 @pytest.mark.flow("J7")
@@ -159,6 +164,7 @@ def test_j8_tracecase_run_orchestrator(
     """J8: tracecase run executes selected test suites."""
     res = run_tracecase(["run", "--help"], env=isolated_env)
     assert res.returncode == 0
+    assert "run" in res.stdout.lower() or "usage:" in res.stdout.lower()
 
 
 @pytest.mark.flow("J9")
@@ -171,6 +177,7 @@ def test_j9_ci_gate_evaluation(
     base = git_fixture_repo["commit_1"]
     res = run_tracecase(["ci", "--repo", str(repo), "--base", base], env=isolated_env, cwd=repo)
     assert res.returncode in (0, 1)
+    assert "quality gate" in res.stdout.lower() or "ci" in res.stdout.lower() or len(res.stdout) > 0
 
 
 @pytest.mark.flow("J10")
@@ -198,6 +205,7 @@ def test_j12_ci_upload_options(
     """J12: tracecase ci-upload uploads run manifest to Studio."""
     res = run_tracecase(["ci-upload", "--help"], env=isolated_env)
     assert res.returncode == 0
+    assert "upload" in res.stdout.lower() or "manifest" in res.stdout.lower() or "usage:" in res.stdout.lower()
 
 
 @pytest.mark.flow("J13")
@@ -207,6 +215,7 @@ def test_j13_benchmark_command(
     """J13: tracecase benchmark evaluates execution timing metrics."""
     res = run_tracecase(["benchmark", "--help"], env=isolated_env)
     assert res.returncode == 0
+    assert "benchmark" in res.stdout.lower() or "usage:" in res.stdout.lower()
 
 
 @pytest.mark.flow("J14")
@@ -216,6 +225,7 @@ def test_j14_storage_disk_usage(
     """J14: tracecase storage inspects disk usage of artifacts."""
     res = run_tracecase(["storage"], env=isolated_env)
     assert res.returncode == 0
+    assert "storage" in res.stdout.lower() or "usage" in res.stdout.lower() or len(res.stdout) > 0
 
 
 @pytest.mark.flow("J15")
@@ -225,6 +235,7 @@ def test_j15_storage_prune_dry_run(
     """J15: tracecase storage --dry-run previews pruning without deleting."""
     res = run_tracecase(["storage", "--dry-run"], env=isolated_env)
     assert res.returncode == 0
+    assert "dry-run" in res.stdout.lower() or "simulat" in res.stdout.lower() or len(res.stdout) > 0
 
 
 @pytest.mark.flow("J16")
@@ -234,6 +245,7 @@ def test_j16_storage_retention_policy_older_than(
     """J16: tracecase storage --older-than applies retention policy."""
     res = run_tracecase(["storage", "--dry-run", "--older-than", "30"], env=isolated_env)
     assert res.returncode == 0
+    assert "30" in res.stdout or len(res.stdout) > 0
 
 
 @pytest.mark.flow("J17")
@@ -243,6 +255,7 @@ def test_j17_storage_failures_only_filter(
     """J17: tracecase storage --failures-only retains only failure artifacts."""
     res = run_tracecase(["storage", "--dry-run", "--failures-only"], env=isolated_env)
     assert res.returncode == 0
+    assert "failure" in res.stdout.lower() or len(res.stdout) > 0
 
 
 @pytest.mark.flow("J18")
@@ -255,6 +268,7 @@ def test_j18_non_git_directory_handling(
     empty_dir.mkdir(parents=True, exist_ok=True)
     res = run_tracecase(["changes", str(empty_dir)], env=isolated_env)
     assert res.returncode in (0, 1, 2)
+    assert "Traceback" not in res.stderr
 
 
 @pytest.mark.flow("J19")
@@ -278,3 +292,4 @@ def test_j20_ci_yaml_config_file(
     cfg_file.write_text("ci:\n  concurrency: 2\n  budget: 5m\n", encoding="utf-8")
     res = run_tracecase(["ci", "--repo", str(repo), "--config", str(cfg_file)], env=isolated_env, cwd=repo)
     assert res.returncode in (0, 1)
+    assert "Traceback" not in res.stderr

@@ -51,6 +51,7 @@ def test_d2_diff_different_images_overlay(
     assert res.returncode == 1
     assert "Failed" in res.stdout
     assert diff_out.exists(), f"Diff overlay {diff_out} was not generated"
+    assert len(diff_out.read_bytes()) > 50
 
 
 @pytest.mark.flow("D3")
@@ -72,10 +73,12 @@ def test_d3_threshold_boundary(
     # 0.05% threshold fails
     res_fail = run_tracecase(["diff", str(p1), str(p2), "--threshold", "0.05"], env=isolated_env)
     assert res_fail.returncode == 1
+    assert "Failed" in res_fail.stdout
 
     # 0.5% threshold passes
     res_pass = run_tracecase(["diff", str(p1), str(p2), "--threshold", "0.5"], env=isolated_env)
     assert res_pass.returncode == 0
+    assert "Passed" in res_pass.stdout
 
 
 @pytest.mark.flow("D4")
@@ -117,9 +120,11 @@ def test_d5_corrupt_file(
 
     res_missing = run_tracecase(["diff", str(isolated_workspace / "missing.png"), str(good_img)], env=isolated_env)
     assert res_missing.returncode == 2
+    assert "not found" in (res_missing.stdout + res_missing.stderr).lower() or "error" in (res_missing.stdout + res_missing.stderr).lower()
 
     res_corrupt = run_tracecase(["diff", str(good_img), str(corrupt_file)], env=isolated_env)
     assert res_corrupt.returncode == 2
+    assert "error" in (res_corrupt.stdout + res_corrupt.stderr).lower() or "cannot identify" in (res_corrupt.stdout + res_corrupt.stderr).lower()
 
 
 @pytest.mark.flow("D6")

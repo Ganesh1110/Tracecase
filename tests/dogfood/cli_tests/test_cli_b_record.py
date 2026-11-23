@@ -179,12 +179,14 @@ def test_b6_record_browser_webkit(isolated_workspace: Path, playground_server_ur
 @pytest.mark.flow("B7")
 def test_b7_invalid_browser_rejected(isolated_workspace: Path, isolated_env: dict[str, str], playground_server_url: str):
     """B7: record rejects invalid browser option (e.g. --browser opera)."""
+    out_dir = isolated_workspace / "out_b7"
     res = run_tracecase(
-        ["record", f"{playground_server_url}/login.html", "-o", str(isolated_workspace / "out"), "--browser", "opera"],
+        ["record", f"{playground_server_url}/login.html", "-o", str(out_dir), "--browser", "opera"],
         env=isolated_env,
     )
     assert res.returncode != 0
     assert "Invalid value for '--browser'" in res.stderr or "Invalid" in res.stdout
+    assert not (out_dir / "testcase.json").exists()
 
 
 @pytest.mark.flow("B8")
@@ -194,6 +196,7 @@ def test_b8_headless_mode_flag(isolated_workspace: Path, isolated_env: dict[str,
         ["record", "--help"],
         env=isolated_env,
     )
+    assert res.returncode == 0
     assert "--headless" in res.stdout
 
 
@@ -201,11 +204,14 @@ def test_b8_headless_mode_flag(isolated_workspace: Path, isolated_env: dict[str,
 def test_b9_timeout_option(isolated_workspace: Path, isolated_env: dict[str, str], playground_server_url: str):
     """B9: --timeout validates range (1000 - 300000)."""
     # Invalid timeout: 500 (below 1000 min)
+    out_dir = isolated_workspace / "out_b9"
     res_bad = run_tracecase(
-        ["record", f"{playground_server_url}/login.html", "-o", str(isolated_workspace / "out"), "--timeout", "500"],
+        ["record", f"{playground_server_url}/login.html", "-o", str(out_dir), "--timeout", "500"],
         env=isolated_env,
     )
     assert res_bad.returncode != 0
+    assert "timeout" in (res_bad.stderr + res_bad.stdout).lower() or res_bad.returncode == 2
+    assert not (out_dir / "testcase.json").exists()
 
 
 @pytest.mark.flow("B10")
@@ -213,6 +219,7 @@ def test_b10_missing_output_option(isolated_env: dict[str, str], playground_serv
     """B10: record without -o exits non-zero with missing option error."""
     res = run_tracecase(["record", f"{playground_server_url}/login.html"], env=isolated_env)
     assert res.returncode != 0
+    assert "missing" in (res.stderr + res.stdout).lower() or "error" in (res.stderr + res.stdout).lower()
     assert "Missing option" in res.stderr or "Missing" in res.stdout
 
 
@@ -273,7 +280,8 @@ def test_b14_close_browser_without_stop(isolated_workspace: Path, playground_ser
         await asyncio.sleep(0.1)
 
     asyncio.run(_run_recorder(out_dir, url, actions_callback=actions, close_browser_early=True))
-    # Should not hang or crash unhandled
+    # Browser closed early without clicking stop: clean termination with no exported testcase
+    assert not (out_dir / "testcase.json").exists()
 
 
 @pytest.mark.flow("B15")
@@ -296,21 +304,88 @@ def test_b15_panel_excluded_from_screenshots(isolated_workspace: Path, playgroun
 
 @pytest.mark.flow("B16")
 def test_b16_action_types_capture(isolated_workspace: Path, playground_server_url: str):
-    """B16: Verify input, click, and dblclick action types capture."""
+    """B16: Test recorded ActionTypes (click, dblclick, input, select, check, uncheck, keypress, navigate)."""
     out_dir = isolated_workspace / "b16_actions"
     url = f"{playground_server_url}/actions.html"
 
     async def actions(page, rec):
         await page.wait_for_selector("#dblclick-btn")
+        # 1. dblclick
         await page.dblclick("#dblclick-btn")
+        # 2. check (checkbox)
+        chk = await page.query_selector("#toggle-chk")
+        if not await chk.is_checked():
+            await page.click("#toggle-chk")
+        # 3. uncheck
         await page.click("#toggle-chk")
+        # 4. input
         await page.fill("#key-input", "testing_keypress")
+        await asyncio.sleep(0.7)  # allow input debounce timer to fire
+        # 5. keypress
+        await page.press("#key-input", "Enter")
+        # 6. select
+        await page.select_option("#role-select", "admin")
+        # 7. click
+        await page.click("#dblclick-btn")
         await asyncio.sleep(0.3)
 
     asyncio.run(_run_recorder(out_dir, url, actions_callback=actions))
     tc = TestCase.model_validate_json((out_dir / "testcase.json").read_text(encoding="utf-8"))
-    action_types = [s.action_type for s in tc.steps]
-    assert len(action_types) >= 2
+    recorded_types = {s.action_type for s in tc.steps}
+
+    # Verify each recorded action type
+    assert "click" in recorded_types or "dblclick" in recorded_types
+    assert any(s.action_type in ("check", "uncheck") for s in tc.steps)
+    assert any(s.action_type == "input" and s.input_value for s in tc.steps)
+    assert any(s.action_type == "select" for s in tc.steps)
+    # Check step metadata
+    for step in tc.steps:
+        if step.element:
+            assert step.element.selector
+            assert step.element.tag_name
+
+
+@pytest.mark.flow("B16")
+def test_b16_action_types_unrecordable_gap(isolated_workspace: Path, playground_server_url: str):
+    """B16: Audit ActionTypes that recorder never emits (scroll, hover, wait).
+
+    Models define 11 ActionTypes, but events.py lacks listeners for scroll and hover,
+    and wait is purely synthetic.
+    """
+    from tracecase.events import EVENT_LISTENER_JS
+    # Verify events.py does not attach listeners for scroll or mouseenter/hover
+    assert "addEventListener('scroll'" not in EVENT_LISTENER_JS
+    assert "addEventListener('mouseenter'" not in EVENT_LISTENER_JS
+    assert "addEventListener('mouseover'" not in EVENT_LISTENER_JS
+
+
+@pytest.mark.flow("B16")
+@pytest.mark.xfail(strict=True, reason="BUG-010: ReplayEngine._perform raises ValueError for action_type='scroll'")
+def test_b16_action_types_replay_scroll_bug(isolated_workspace: Path, playground_server_url: str):
+    """B16 / BUG-010: Replaying action_type='scroll' raises ValueError in ReplayEngine._perform."""
+    from tracecase.replay.engine import ReplayEngine
+    step_scroll = Step(
+        number=1,
+        timestamp=datetime.now(),
+        action_type="scroll",
+        input_value="500",
+        description_short="Scroll down",
+        description_detailed="Scroll page down 500px",
+    )
+    tc = TestCase(
+        id="tc_scroll_test",
+        name="Scroll Test",
+        created_at=datetime.now(),
+        start_url=f"{playground_server_url}/login.html",
+        browser="chromium",
+        steps=[step_scroll],
+        total_steps=1,
+        total_duration=1.0,
+    )
+    engine = ReplayEngine(tc, headless=True)
+    # Replay raises ValueError: Unsupported action type: scroll
+    res = asyncio.run(engine.run())
+    assert res.status == "passed"
 
 
 @pytest.mark.flow("B17")

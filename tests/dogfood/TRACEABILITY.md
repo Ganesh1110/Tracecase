@@ -52,6 +52,8 @@ dogfood test markers (`@pytest.mark.flow`), and real test outcomes.
 | `B14` | close browser without pressing stop | `test_cli_b_record.py::test_b14_close_browser_without_stop` | **PASSED** | Standard |
 | `B15` | panel excluded from step screenshots | `test_cli_b_record.py::test_b15_panel_excluded_from_screenshots` | **PASSED** | Standard |
 | `B16` | captured action types (11 types) | `test_cli_b_record.py::test_b16_action_types_capture` | **PASSED** | Critical |
+| `B16` | captured action types (11 types) | `test_cli_b_record.py::test_b16_action_types_unrecordable_gap` | `MAPPED` | Critical |
+| `B16` | captured action types (11 types) | `test_cli_b_record.py::test_b16_action_types_replay_scroll_bug` | `MAPPED` | Critical |
 | `B17` | element metadata capture | `test_cli_b_record.py::test_b17_element_metadata_capture` | **PASSED** | Standard |
 | `B18` | step screenshot with highlight outline | `test_cli_b_record.py::test_b18_step_screenshot_with_highlight` | **PASSED** | Standard |
 | `B19` | network capture attached to step | `test_cli_b_record.py::test_b19_network_capture` | **PASSED** | Standard |
