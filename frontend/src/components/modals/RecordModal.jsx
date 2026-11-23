@@ -1,13 +1,13 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { X, Video, Globe, Laptop, Loader2 } from 'lucide-react';
-import { api } from '../../services/api';
-import { useToast } from '../../context/ToastContext';
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { X, Video, Globe, Laptop, Loader2 } from "lucide-react";
+import { api } from "../../services/api";
+import { useToast } from "../../context/ToastContext";
 
 export function RecordModal({ isOpen, onClose }) {
-  const [url, setUrl] = useState('');
-  const [name, setName] = useState('');
-  const [browser, setBrowser] = useState('chromium');
+  const [url, setUrl] = useState("");
+  const [name, setName] = useState("");
+  const [browser, setBrowser] = useState("chromium");
   const [headless, setHeadless] = useState(false);
   const [loading, setLoading] = useState(false);
   const { showToast } = useToast();
@@ -17,25 +17,35 @@ export function RecordModal({ isOpen, onClose }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!url.trim()) {
-      showToast('Please provide a target application URL.', 'error');
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl) {
+      showToast("Please provide a target application URL.", "error");
       return;
     }
+
+    // Ensure protocol is present so Playwright navigation doesn't fail silently
+    const normalizedUrl = /^https?:\/\//i.test(trimmedUrl)
+      ? trimmedUrl
+      : `http://${trimmedUrl}`;
 
     try {
       setLoading(true);
       const session = await api.startRecording({
-        url: url.trim(),
+        url: normalizedUrl,
         name: name.trim() || undefined,
         browser,
         headless,
         timeout: 30000,
+        project_id: currentProject?.id || "default_project",
       });
-      showToast(`Recording session started (${session.session_id})!`, 'success');
+      showToast(
+        `Recording session started (${session.session_id})!`,
+        "success",
+      );
       onClose();
-      navigate('/recorder');
+      navigate("/recorder");
     } catch (err) {
-      showToast(err.message || 'Failed to start recording session.', 'error');
+      showToast(err.message || "Failed to start recording session.", "error");
     } finally {
       setLoading(false);
     }
@@ -53,7 +63,9 @@ export function RecordModal({ isOpen, onClose }) {
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
                 Launch Browser Recorder
               </h3>
-              <p className="text-xs text-slate-500">Record live user interactions with Playwright</p>
+              <p className="text-xs text-slate-500">
+                Record live user interactions with Playwright
+              </p>
             </div>
           </div>
           <button
@@ -108,6 +120,7 @@ export function RecordModal({ isOpen, onClose }) {
                 <option value="chromium">Chromium</option>
                 <option value="firefox">Firefox</option>
                 <option value="webkit">WebKit (Safari)</option>
+                <option value="msedge">Microsoft Edge</option>
               </select>
             </div>
 
@@ -116,8 +129,8 @@ export function RecordModal({ isOpen, onClose }) {
                 Execution Mode
               </label>
               <select
-                value={headless ? 'headless' : 'headed'}
-                onChange={(e) => setHeadless(e.target.value === 'headless')}
+                value={headless ? "headless" : "headed"}
+                onChange={(e) => setHeadless(e.target.value === "headless")}
                 className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
               >
                 <option value="headed">Headed (Visual Window)</option>

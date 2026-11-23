@@ -1,17 +1,24 @@
-import React, { useEffect, useState } from 'react';
-import { Settings as SettingsIcon, Save, Server, Monitor, Shield, Check } from 'lucide-react';
-import { api } from '../services/api';
-import { useToast } from '../context/ToastContext';
+import React, { useEffect, useState } from "react";
+import {
+  Settings as SettingsIcon,
+  Save,
+  Server,
+  Monitor,
+  Shield,
+  Check,
+} from "lucide-react";
+import { api } from "../services/api";
+import { useToast } from "../context/ToastContext";
 
 export function Settings() {
   const [settings, setSettings] = useState({
-    default_browser: 'chromium',
-    default_timeout: '30000',
-    ai_provider: 'openai',
-    ai_model: 'gemma-4-12b-it',
-    ai_api_base: 'https://chatbot.infospica.in/v1',
-    ai_api_key: '',
-    theme: 'dark',
+    default_browser: "chromium",
+    default_timeout: "30000",
+    ai_provider: "openai",
+    ai_model: "gemma-4-12b-it",
+    ai_api_base: "https://chatbot.infospica.in/v1",
+    ai_api_key: "",
+    theme: "dark",
   });
   const [loading, setLoading] = useState(false);
   const { showToast } = useToast();
@@ -25,9 +32,9 @@ export function Settings() {
     try {
       setLoading(true);
       await api.updateSettings(settings);
-      showToast('Settings saved successfully!', 'success');
+      showToast("Settings saved successfully!", "success");
     } catch (err) {
-      showToast('Failed to save settings: ' + err.message, 'error');
+      showToast("Failed to save settings: " + err.message, "error");
     } finally {
       setLoading(false);
     }
@@ -41,7 +48,8 @@ export function Settings() {
           <span>Platform Settings</span>
         </h1>
         <p className="text-sm text-slate-500 mt-1">
-          Configure default test execution parameters, LLM providers, and workspace preferences.
+          Configure default test execution parameters, LLM providers, and
+          workspace preferences.
         </p>
       </div>
 
@@ -60,12 +68,15 @@ export function Settings() {
               </label>
               <select
                 value={settings.default_browser}
-                onChange={(e) => setSettings({ ...settings, default_browser: e.target.value })}
+                onChange={(e) =>
+                  setSettings({ ...settings, default_browser: e.target.value })
+                }
                 className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200"
               >
                 <option value="chromium">Chromium</option>
                 <option value="firefox">Firefox</option>
                 <option value="webkit">WebKit (Safari)</option>
+                <option value="msedge">Microsoft Edge</option>
               </select>
             </div>
 
@@ -76,7 +87,9 @@ export function Settings() {
               <input
                 type="number"
                 value={settings.default_timeout}
-                onChange={(e) => setSettings({ ...settings, default_timeout: e.target.value })}
+                onChange={(e) =>
+                  setSettings({ ...settings, default_timeout: e.target.value })
+                }
                 className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200"
               />
             </div>
@@ -97,12 +110,18 @@ export function Settings() {
               </label>
               <select
                 value={settings.ai_provider}
-                onChange={(e) => setSettings({ ...settings, ai_provider: e.target.value })}
+                onChange={(e) =>
+                  setSettings({ ...settings, ai_provider: e.target.value })
+                }
                 className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200"
               >
                 <option value="ollama">Ollama (Local LLM)</option>
-                <option value="openai">OpenAI / Compatible Endpoint (vLLM, LMStudio)</option>
-                <option value="null">Deterministic Heuristics Only (Offline)</option>
+                <option value="openai">
+                  OpenAI / Compatible Endpoint (vLLM, LMStudio)
+                </option>
+                <option value="null">
+                  Deterministic Heuristics Only (Offline)
+                </option>
               </select>
             </div>
 
@@ -115,7 +134,9 @@ export function Settings() {
                   type="text"
                   placeholder="e.g. llama3, qwen2.5-coder, gpt-4o-mini"
                   value={settings.ai_model}
-                  onChange={(e) => setSettings({ ...settings, ai_model: e.target.value })}
+                  onChange={(e) =>
+                    setSettings({ ...settings, ai_model: e.target.value })
+                  }
                   className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200"
                 />
               </div>
@@ -128,7 +149,9 @@ export function Settings() {
                   type="text"
                   placeholder="e.g. http://localhost:11434"
                   value={settings.ai_api_base}
-                  onChange={(e) => setSettings({ ...settings, ai_api_base: e.target.value })}
+                  onChange={(e) =>
+                    setSettings({ ...settings, ai_api_base: e.target.value })
+                  }
                   className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-mono text-xs"
                 />
               </div>
@@ -142,7 +165,9 @@ export function Settings() {
                 type="password"
                 placeholder="sk-..."
                 value={settings.ai_api_key}
-                onChange={(e) => setSettings({ ...settings, ai_api_key: e.target.value })}
+                onChange={(e) =>
+                  setSettings({ ...settings, ai_api_key: e.target.value })
+                }
                 className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-mono text-xs"
               />
             </div>

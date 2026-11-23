@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   Play,
@@ -25,9 +25,9 @@ import {
   ArrowRight,
   Zap,
   RefreshCw,
-} from 'lucide-react';
-import { api } from '../services/api';
-import { useToast } from '../context/ToastContext';
+} from "lucide-react";
+import { api } from "../services/api";
+import { useToast } from "../context/ToastContext";
 
 export function TestCaseDetail() {
   const { id } = useParams();
@@ -36,32 +36,32 @@ export function TestCaseDetail() {
 
   const [testcase, setTestCase] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('steps'); // 'steps' | 'assertions' | 'codegen'
-  const [codegen, setCodegen] = useState('');
+  const [activeTab, setActiveTab] = useState("steps"); // 'steps' | 'assertions' | 'codegen'
+  const [codegen, setCodegen] = useState("");
   const [selectedScreenshot, setSelectedScreenshot] = useState(null);
 
   // Metadata editing
   const [isEditingMeta, setIsEditingMeta] = useState(false);
-  const [metaName, setMetaName] = useState('');
-  const [metaDesc, setMetaDesc] = useState('');
-  const [metaUrl, setMetaUrl] = useState('');
+  const [metaName, setMetaName] = useState("");
+  const [metaDesc, setMetaDesc] = useState("");
+  const [metaUrl, setMetaUrl] = useState("");
 
   // Step editing
   const [editingStep, setEditingStep] = useState(null);
   const [editFormData, setEditFormData] = useState({});
   const [isAddingStep, setIsAddingStep] = useState(false);
   const [newStepData, setNewStepData] = useState({
-    action_type: 'click',
-    selector: '',
-    input_value: '',
-    url: '',
-    description_short: '',
+    action_type: "click",
+    selector: "",
+    input_value: "",
+    url: "",
+    description_short: "",
   });
 
   // Assertion form
-  const [newAssertionKind, setNewAssertionKind] = useState('visible');
-  const [newAssertionTarget, setNewAssertionTarget] = useState('');
-  const [newAssertionExpected, setNewAssertionExpected] = useState('');
+  const [newAssertionKind, setNewAssertionKind] = useState("visible");
+  const [newAssertionTarget, setNewAssertionTarget] = useState("");
+  const [newAssertionExpected, setNewAssertionExpected] = useState("");
   const [newAssertionStep, setNewAssertionStep] = useState(1);
   const [editingAssertionIndex, setEditingAssertionIndex] = useState(null);
   const [editAssertionData, setEditAssertionData] = useState({});
@@ -70,7 +70,7 @@ export function TestCaseDetail() {
   const [showReplayModal, setShowReplayModal] = useState(false);
   const [flakinessStats, setFlakinessStats] = useState(null);
   const [replayOptions, setReplayOptions] = useState({
-    browser: 'chromium',
+    browser: "chromium",
     headed: false,
     heal: true,
     assertions: true,
@@ -90,15 +90,18 @@ export function TestCaseDetail() {
       setLoading(true);
       const data = await api.getTestCase(id);
       setTestCase(data);
-      setMetaName(data.name || '');
-      setMetaDesc(data.description || '');
-      setMetaUrl(data.start_url || '');
+      setMetaName(data.name || "");
+      setMetaDesc(data.description || "");
+      setMetaUrl(data.start_url || "");
       if (data.browser) {
         setReplayOptions((prev) => ({ ...prev, browser: data.browser }));
       }
-      api.getTestcaseFlakiness(id).then(setFlakinessStats).catch(() => {});
+      api
+        .getTestcaseFlakiness(id)
+        .then(setFlakinessStats)
+        .catch(() => {});
     } catch (err) {
-      showToast('Failed to load test case: ' + err.message, 'error');
+      showToast("Failed to load test case: " + err.message, "error");
     } finally {
       setLoading(false);
     }
@@ -113,9 +116,12 @@ export function TestCaseDetail() {
       setLoadingSuggestions(true);
       const res = await api.suggestAssertions(id);
       setSuggestedAssertions(res.suggestions || []);
-      showToast(`Generated ${res.suggestions?.length || 0} assertions!`, 'success');
+      showToast(
+        `Generated ${res.suggestions?.length || 0} assertions!`,
+        "success",
+      );
     } catch (err) {
-      showToast('Failed to suggest assertions: ' + err.message, 'error');
+      showToast("Failed to suggest assertions: " + err.message, "error");
     } finally {
       setLoadingSuggestions(false);
     }
@@ -125,10 +131,10 @@ export function TestCaseDetail() {
     try {
       await api.applySuggestedAssertions(id, [suggestion]);
       setSuggestedAssertions((prev) => prev.filter((s) => s !== suggestion));
-      showToast('Assertion attached!', 'success');
+      showToast("Assertion attached!", "success");
       loadDetails();
     } catch (err) {
-      showToast('Failed to attach: ' + err.message, 'error');
+      showToast("Failed to attach: " + err.message, "error");
     }
   };
 
@@ -137,9 +143,12 @@ export function TestCaseDetail() {
       setLoadingSelectorAudit(true);
       const res = await api.auditSelectors(id);
       setSelectorAudit(res);
-      showToast(`Audit: ${res.safe_count} resilient, ${res.fragile_count} fragile`, 'info');
+      showToast(
+        `Audit: ${res.safe_count} resilient, ${res.fragile_count} fragile`,
+        "info",
+      );
     } catch (err) {
-      showToast('Failed to audit: ' + err.message, 'error');
+      showToast("Failed to audit: " + err.message, "error");
     } finally {
       setLoadingSelectorAudit(false);
     }
@@ -147,28 +156,37 @@ export function TestCaseDetail() {
 
   const handleApplySelectorFix = async (item) => {
     try {
-      await api.applySelectorFix(id, item.step_number, item.recommended_locator);
-      showToast(`Step #${item.step_number} updated to resilient locator!`, 'success');
+      await api.applySelectorFix(
+        id,
+        item.step_number,
+        item.recommended_locator,
+      );
+      showToast(
+        `Step #${item.step_number} updated to resilient locator!`,
+        "success",
+      );
       loadDetails();
       const res = await api.auditSelectors(id);
       setSelectorAudit(res);
     } catch (err) {
-      showToast('Failed to apply selector: ' + err.message, 'error');
+      showToast("Failed to apply selector: " + err.message, "error");
     }
   };
 
   useEffect(() => {
-    if (activeTab === 'codegen' && !codegen && id) {
+    if (activeTab === "codegen" && !codegen && id) {
       api
         .getCodegen(id)
         .then((res) => setCodegen(res.code))
-        .catch((err) => showToast('Could not load code: ' + err.message, 'error'));
+        .catch((err) =>
+          showToast("Could not load code: " + err.message, "error"),
+        );
     }
   }, [activeTab, id, codegen]);
 
   const handleSaveMeta = async () => {
     if (!metaName.trim()) {
-      showToast('Test case name cannot be empty', 'error');
+      showToast("Test case name cannot be empty", "error");
       return;
     }
     try {
@@ -179,15 +197,15 @@ export function TestCaseDetail() {
       });
       setTestCase(updated);
       setIsEditingMeta(false);
-      showToast('Metadata updated successfully!', 'success');
+      showToast("Metadata updated successfully!", "success");
     } catch (err) {
-      showToast('Failed to update metadata: ' + err.message, 'error');
+      showToast("Failed to update metadata: " + err.message, "error");
     }
   };
 
   const handleRunTest = async () => {
     try {
-      showToast('Launching test execution...', 'info');
+      showToast("Launching test execution...", "info");
       const run = await api.startExecution({
         testcase_id: id,
         browser: replayOptions.browser,
@@ -197,11 +215,11 @@ export function TestCaseDetail() {
         visual_diff: replayOptions.visual_diff,
         diff_threshold: replayOptions.diff_threshold,
       });
-      showToast('Execution launched!', 'success');
+      showToast("Execution launched!", "success");
       setShowReplayModal(false);
       navigate(`/executions?id=${run.id}`);
     } catch (err) {
-      showToast('Execution failed: ' + err.message, 'error');
+      showToast("Execution failed: " + err.message, "error");
     }
   };
 
@@ -209,20 +227,25 @@ export function TestCaseDetail() {
     try {
       const updated = await api.reorderStep(id, stepNumber, direction);
       setTestCase(updated);
-      showToast(`Step moved ${direction}.`, 'info');
+      showToast(`Step moved ${direction}.`, "info");
     } catch (err) {
-      showToast('Failed to reorder: ' + err.message, 'error');
+      showToast("Failed to reorder: " + err.message, "error");
     }
   };
 
   const handleDeleteTestCase = async () => {
-    if (!confirm(`Are you sure you want to permanently delete "${testcase.name}"?`)) return;
+    if (
+      !confirm(
+        `Are you sure you want to permanently delete "${testcase.name}"?`,
+      )
+    )
+      return;
     try {
       await api.deleteTestCase(id);
-      showToast('Test case deleted.', 'success');
-      navigate('/testcases');
+      showToast("Test case deleted.", "success");
+      navigate("/testcases");
     } catch (err) {
-      showToast('Failed to delete: ' + err.message, 'error');
+      showToast("Failed to delete: " + err.message, "error");
     }
   };
 
@@ -233,15 +256,15 @@ export function TestCaseDetail() {
       setTestCase(updated);
       setIsAddingStep(false);
       setNewStepData({
-        action_type: 'click',
-        selector: '',
-        input_value: '',
-        url: '',
-        description_short: '',
+        action_type: "click",
+        selector: "",
+        input_value: "",
+        url: "",
+        description_short: "",
       });
-      showToast('Step added successfully!', 'success');
+      showToast("Step added successfully!", "success");
     } catch (err) {
-      showToast('Failed to add step: ' + err.message, 'error');
+      showToast("Failed to add step: " + err.message, "error");
     }
   };
 
@@ -250,9 +273,9 @@ export function TestCaseDetail() {
     try {
       const updated = await api.deleteStep(id, stepNumber);
       setTestCase(updated);
-      showToast(`Step ${stepNumber} deleted.`, 'success');
+      showToast(`Step ${stepNumber} deleted.`, "success");
     } catch (err) {
-      showToast('Failed to delete step: ' + err.message, 'error');
+      showToast("Failed to delete step: " + err.message, "error");
     }
   };
 
@@ -260,9 +283,9 @@ export function TestCaseDetail() {
     setEditingStep(step.number);
     setEditFormData({
       action_type: step.action_type,
-      selector: step.element?.selector || '',
-      input_value: step.input_value || '',
-      description_short: step.description_short || '',
+      selector: step.element?.selector || "",
+      input_value: step.input_value || "",
+      description_short: step.description_short || "",
     });
   };
 
@@ -277,9 +300,9 @@ export function TestCaseDetail() {
       const updated = await api.updateStep(id, stepNumber, payload);
       setTestCase(updated);
       setEditingStep(null);
-      showToast('Step updated successfully.', 'success');
+      showToast("Step updated successfully.", "success");
     } catch (err) {
-      showToast('Failed to update step: ' + err.message, 'error');
+      showToast("Failed to update step: " + err.message, "error");
     }
   };
 
@@ -295,11 +318,11 @@ export function TestCaseDetail() {
       };
       const updated = await api.addAssertion(id, payload);
       setTestCase(updated);
-      setNewAssertionTarget('');
-      setNewAssertionExpected('');
-      showToast('Custom assertion added!', 'success');
+      setNewAssertionTarget("");
+      setNewAssertionExpected("");
+      showToast("Custom assertion added!", "success");
     } catch (err) {
-      showToast('Failed to add assertion: ' + err.message, 'error');
+      showToast("Failed to add assertion: " + err.message, "error");
     }
   };
 
@@ -307,8 +330,8 @@ export function TestCaseDetail() {
     setEditingAssertionIndex(index);
     setEditAssertionData({
       kind: assn.kind,
-      target: assn.target || '',
-      expected: assn.expected || '',
+      target: assn.target || "",
+      expected: assn.expected || "",
       step_number: assn.step_number || 1,
       enforced: assn.enforced !== false,
     });
@@ -319,9 +342,9 @@ export function TestCaseDetail() {
       const updated = await api.updateAssertion(id, index, editAssertionData);
       setTestCase(updated);
       setEditingAssertionIndex(null);
-      showToast('Assertion updated successfully!', 'success');
+      showToast("Assertion updated successfully!", "success");
     } catch (err) {
-      showToast('Failed to update assertion: ' + err.message, 'error');
+      showToast("Failed to update assertion: " + err.message, "error");
     }
   };
 
@@ -329,22 +352,28 @@ export function TestCaseDetail() {
     try {
       const updated = await api.deleteAssertion(id, index);
       setTestCase(updated);
-      showToast('Assertion removed.', 'info');
+      showToast("Assertion removed.", "info");
     } catch (err) {
-      showToast('Failed to remove assertion: ' + err.message, 'error');
+      showToast("Failed to remove assertion: " + err.message, "error");
     }
   };
 
   if (loading) {
-    return <div className="p-12 text-center text-slate-500">Loading test case details...</div>;
+    return (
+      <div className="p-12 text-center text-slate-500">
+        Loading test case details...
+      </div>
+    );
   }
 
   if (!testcase) {
     return (
       <div className="p-12 text-center">
-        <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">Test Case Not Found</h3>
+        <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">
+          Test Case Not Found
+        </h3>
         <button
-          onClick={() => navigate('/testcases')}
+          onClick={() => navigate("/testcases")}
           className="mt-4 px-4 py-2 text-xs font-semibold rounded-lg bg-brand-600 text-white"
         >
           Return to Test Cases
@@ -359,7 +388,7 @@ export function TestCaseDetail() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-surface-borderDark">
         <div className="flex items-start gap-3 flex-1 min-w-0">
           <button
-            onClick={() => navigate('/testcases')}
+            onClick={() => navigate("/testcases")}
             className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition-colors mt-0.5"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -368,7 +397,9 @@ export function TestCaseDetail() {
           {isEditingMeta ? (
             <div className="space-y-2 flex-1 max-w-xl">
               <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Test Case Name</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">
+                  Test Case Name
+                </label>
                 <input
                   type="text"
                   value={metaName}
@@ -378,7 +409,9 @@ export function TestCaseDetail() {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase">Start URL</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">
+                    Start URL
+                  </label>
                   <input
                     type="text"
                     value={metaUrl}
@@ -387,7 +420,9 @@ export function TestCaseDetail() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase">Description</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">
+                    Description
+                  </label>
                   <input
                     type="text"
                     value={metaDesc}
@@ -425,20 +460,24 @@ export function TestCaseDetail() {
                 {flakinessStats && flakinessStats.total_runs > 0 && (
                   <span
                     className={`text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider flex items-center gap-1.5 ${
-                      flakinessStats.rating === 'stable'
-                        ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
-                        : flakinessStats.rating === 'low'
-                        ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
-                        : flakinessStats.rating === 'moderate'
-                        ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
-                        : flakinessStats.rating === 'failing'
-                        ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
-                        : 'bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 border border-rose-200 dark:border-rose-800'
+                      flakinessStats.rating === "stable"
+                        ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
+                        : flakinessStats.rating === "low"
+                          ? "bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 border border-blue-200 dark:border-blue-800"
+                          : flakinessStats.rating === "moderate"
+                            ? "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
+                            : flakinessStats.rating === "failing"
+                              ? "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border border-rose-300 dark:border-rose-800"
+                              : "bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 border border-rose-200 dark:border-rose-800"
                     }`}
                     title={`First-Attempt Pass: ${flakinessStats.first_attempt_pass_rate ?? 0}% | Final Pass: ${flakinessStats.final_pass_rate ?? 0}% | Flakiness: ${flakinessStats.flakiness_rate ?? flakinessStats.flakiness_score}% | Stability: ${flakinessStats.stability_score ?? 100}% | Failure Rate: ${flakinessStats.failure_rate ?? 0}%`}
                   >
                     <RefreshCw className="w-3 h-3" />
-                    <span>{flakinessStats.flakiness_rate ?? flakinessStats.flakiness_score}% Flaky ({flakinessStats.rating})</span>
+                    <span>
+                      {flakinessStats.flakiness_rate ??
+                        flakinessStats.flakiness_score}
+                      % Flaky ({flakinessStats.rating})
+                    </span>
                   </span>
                 )}
                 <button
@@ -450,7 +489,9 @@ export function TestCaseDetail() {
                 </button>
               </div>
               <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1">
-                <span className="font-mono truncate max-w-md">{testcase.start_url}</span>
+                <span className="font-mono truncate max-w-md">
+                  {testcase.start_url}
+                </span>
                 {testcase.description && (
                   <span className="text-slate-400 border-l border-slate-200 dark:border-slate-800 pl-3">
                     {testcase.description}
@@ -491,11 +532,11 @@ export function TestCaseDetail() {
       {/* Navigation Tabs */}
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-surface-borderDark pb-px">
         <button
-          onClick={() => setActiveTab('steps')}
+          onClick={() => setActiveTab("steps")}
           className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-2 ${
-            activeTab === 'steps'
-              ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+            activeTab === "steps"
+              ? "border-brand-500 text-brand-600 dark:text-brand-400"
+              : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
           }`}
         >
           <FileCode2 className="w-4 h-4" />
@@ -503,11 +544,11 @@ export function TestCaseDetail() {
         </button>
 
         <button
-          onClick={() => setActiveTab('assertions')}
+          onClick={() => setActiveTab("assertions")}
           className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-2 ${
-            activeTab === 'assertions'
-              ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+            activeTab === "assertions"
+              ? "border-brand-500 text-brand-600 dark:text-brand-400"
+              : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
           }`}
         >
           <ShieldAlert className="w-4 h-4" />
@@ -515,11 +556,11 @@ export function TestCaseDetail() {
         </button>
 
         <button
-          onClick={() => setActiveTab('codegen')}
+          onClick={() => setActiveTab("codegen")}
           className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-2 ${
-            activeTab === 'codegen'
-              ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+            activeTab === "codegen"
+              ? "border-brand-500 text-brand-600 dark:text-brand-400"
+              : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
           }`}
         >
           <Terminal className="w-4 h-4" />
@@ -528,7 +569,7 @@ export function TestCaseDetail() {
       </div>
 
       {/* Tab: Recorded Steps */}
-      {activeTab === 'steps' && (
+      {activeTab === "steps" && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500">
@@ -552,7 +593,7 @@ export function TestCaseDetail() {
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-50 dark:bg-brand-950/50 text-brand-600 dark:text-brand-400 hover:bg-brand-100 transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>{isAddingStep ? 'Cancel' : 'Add Step Manually'}</span>
+                <span>{isAddingStep ? "Cancel" : "Add Step Manually"}</span>
               </button>
             </div>
           </div>
@@ -563,7 +604,10 @@ export function TestCaseDetail() {
               <div className="flex items-center justify-between">
                 <span className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
                   <Crosshair className="w-4 h-4 text-brand-500" />
-                  <span>Selector Fragility Audit: {selectorAudit.safe_count} Resilient, {selectorAudit.fragile_count} Fragile</span>
+                  <span>
+                    Selector Fragility Audit: {selectorAudit.safe_count}{" "}
+                    Resilient, {selectorAudit.fragile_count} Fragile
+                  </span>
                 </span>
                 <button
                   onClick={() => setSelectorAudit(null)}
@@ -577,9 +621,15 @@ export function TestCaseDetail() {
                   {selectorAudit.selectors
                     .filter((s) => s.is_fragile && s.recommended_locator)
                     .map((item, i) => (
-                      <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-surface-cardDark border border-slate-200 dark:border-slate-800">
+                      <div
+                        key={i}
+                        className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-surface-cardDark border border-slate-200 dark:border-slate-800"
+                      >
                         <span className="font-mono text-slate-700 dark:text-slate-300">
-                          Step #{item.step_number}: Upgrade to <strong className="text-brand-600 dark:text-brand-400">{item.recommended_locator}</strong>
+                          Step #{item.step_number}: Upgrade to{" "}
+                          <strong className="text-brand-600 dark:text-brand-400">
+                            {item.recommended_locator}
+                          </strong>
                         </span>
                         <button
                           onClick={() => handleApplySelectorFix(item)}
@@ -610,7 +660,12 @@ export function TestCaseDetail() {
                   </label>
                   <select
                     value={newStepData.action_type}
-                    onChange={(e) => setNewStepData({ ...newStepData, action_type: e.target.value })}
+                    onChange={(e) =>
+                      setNewStepData({
+                        ...newStepData,
+                        action_type: e.target.value,
+                      })
+                    }
                     className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
                   >
                     <option value="click">click</option>
@@ -628,7 +683,12 @@ export function TestCaseDetail() {
                     type="text"
                     placeholder="e.g. #login-btn"
                     value={newStepData.selector}
-                    onChange={(e) => setNewStepData({ ...newStepData, selector: e.target.value })}
+                    onChange={(e) =>
+                      setNewStepData({
+                        ...newStepData,
+                        selector: e.target.value,
+                      })
+                    }
                     className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
                   />
                 </div>
@@ -640,7 +700,12 @@ export function TestCaseDetail() {
                     type="text"
                     placeholder="e.g. user@example.com"
                     value={newStepData.input_value}
-                    onChange={(e) => setNewStepData({ ...newStepData, input_value: e.target.value })}
+                    onChange={(e) =>
+                      setNewStepData({
+                        ...newStepData,
+                        input_value: e.target.value,
+                      })
+                    }
                     className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
                   />
                 </div>
@@ -653,7 +718,10 @@ export function TestCaseDetail() {
                     placeholder="e.g. Click submit"
                     value={newStepData.description_short}
                     onChange={(e) =>
-                      setNewStepData({ ...newStepData, description_short: e.target.value })
+                      setNewStepData({
+                        ...newStepData,
+                        description_short: e.target.value,
+                      })
                     }
                     className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
                   />
@@ -673,7 +741,7 @@ export function TestCaseDetail() {
           {/* Steps List */}
           <div className="space-y-3">
             {testcase.steps?.map((step) => {
-              const shotName = step.screenshot?.replace(/^.*[\\/]/, '');
+              const shotName = step.screenshot?.replace(/^.*[\\/]/, "");
               const isEditing = editingStep === step.number;
 
               return (
@@ -703,7 +771,10 @@ export function TestCaseDetail() {
                             placeholder="Selector"
                             value={editFormData.selector}
                             onChange={(e) =>
-                              setEditFormData({ ...editFormData, selector: e.target.value })
+                              setEditFormData({
+                                ...editFormData,
+                                selector: e.target.value,
+                              })
                             }
                             className="px-2.5 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                           />
@@ -712,7 +783,10 @@ export function TestCaseDetail() {
                             placeholder="Description"
                             value={editFormData.description_short}
                             onChange={(e) =>
-                              setEditFormData({ ...editFormData, description_short: e.target.value })
+                              setEditFormData({
+                                ...editFormData,
+                                description_short: e.target.value,
+                              })
                             }
                             className="px-2.5 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                           />
@@ -721,7 +795,10 @@ export function TestCaseDetail() {
                             placeholder="Input Value"
                             value={editFormData.input_value}
                             onChange={(e) =>
-                              setEditFormData({ ...editFormData, input_value: e.target.value })
+                              setEditFormData({
+                                ...editFormData,
+                                input_value: e.target.value,
+                              })
                             }
                             className="px-2.5 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                           />
@@ -761,7 +838,9 @@ export function TestCaseDetail() {
                           {step.url && (
                             <div className="flex items-center gap-1.5 font-mono truncate">
                               <span className="text-slate-400">url:</span>
-                              <span className="text-slate-700 dark:text-slate-300">{step.url}</span>
+                              <span className="text-slate-700 dark:text-slate-300">
+                                {step.url}
+                              </span>
                             </div>
                           )}
                         </div>
@@ -774,7 +853,9 @@ export function TestCaseDetail() {
                     {shotName && (
                       <button
                         onClick={() =>
-                          setSelectedScreenshot(`/api/testcases/${id}/screenshots/${shotName}`)
+                          setSelectedScreenshot(
+                            `/api/testcases/${id}/screenshots/${shotName}`,
+                          )
                         }
                         className="group/img relative w-20 h-12 rounded-lg border border-slate-200 dark:border-slate-800 overflow-hidden bg-slate-100 dark:bg-slate-900 shrink-0"
                         title="Click to view full screenshot"
@@ -793,7 +874,7 @@ export function TestCaseDetail() {
 
                     <div className="flex items-center gap-1">
                       <button
-                        onClick={() => handleReorder(step.number, 'up')}
+                        onClick={() => handleReorder(step.number, "up")}
                         disabled={step.number === 1}
                         className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-20"
                         title="Move up"
@@ -801,7 +882,7 @@ export function TestCaseDetail() {
                         <ChevronUp className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleReorder(step.number, 'down')}
+                        onClick={() => handleReorder(step.number, "down")}
                         disabled={step.number === testcase.steps.length}
                         className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-20"
                         title="Move down"
@@ -832,7 +913,7 @@ export function TestCaseDetail() {
       )}
 
       {/* Tab: Assertions */}
-      {activeTab === 'assertions' && (
+      {activeTab === "assertions" && (
         <div className="space-y-6">
           {/* AI Suggest Assertions Header */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 rounded-2xl border border-brand-200 dark:border-brand-800 bg-brand-50/40 dark:bg-brand-950/20 gap-3">
@@ -842,7 +923,8 @@ export function TestCaseDetail() {
                 <span>AI Automated Assertion Generation</span>
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Automatically synthesize URL, element visibility, and HTTP status verification assertions.
+                Automatically synthesize URL, element visibility, and HTTP
+                status verification assertions.
               </p>
             </div>
             <button
@@ -881,11 +963,19 @@ export function TestCaseDetail() {
                   >
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-brand-600 dark:text-brand-400">Step #{s.step_number}</span>
-                        <span className="font-semibold text-slate-800 dark:text-slate-200">{s.assertion_type}</span>
-                        <span className="text-[10px] text-slate-400">({Math.round(s.confidence * 100)}% conf)</span>
+                        <span className="font-mono font-bold text-brand-600 dark:text-brand-400">
+                          Step #{s.step_number}
+                        </span>
+                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                          {s.assertion_type}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          ({Math.round(s.confidence * 100)}% conf)
+                        </span>
                       </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">{s.rationale}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {s.rationale}
+                      </p>
                     </div>
                     <button
                       onClick={() => handleApplySingleSuggestion(s)}
@@ -980,7 +1070,8 @@ export function TestCaseDetail() {
           <div className="space-y-3">
             {testcase.custom_assertions?.length === 0 ? (
               <div className="p-8 text-center text-slate-500 text-xs border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
-                No custom assertions attached yet. Add assertions above to enforce validation rules during replays.
+                No custom assertions attached yet. Add assertions above to
+                enforce validation rules during replays.
               </div>
             ) : (
               testcase.custom_assertions?.map((assn, idx) => {
@@ -1018,15 +1109,22 @@ export function TestCaseDetail() {
                             <select
                               value={editAssertionData.kind}
                               onChange={(e) =>
-                                setEditAssertionData({ ...editAssertionData, kind: e.target.value })
+                                setEditAssertionData({
+                                  ...editAssertionData,
+                                  kind: e.target.value,
+                                })
                               }
                               className="w-full px-2.5 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                             >
                               <option value="visible">Element Visible</option>
-                              <option value="text">Element Contains Text</option>
+                              <option value="text">
+                                Element Contains Text
+                              </option>
                               <option value="url">URL Path Matches</option>
                               <option value="status">HTTP Status Code</option>
-                              <option value="no_page_error">No Console Errors</option>
+                              <option value="no_page_error">
+                                No Console Errors
+                              </option>
                             </select>
                           </div>
                           <div>
@@ -1037,7 +1135,10 @@ export function TestCaseDetail() {
                               type="text"
                               value={editAssertionData.target}
                               onChange={(e) =>
-                                setEditAssertionData({ ...editAssertionData, target: e.target.value })
+                                setEditAssertionData({
+                                  ...editAssertionData,
+                                  target: e.target.value,
+                                })
                               }
                               className="w-full px-2.5 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                             />
@@ -1050,7 +1151,10 @@ export function TestCaseDetail() {
                               type="text"
                               value={editAssertionData.expected}
                               onChange={(e) =>
-                                setEditAssertionData({ ...editAssertionData, expected: e.target.value })
+                                setEditAssertionData({
+                                  ...editAssertionData,
+                                  expected: e.target.value,
+                                })
                               }
                               className="w-full px-2.5 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                             />
@@ -1081,11 +1185,17 @@ export function TestCaseDetail() {
                             {assn.kind}
                           </span>
                           <span className="text-xs text-slate-700 dark:text-slate-300 font-medium">
-                            Target: <span className="font-mono text-slate-500">{assn.target || 'None'}</span>
+                            Target:{" "}
+                            <span className="font-mono text-slate-500">
+                              {assn.target || "None"}
+                            </span>
                           </span>
                           {assn.expected && (
                             <span className="text-xs text-slate-700 dark:text-slate-300">
-                              Expected: <span className="font-bold text-slate-900 dark:text-white">"{assn.expected}"</span>
+                              Expected:{" "}
+                              <span className="font-bold text-slate-900 dark:text-white">
+                                "{assn.expected}"
+                              </span>
                             </span>
                           )}
                         </div>
@@ -1117,16 +1227,16 @@ export function TestCaseDetail() {
       )}
 
       {/* Tab: Pytest Codegen */}
-      {activeTab === 'codegen' && (
+      {activeTab === "codegen" && (
         <div className="rounded-2xl border border-slate-200 dark:border-surface-borderDark bg-slate-950 text-slate-200 overflow-hidden shadow-xl">
           <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
             <span className="text-xs font-mono font-semibold text-slate-400">
-              test_{id.replace(/[^a-zA-Z0-9_]/g, '_')}.py
+              test_{id.replace(/[^a-zA-Z0-9_]/g, "_")}.py
             </span>
             <button
               onClick={() => {
                 navigator.clipboard.writeText(codegen);
-                showToast('Code copied to clipboard!', 'success');
+                showToast("Code copied to clipboard!", "success");
               }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
             >
@@ -1135,7 +1245,7 @@ export function TestCaseDetail() {
             </button>
           </div>
           <pre className="p-5 font-mono text-xs leading-relaxed overflow-x-auto selection:bg-brand-600">
-            {codegen || '# Generating Pytest Playwright code...'}
+            {codegen || "# Generating Pytest Playwright code..."}
           </pre>
         </div>
       )}
@@ -1164,12 +1274,18 @@ export function TestCaseDetail() {
                 </label>
                 <select
                   value={replayOptions.browser}
-                  onChange={(e) => setReplayOptions({ ...replayOptions, browser: e.target.value })}
+                  onChange={(e) =>
+                    setReplayOptions({
+                      ...replayOptions,
+                      browser: e.target.value,
+                    })
+                  }
                   className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900"
                 >
                   <option value="chromium">Chromium</option>
                   <option value="firefox">Firefox</option>
                   <option value="webkit">WebKit (Safari)</option>
+                  <option value="msedge">Microsoft Edge</option>
                 </select>
               </div>
 
@@ -1181,7 +1297,9 @@ export function TestCaseDetail() {
                     <span>Flaky Retry Attempts</span>
                   </span>
                   <span className="font-mono text-amber-700 dark:text-amber-400 font-bold">
-                    {replayOptions.retries === 0 ? '0 (None)' : `${replayOptions.retries} Retries`}
+                    {replayOptions.retries === 0
+                      ? "0 (None)"
+                      : `${replayOptions.retries} Retries`}
                   </span>
                 </div>
                 <input
@@ -1191,14 +1309,19 @@ export function TestCaseDetail() {
                   step="1"
                   value={replayOptions.retries ?? 2}
                   onChange={(e) =>
-                    setReplayOptions({ ...replayOptions, retries: parseInt(e.target.value, 10) })
+                    setReplayOptions({
+                      ...replayOptions,
+                      retries: parseInt(e.target.value, 10),
+                    })
                   }
                   className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
                 />
                 <div className="flex justify-between text-[10px] text-slate-400">
                   <span>0 (None)</span>
                   <span>1</span>
-                  <span className="text-amber-600 dark:text-amber-400 font-semibold">2 (Default)</span>
+                  <span className="text-amber-600 dark:text-amber-400 font-semibold">
+                    2 (Default)
+                  </span>
                   <span>3 (Max)</span>
                 </div>
               </div>
@@ -1210,7 +1333,12 @@ export function TestCaseDetail() {
                 <input
                   type="checkbox"
                   checked={replayOptions.headed}
-                  onChange={(e) => setReplayOptions({ ...replayOptions, headed: e.target.checked })}
+                  onChange={(e) =>
+                    setReplayOptions({
+                      ...replayOptions,
+                      headed: e.target.checked,
+                    })
+                  }
                   className="rounded text-brand-600 focus:ring-brand-500"
                 />
               </div>
@@ -1222,7 +1350,12 @@ export function TestCaseDetail() {
                 <input
                   type="checkbox"
                   checked={replayOptions.heal}
-                  onChange={(e) => setReplayOptions({ ...replayOptions, heal: e.target.checked })}
+                  onChange={(e) =>
+                    setReplayOptions({
+                      ...replayOptions,
+                      heal: e.target.checked,
+                    })
+                  }
                   className="rounded text-brand-600 focus:ring-brand-500"
                 />
               </div>
@@ -1235,7 +1368,10 @@ export function TestCaseDetail() {
                   type="checkbox"
                   checked={replayOptions.assertions}
                   onChange={(e) =>
-                    setReplayOptions({ ...replayOptions, assertions: e.target.checked })
+                    setReplayOptions({
+                      ...replayOptions,
+                      assertions: e.target.checked,
+                    })
                   }
                   className="rounded text-brand-600 focus:ring-brand-500"
                 />
@@ -1249,7 +1385,10 @@ export function TestCaseDetail() {
                   type="checkbox"
                   checked={replayOptions.visual_diff}
                   onChange={(e) =>
-                    setReplayOptions({ ...replayOptions, visual_diff: e.target.checked })
+                    setReplayOptions({
+                      ...replayOptions,
+                      visual_diff: e.target.checked,
+                    })
                   }
                   className="rounded text-brand-600 focus:ring-brand-500"
                 />

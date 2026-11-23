@@ -1,15 +1,15 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { X, FileCode2, Globe, Laptop, Plus, Loader2 } from 'lucide-react';
-import { api } from '../../services/api';
-import { useToast } from '../../context/ToastContext';
-import { useProject } from '../../context/ProjectContext';
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { X, FileCode2, Globe, Laptop, Plus, Loader2 } from "lucide-react";
+import { api } from "../../services/api";
+import { useToast } from "../../context/ToastContext";
+import { useProject } from "../../context/ProjectContext";
 
 export function NewCaseModal({ isOpen, onClose, onCreated }) {
-  const [name, setName] = useState('');
-  const [url, setUrl] = useState('');
-  const [browser, setBrowser] = useState('chromium');
-  const [description, setDescription] = useState('');
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [browser, setBrowser] = useState("chromium");
+  const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
   const { currentProject } = useProject();
   const { showToast } = useToast();
@@ -20,11 +20,11 @@ export function NewCaseModal({ isOpen, onClose, onCreated }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!name.trim()) {
-      showToast('Please provide a test case name.', 'error');
+      showToast("Please provide a test case name.", "error");
       return;
     }
     if (!url.trim()) {
-      showToast('Please provide a starting application URL.', 'error');
+      showToast("Please provide a starting application URL.", "error");
       return;
     }
 
@@ -35,14 +35,14 @@ export function NewCaseModal({ isOpen, onClose, onCreated }) {
         start_url: url.trim(),
         browser,
         description: description.trim(),
-        project_id: currentProject?.id || 'default_project',
+        project_id: currentProject?.id || "default_project",
       });
-      showToast('Test case created successfully!', 'success');
+      showToast("Test case created successfully!", "success");
       onClose();
       if (onCreated) onCreated(tc);
       navigate(`/testcases/${tc.id}`);
     } catch (err) {
-      showToast(err.message || 'Failed to create test case.', 'error');
+      showToast(err.message || "Failed to create test case.", "error");
     } finally {
       setLoading(false);
     }
@@ -60,7 +60,9 @@ export function NewCaseModal({ isOpen, onClose, onCreated }) {
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
                 Create New Test Case
               </h3>
-              <p className="text-xs text-slate-500">Define a workflow starting point</p>
+              <p className="text-xs text-slate-500">
+                Define a workflow starting point
+              </p>
             </div>
           </div>
           <button
@@ -115,6 +117,7 @@ export function NewCaseModal({ isOpen, onClose, onCreated }) {
                 <option value="chromium">Chromium</option>
                 <option value="firefox">Firefox</option>
                 <option value="webkit">WebKit (Safari)</option>
+                <option value="msedge">Microsoft Edge</option>
               </select>
             </div>
 
@@ -123,7 +126,7 @@ export function NewCaseModal({ isOpen, onClose, onCreated }) {
                 Workspace
               </label>
               <div className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 truncate">
-                {currentProject?.name || 'Tracecase'}
+                {currentProject?.name || "Tracecase"}
               </div>
             </div>
           </div>

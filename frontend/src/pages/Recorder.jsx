@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Video,
   Globe,
@@ -16,18 +16,18 @@ import {
   Layers,
   Bug,
   Radio,
-} from 'lucide-react';
-import { api } from '../services/api';
-import { useWebSocket } from '../context/WebSocketContext';
-import { useToast } from '../context/ToastContext';
-import { useProject } from '../context/ProjectContext';
+} from "lucide-react";
+import { api } from "../services/api";
+import { useWebSocket } from "../context/WebSocketContext";
+import { useToast } from "../context/ToastContext";
+import { useProject } from "../context/ProjectContext";
 
 export function Recorder() {
-  const [url, setUrl] = useState('');
-  const [name, setName] = useState('');
-  const [browser, setBrowser] = useState('chromium');
+  const [url, setUrl] = useState("");
+  const [name, setName] = useState("");
+  const [browser, setBrowser] = useState("chromium");
   const [headless, setHeadless] = useState(false);
-  const [status, setStatus] = useState({ status: 'idle' });
+  const [status, setStatus] = useState({ status: "idle" });
   const [liveSteps, setLiveSteps] = useState([]);
   const [loading, setLoading] = useState(false);
   const [pauseLoading, setPauseLoading] = useState(false);
@@ -36,7 +36,9 @@ export function Recorder() {
   const { subscribe } = useWebSocket();
   const { showToast } = useToast();
   const { projects, currentProject } = useProject();
-  const [selectedProjectId, setSelectedProjectId] = useState(currentProject?.id || 'default_project');
+  const [selectedProjectId, setSelectedProjectId] = useState(
+    currentProject?.id || "default_project",
+  );
   const navigate = useNavigate();
   const timerRef = useRef(null);
 
@@ -69,7 +71,7 @@ export function Recorder() {
 
   // Timer loop when actively recording
   useEffect(() => {
-    if (status.status === 'recording') {
+    if (status.status === "recording") {
       timerRef.current = setInterval(() => {
         setElapsedSeconds((prev) => prev + 1);
       }, 1000);
@@ -82,10 +84,10 @@ export function Recorder() {
   }, [status.status]);
 
   useEffect(() => {
-    const unsubRecorder = subscribe('recorder', (event) => {
+    const unsubRecorder = subscribe("recorder", (event) => {
       fetchStatus();
     });
-    const unsubStep = subscribe('recording_step', (event) => {
+    const unsubStep = subscribe("recording_step", (event) => {
       if (event?.data?.step) {
         setLiveSteps((prev) => {
           const exists = prev.some((s) => s.number === event.data.step.number);
@@ -104,7 +106,7 @@ export function Recorder() {
   const handleStart = async (e) => {
     e.preventDefault();
     if (!url.trim()) {
-      showToast('Please enter a target URL', 'error');
+      showToast("Please enter a target URL", "error");
       return;
     }
     try {
@@ -117,12 +119,12 @@ export function Recorder() {
         browser,
         headless,
         timeout: 30000,
-        project_id: selectedProjectId || 'default_project',
+        project_id: selectedProjectId || "default_project",
       });
       setStatus(session);
-      showToast('Recording session launched!', 'success');
+      showToast("Recording session launched!", "success");
     } catch (err) {
-      showToast('Failed to start recorder: ' + err.message, 'error');
+      showToast("Failed to start recorder: " + err.message, "error");
     } finally {
       setLoading(false);
     }
@@ -133,9 +135,9 @@ export function Recorder() {
       setPauseLoading(true);
       const res = await api.pauseRecording();
       setStatus(res);
-      showToast('Recording paused', 'info');
+      showToast("Recording paused", "info");
     } catch (err) {
-      showToast('Failed to pause recording: ' + err.message, 'error');
+      showToast("Failed to pause recording: " + err.message, "error");
     } finally {
       setPauseLoading(false);
     }
@@ -146,9 +148,9 @@ export function Recorder() {
       setPauseLoading(true);
       const res = await api.resumeRecording();
       setStatus(res);
-      showToast('Recording resumed', 'success');
+      showToast("Recording resumed", "success");
     } catch (err) {
-      showToast('Failed to resume recording: ' + err.message, 'error');
+      showToast("Failed to resume recording: " + err.message, "error");
     } finally {
       setPauseLoading(false);
     }
@@ -157,28 +159,28 @@ export function Recorder() {
   const handleStop = async () => {
     try {
       setLoading(true);
-      showToast('Finalizing recording and saving test case...', 'info');
+      showToast("Finalizing recording and saving test case...", "info");
       const res = await api.stopRecording();
       setStatus(res);
-      showToast('Recording finalized and test case generated!', 'success');
+      showToast("Recording finalized and test case generated!", "success");
       if (res.testcase_id) {
         navigate(`/testcases/${res.testcase_id}`);
       }
     } catch (err) {
-      showToast('Failed to stop recording: ' + err.message, 'error');
+      showToast("Failed to stop recording: " + err.message, "error");
     } finally {
       setLoading(false);
     }
   };
 
-  const isRecording = status.status === 'recording';
-  const isPaused = status.status === 'paused';
+  const isRecording = status.status === "recording";
+  const isPaused = status.status === "paused";
   const isActive = isRecording || isPaused;
 
   const formatTimer = (secs) => {
     const mins = Math.floor(secs / 60);
     const remainderSecs = secs % 60;
-    return `${mins.toString().padStart(2, '0')}:${remainderSecs.toString().padStart(2, '0')}`;
+    return `${mins.toString().padStart(2, "0")}:${remainderSecs.toString().padStart(2, "0")}`;
   };
 
   return (
@@ -190,7 +192,8 @@ export function Recorder() {
             <span>Browser Recorder Workspace</span>
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Launch a real browser instance, interact with elements, and record reproducible test cases.
+            Launch a real browser instance, interact with elements, and record
+            reproducible test cases.
           </p>
         </div>
 
@@ -203,13 +206,13 @@ export function Recorder() {
               )}
               <span
                 className={`relative inline-flex rounded-full h-3 w-3 ${
-                  isRecording ? 'bg-rose-500' : 'bg-amber-500'
+                  isRecording ? "bg-rose-500" : "bg-amber-500"
                 }`}
               ></span>
             </span>
             <div className="text-xs">
               <span className="font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                {isRecording ? 'Recording Live' : 'Paused'}
+                {isRecording ? "Recording Live" : "Paused"}
               </span>
               <span className="text-slate-400 ml-2 font-mono">
                 {formatTimer(elapsedSeconds)}
@@ -238,7 +241,8 @@ export function Recorder() {
             <form onSubmit={handleStart} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                  Target Application URL <span className="text-rose-500">*</span>
+                  Target Application URL{" "}
+                  <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <Globe className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
@@ -302,6 +306,7 @@ export function Recorder() {
                     <option value="chromium">Chromium</option>
                     <option value="firefox">Firefox</option>
                     <option value="webkit">WebKit (Safari)</option>
+                    <option value="msedge">Microsoft Edge</option>
                   </select>
                 </div>
 
@@ -310,8 +315,8 @@ export function Recorder() {
                     Window Mode
                   </label>
                   <select
-                    value={headless ? 'headless' : 'headed'}
-                    onChange={(e) => setHeadless(e.target.value === 'headless')}
+                    value={headless ? "headless" : "headed"}
+                    onChange={(e) => setHeadless(e.target.value === "headless")}
                     disabled={isActive}
                     className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50"
                   >
@@ -396,7 +401,7 @@ export function Recorder() {
                 <span>Captured Action Stream</span>
               </h3>
               <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold">
-                {liveSteps.length} {liveSteps.length === 1 ? 'Step' : 'Steps'}
+                {liveSteps.length} {liveSteps.length === 1 ? "Step" : "Steps"}
               </span>
             </div>
 
@@ -405,11 +410,12 @@ export function Recorder() {
                 <Activity className="w-8 h-8 text-slate-400 mx-auto mb-2 opacity-50" />
                 <p className="text-sm font-medium text-slate-600 dark:text-slate-400">
                   {isActive
-                    ? 'Browser open. Interact with the page to record actions.'
-                    : 'Start a session to stream user actions in real-time.'}
+                    ? "Browser open. Interact with the page to record actions."
+                    : "Start a session to stream user actions in real-time."}
                 </p>
                 <p className="text-xs text-slate-400 mt-1">
-                  Clicks, inputs, navigations, and hover events are captured automatically.
+                  Clicks, inputs, navigations, and hover events are captured
+                  automatically.
                 </p>
               </div>
             ) : (
@@ -425,7 +431,7 @@ export function Recorder() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="px-2 py-0.5 text-[10px] font-bold rounded uppercase bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                          {step.action_type || 'action'}
+                          {step.action_type || "action"}
                         </span>
                         <span className="text-xs font-medium text-slate-900 dark:text-slate-100 truncate">
                           {step.description_short || step.action_type}
@@ -438,7 +444,10 @@ export function Recorder() {
                       )}
                       {step.input_value && (
                         <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
-                          Value: <span className="font-mono bg-white dark:bg-slate-800 px-1 py-0.5 rounded border border-slate-200 dark:border-slate-700">{step.input_value}</span>
+                          Value:{" "}
+                          <span className="font-mono bg-white dark:bg-slate-800 px-1 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+                            {step.input_value}
+                          </span>
                         </p>
                       )}
                       {step.url && (
@@ -469,16 +478,16 @@ export function Recorder() {
                 </span>
                 <span
                   className={`px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${
-                    status.status === 'recording'
-                      ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-500 border border-rose-200 dark:border-rose-800 animate-pulse'
-                      : status.status === 'paused'
-                      ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-500 border border-amber-200 dark:border-amber-800'
-                      : status.status === 'completed'
-                      ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-500 border border-emerald-200 dark:border-emerald-800'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                    status.status === "recording"
+                      ? "bg-rose-50 dark:bg-rose-950/60 text-rose-500 border border-rose-200 dark:border-rose-800 animate-pulse"
+                      : status.status === "paused"
+                        ? "bg-amber-50 dark:bg-amber-950/60 text-amber-500 border border-amber-200 dark:border-amber-800"
+                        : status.status === "completed"
+                          ? "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-500 border border-emerald-200 dark:border-emerald-800"
+                          : "bg-slate-100 dark:bg-slate-800 text-slate-400"
                   }`}
                 >
-                  {status.status || 'idle'}
+                  {status.status || "idle"}
                 </span>
               </div>
 
@@ -507,7 +516,9 @@ export function Recorder() {
                   <Bug className="w-4 h-4 text-rose-500" />
                   Console Errors
                 </span>
-                <span className={`text-xs font-semibold ${status.console_errors_count ? 'text-rose-500' : 'text-slate-400'}`}>
+                <span
+                  className={`text-xs font-semibold ${status.console_errors_count ? "text-rose-500" : "text-slate-400"}`}
+                >
                   {status.console_errors_count || 0}
                 </span>
               </div>
@@ -525,11 +536,12 @@ export function Recorder() {
 
             {isActive && (
               <div className="mt-4 p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs leading-relaxed">
-                Interact with the browser window to record actions. When done, click <strong>Stop & Save</strong> to generate the test case.
+                Interact with the browser window to record actions. When done,
+                click <strong>Stop & Save</strong> to generate the test case.
               </div>
             )}
 
-            {status.status === 'completed' && status.testcase_id && (
+            {status.status === "completed" && status.testcase_id && (
               <button
                 onClick={() => navigate(`/testcases/${status.testcase_id}`)}
                 className="mt-4 flex items-center justify-center gap-2 w-full py-2.5 text-xs font-bold rounded-xl bg-brand-600 hover:bg-brand-500 text-white shadow-md shadow-brand-500/20 transition-all"

@@ -4,7 +4,7 @@ from typing import Literal
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 
-BrowserType = Literal["chromium", "firefox", "webkit"]
+BrowserType = Literal["chromium", "firefox", "webkit", "msedge"]
 
 
 class BrowserManager:
@@ -25,7 +25,7 @@ class BrowserManager:
         Initialize browser manager.
 
         Args:
-            browser_type: Browser to use (chromium, firefox, webkit)
+            browser_type: Browser to use (chromium, firefox, webkit, msedge)
             headless: Run browser without GUI
             viewport: Browser window size (width, height)
             timeout: Default timeout for operations in ms
@@ -75,25 +75,32 @@ class BrowserManager:
         Returns:
             The created Page object
         """
+        import sys
+
         self._playwright = await async_playwright().start()
 
-        # Get browser launcher based on type
-        launcher = getattr(self._playwright, self.browser_type)
+        if self.browser_type == "msedge":
+            self._browser = await self._playwright.chromium.launch(
+                headless=self.headless,
+                channel="msedge",
+            )
+        elif self.browser_type == "firefox":
+            # Playwright's Firefox Nightly.app hits macOS WindowServer/Seatbelt
+            # sandbox crashes when launched headed on macOS 26/27; run headless on darwin.
+            use_headless = True if sys.platform == "darwin" else self.headless
+            self._browser = await self._playwright.firefox.launch(
+                headless=use_headless,
+            )
+        else:
+            launcher = getattr(self._playwright, self.browser_type)
+            self._browser = await launcher.launch(
+                headless=self.headless,
+            )
 
-        # Launch browser
-        self._browser = await launcher.launch(
-            headless=self.headless,
-        )
-
-        # Create context with viewport
         self._context = await self._browser.new_context(
             viewport={"width": self.viewport["width"], "height": self.viewport["height"]},
         )
-
-        # Set default timeout
         self._context.set_default_timeout(self.timeout)
-
-        # Create page
         self._page = await self._context.new_page()
 
         return self._page

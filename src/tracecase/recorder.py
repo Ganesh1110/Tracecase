@@ -64,7 +64,7 @@ class Recorder:
             output_dir: Directory to save output files
             start_url: URL to open when starting
             name: Name for the test case
-            browser_type: Browser to use (chromium, firefox, webkit)
+            browser_type: Browser to use (chromium, firefox, webkit, msedge)
             headless: Run browser without GUI
             viewport: Browser window size (width, height)
             timeout: Default timeout for operations in ms
