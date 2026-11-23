@@ -1,0 +1,2 @@
+PYTHONPATH: /tmp/tc_fault_injection/src
+tracecase.__file__: /tmp/tc_fault_injection/src/tracecase/__init__.py

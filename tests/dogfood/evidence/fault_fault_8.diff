@@ -1,0 +1,12 @@
+--- a/tracecase/cli.py
++++ b/tracecase/cli.py
+@@ -1002,6 +1002,9 @@
+     wiped_any = False
+ 
+     if db or all_artifacts:
++        rec_dir = Path('./recordings')
++        if rec_dir.exists():
++            shutil.rmtree(rec_dir)
+         if reset_db(target_db):
+             console.print(f"[green]✓[/green] Wiped local corpus database: {target_db}")
+             wiped_any = True

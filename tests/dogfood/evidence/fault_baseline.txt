@@ -1,0 +1,4 @@
+BASELINE VERIFIED CLEAN:
+- Exit Status: 0 failing tests
+- Test Counts: 132 passed, 15 xfailed in 134.38s (0:02:14)
+- All 15 xfailed tests strictly match known APP BUGs (BUG-001 through BUG-010).

@@ -1,0 +1,11 @@
+--- a/tracecase/cli.py
++++ b/tracecase/cli.py
+@@ -505,7 +505,7 @@
+         path = write_replay_result(result, output)
+         console.print(f"[dim]Replay report: {path}[/dim]")
+ 
+-    raise typer.Exit(result.exit_code)
++    raise typer.Exit(0)  # FAULT-1: always exit 0
+ 
+ 
+ def _print_replay_summary(result: ReplayResult) -> None:

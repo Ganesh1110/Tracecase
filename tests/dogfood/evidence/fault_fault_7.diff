@@ -1,0 +1,11 @@
+--- a/tracecase/ai/analyst.py
++++ b/tracecase/ai/analyst.py
+@@ -98,7 +98,7 @@
+     return AnalysisResult(
+         testcase_id=testcase.id,
+         testcase_name=testcase.name,
+-        provider=provider.name,
++        provider='openai' if provider.name == 'null' else provider.name,  # FAULT-7
+         model=provider.model,
+         summary=summary,
+         annotations=annotations,

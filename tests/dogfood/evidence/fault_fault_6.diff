@@ -1,0 +1,11 @@
+--- a/tracecase/replay/har.py
++++ b/tracecase/replay/har.py
+@@ -67,7 +67,7 @@
+             "version": "1.2",
+             "creator": {"name": "tracecase", "version": __version__},
+             "pages": [],
+-            "entries": [_har_entry(request) for request in testcase.network_requests],
++            "entries": [],  # FAULT-6: empty entries
+         }
+     }
+ 

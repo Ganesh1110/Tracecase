@@ -1,0 +1,11 @@
+--- a/tracecase/index/search.py
++++ b/tracecase/index/search.py
+@@ -31,7 +31,7 @@
+             bm25(steps_fts) as rank
+         FROM steps_fts
+         JOIN testcases t ON t.id = steps_fts.testcase_id
+-        WHERE steps_fts MATCH ?
++        WHERE 1=1 OR steps_fts MATCH ?  -- FAULT-5: match everything
+         ORDER BY rank
+         LIMIT ?
+         """,

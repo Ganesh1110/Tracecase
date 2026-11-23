@@ -1,0 +1,11 @@
+--- a/tracecase/codegen/pytest_exporter.py
++++ b/tracecase/codegen/pytest_exporter.py
+@@ -90,7 +90,7 @@
+ 
+     body_lines.append(f'await page.goto("{testcase.start_url}")')
+ 
+-    for step in testcase.steps:
++    for step in testcase.steps[:-1]:  # FAULT-3: drop last step
+         body_lines.append(f"# Step {step.number}: {step.description_short}")
+         body_lines.extend(_format_step(step))
+         for assertion_line in assertions_by_step.get(step.number, []):

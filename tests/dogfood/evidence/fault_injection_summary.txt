@@ -1,0 +1,48 @@
+================================================================================
+STRICT 12-FAULT INJECTION BENCHMARK (WHOLE CLI SUITE PER FAULT)
+================================================================================
+================================================================================
+FAULT INJECTION BASELINE (NO FAULT INJECTED IN THROWAWAY SRC)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Running full test suite on clean throwaway copy...
+
+Baseline failing tests: 0
+
+✓ BASELINE VERIFIED CLEAN: 0 failing tests!
+
+[Injecting FAULT-1] Replay always exits 0...
+  Result: CAUGHT (2 failing test(s) detected)
+    - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c4_exit_codes
+    - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c7_timeout_sensitivity
+
+[Injecting FAULT-2] Healing returns first matching element...
+  Result: CAUGHT (1 failing test(s) detected)
+    - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c10_healing_tiers_and_false_positive_audit
+
+[Injecting FAULT-3] Codegen drops last step...
+  Result: CAUGHT (1 failing test(s) detected)
+    - tests/dogfood/cli_tests/test_cli_f_codegen.py::test_f1_default_codegen
+
+[Injecting FAULT-4] Mutate ignores --limit...
+  Result: CAUGHT (1 failing test(s) detected)
+    - tests/dogfood/cli_tests/test_cli_g_mutate.py::test_g6_limit_flag
+
+[Injecting FAULT-5] Search ignores query...
+  Result: CAUGHT (1 failing test(s) detected)
+    - tests/dogfood/cli_tests/test_cli_i_corpus_mcp.py::test_i8_search_no_results
+
+[Injecting FAULT-6] Export-har writes empty entries list...
+  Result: CAUGHT (2 failing test(s) detected)
+    - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c2_headed_replay
+    - tests/dogfood/cli_tests/test_cli_e_export_har.py::test_e1_export_har_with_output_flag
+
+[Injecting FAULT-7] Analyze labels heuristic output as LLM-generated...
+  Result: CAUGHT (1 failing test(s) detected)
+    - tests/dogfood/cli_tests/test_cli_h_analyze.py::test_h7_schema_validation
+
+[Injecting FAULT-8] clean --db also deletes recordings...
+  Result: CAUGHT (1 failing test(s) detected)
+    - tests/dogfood/cli_tests/test_cli_i_corpus_mcp.py::test_i13_clean_db_flag
+
+[Injecting FAULT-9] Replay swallows assertion failures...

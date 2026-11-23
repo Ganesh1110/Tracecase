@@ -1,0 +1,11 @@
+--- a/tracecase/replay/engine.py
++++ b/tracecase/replay/engine.py
+@@ -284,7 +284,7 @@
+             visible_targets=visible_targets,
+             page_text=page_text,
+         )
+-        failed = any(not result.passed for result in assertion_results)
++        failed = False  # FAULT-9: swallow assertion failures
+ 
+         candidate_screenshot = await self._screenshot(page, step)
+         visual_diff_result = None

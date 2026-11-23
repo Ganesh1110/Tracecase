@@ -1,0 +1,11 @@
+--- a/tracecase/cli.py
++++ b/tracecase/cli.py
+@@ -672,7 +672,7 @@
+         if strategy in ("inputs", "actions", "network")
+         else ["inputs", "actions", "network"]
+     )
+-    mutations = engine.generate(case, strategies=selected_strategies, limit=limit)
++    mutations = engine.generate(case, strategies=selected_strategies, limit=999)  # FAULT-4
+ 
+     if not mutations:
+         console.print("[yellow]No mutations generated for this test case.[/yellow]")
