@@ -98,5 +98,29 @@ This document tracks all discrepancies discovered between the documentation (`RE
 - **Evidence**:
   - Control panel injected DOM IDs use `__qa_` prefixes:
     `__qa_start_btn__`, `__qa_stop_btn__`, `__qa_status_dot__`, `__qa_status_text__`, `__qa_steps_count__`, `__qa_message__`, `__qa_pulse`.
+
+---
+
+## 8. Replay Exit Code Contract: Action Error vs Assertion Failure
+- **Location**: `src/tracecase/replay/engine.py` (lines 156-167) vs `docs/USER_GUIDE.md`
+- **Docs**: Docs imply exit code 0 = pass, 1 = test failure, 2 = CLI infrastructure error.
+- **Code**:
+  - In `ReplayEngine.run()`:
+    - If any step status is `"error"` (e.g., target element not found, action timeout): `status = "error"`, `exit_code = 2`.
+    - If any step status is `"failed"` (e.g., derived assertion or visual diff failed): `status = "failed"`, `exit_code = 1`.
+    - If all steps pass: `status = "passed"`, `exit_code = 0`.
+- **Resolution for Testing**: Tests assert exit code 2 for action/selector errors, exit code 1 for assertion failures, and exit code 0 for passing replays.
+
+---
+
+## 9. Visual Diff Dimension Mismatch Behavior
+- **Location**: `src/tracecase/replay/visual.py` (lines 60-69) vs `docs/USER_GUIDE.md`
+- **Docs**: Docs indicate that comparing images with mismatched dimensions causes a comparison failure/error.
+- **Code**:
+  - `compare_images()` does not raise an exception or abort on dimension mismatches.
+  - It automatically normalizes both images to the bounding box `(max(w1, w2), max(h1, h2))` by padding with transparent pixels `(0, 0, 0, 0)`.
+  - The padded difference area is counted toward `diff_pixels`, producing an accurate diff percentage and returning `passed = False` (which causes `tracecase diff` CLI to exit with code 1, not exit code 2).
+- **Resolution for Testing**: Tests assert graceful canvas padding and exit code 1 on dimension mismatches.
+
   - Planning documents in `docs/superpowers/plans/*.md` use `qa_auto` instead of `tracecase` throughout.
 - **Resolution for Testing**: Test selectors against real DOM IDs (`#__qa_start_btn__` etc.).

@@ -4,6 +4,6 @@
 <body>
   <h2>Hostile & Malicious Inputs</h2>
   <div id="hostile-display"><script>window.__hostile_executed = true;</script>&lt;b&gt;bold text&lt;/b&gt;</div>
-  <button id="btn-xss" onclick="document.getElementById("hostile-display").innerHTML = "<img src=x onerror=window.__xss_fired=true; />";">Inject XSS</button>
+  <button id="btn-xss" onclick="document.getElementById('hostile-display').innerHTML = '<img src=x onerror=window.__xss_fired=true; />';">Inject XSS</button>
 </body>
 </html>

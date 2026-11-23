@@ -4,16 +4,16 @@
 <body>
   <h2>Action Types Test Target</h2>
   <div id="hover-box" style="width:120px; height:40px; background:#e2e8f0; text-align:center; line-height:40px;"
-       onmouseover="this.innerText="Hovered!"; this.style.background="#86efac";"
-       onmouseout="this.innerText="Hover Over Me"; this.style.background="#e2e8f0";">
+       onmouseover="this.innerText='Hovered!'; this.style.background='#86efac';"
+       onmouseout="this.innerText='Hover Over Me'; this.style.background='#e2e8f0';">
     Hover Over Me
   </div>
-  <button id="dblclick-btn" ondblclick="this.innerText="Double Clicked!"; this.style.color="blue";">Double Click Me</button>
+  <button id="dblclick-btn" ondblclick="this.innerText='Double Clicked!'; this.style.color='blue';">Double Click Me</button>
   <button id="wait-btn" onclick="startDelayed();">Wait Action Trigger</button>
   <div id="wait-target" style="display:none; color:purple;">Dynamically Appeared after 300ms</div>
 
   <div>
-    <label><input type="checkbox" id="toggle-chk" onchange="document.getElementById("chk-status").innerText = this.checked ? "CHECKED" : "UNCHECKED";" /> Toggle Checkbox</label>
+    <label><input type="checkbox" id="toggle-chk" onchange="document.getElementById('chk-status').innerText = this.checked ? 'CHECKED' : 'UNCHECKED';" /> Toggle Checkbox</label>
     <span id="chk-status">UNCHECKED</span>
   </div>
 
