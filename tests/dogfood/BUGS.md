@@ -110,16 +110,45 @@ This document tracks all defects, inconsistencies, and functional regressions di
 
 ---
 
-## BUG-009: Plaintext Credential Leakage in Test Case Recordings
+## BUG-009A: Plaintext Credential Leakage in `testcase.json`
 - **Severity**: Critical (Security Vulnerability)
 - **Component**: `src/tracecase/events.py` (line 178) & `src/tracecase/recorder.py`
 - **Observed Behavior**:
   When recording interactions on password fields (`<input type="password">`), the injected JavaScript event listener reads `lastInputValue[selector] = el.value` without checking the input's `type` attribute. As a result, the recorded `testcase.json` stores the user's plaintext password in `step.input_value`.
-- **Contract / Specification**:
-  `src/tracecase/requirements/validation/sandbox.py:73` explicitly specifies:
-  > "Traces, screenshots, and logs are safely stored with credential masking."
+- **Note on API Key vs Password**:
+  Masking `type=password` is a mandatory security baseline. Masking fields by name (e.g. `api_key`, `token`) is an architectural design decision currently unaddressed by the recorder.
 - **Test Target**:
-  Marked `@pytest.mark.xfail(strict=True, reason="BUG-009: Password input values stored in plaintext without credential masking")` in `tests/dogfood/cli_tests/test_cli_b_record.py::test_b27_password_masking_audit`.
+  Marked `@pytest.mark.xfail(strict=True, reason="BUG-009A: Password input values stored in plaintext in testcase.json")` in `tests/dogfood/cli_tests/test_cli_b_record.py::test_b27_password_masking_json`.
+
+---
+
+## BUG-009B: Plaintext Credential Leakage in Exported Markdown (`testcase.md`)
+- **Severity**: Critical (Shareable Artifact Data Leak)
+- **Component**: `src/tracecase/recorder.py` (`_generate_short_description`) & Jinja templates
+- **Observed Behavior**:
+  `_generate_short_description` bakes the raw password into `description_short` (`Type 'password' in #password`). When exported to `testcase.md`, the plaintext secret is rendered in the step documentation table.
+- **Test Target**:
+  Marked `@pytest.mark.xfail(strict=True, reason="BUG-009B: Plaintext password leaked in exported testcase.md")` in `tests/dogfood/cli_tests/test_cli_b_record.py::test_b27_password_masking_markdown`.
+
+---
+
+## BUG-009C: Plaintext Credential Leakage in Exported HTML (`testcase.html`)
+- **Severity**: Critical (Shareable Artifact Data Leak)
+- **Component**: `src/tracecase/recorder.py` & `src/tracecase/templates/report.html.j2`
+- **Observed Behavior**:
+  The HTML test report includes `description_short` and raw input values in rendered table cells, exposing plaintext credentials to anyone viewing the report in a browser.
+- **Test Target**:
+  Marked `@pytest.mark.xfail(strict=True, reason="BUG-009C: Plaintext password leaked in exported testcase.html")` in `tests/dogfood/cli_tests/test_cli_b_record.py::test_b27_password_masking_html`.
+
+---
+
+## BUG-009D: Plaintext Credential Leakage via MCP `get_testcase` Protocol Response
+- **Severity**: Critical (LLM Agent Tool Exposure)
+- **Component**: `src/tracecase/mcp/server.py`
+- **Observed Behavior**:
+  When an AI agent calls the MCP `get_testcase` tool, the server returns the raw `testcase.json` contents without sanitizing passwords, leaking secrets into LLM contexts.
+- **Test Target**:
+  Marked `@pytest.mark.xfail(strict=True, reason="BUG-009D: MCP get_testcase returns plaintext password credentials")` in `tests/dogfood/cli_tests/test_cli_i_corpus_mcp.py::test_i20_mcp_password_masking`.
 
 ---
 
@@ -133,7 +162,8 @@ This document tracks all defects, inconsistencies, and functional regressions di
 - **Expected Behavior**:
   `ReplayEngine._perform` should support scrolling (e.g. `await page.evaluate("window.scrollBy(...)")` or `page.mouse.wheel`), and `events.py` should attach debounced listeners for page scroll and hover.
 - **Test Target**:
-  Marked `@pytest.mark.xfail(strict=True, reason="BUG-010: ReplayEngine._perform raises ValueError for action_type='scroll'")` in `tests/dogfood/cli_tests/test_cli_b_record.py::test_b16_action_types_replay_scroll_bug`.
+  - Characterization: `tests/dogfood/cli_tests/test_cli_b_record.py::test_b16_action_types_unrecordable_gap` (Passed)
+  - Strict XFail: Marked `@pytest.mark.xfail(strict=True, reason="BUG-010: ReplayEngine._perform raises ValueError for action_type='scroll'")` in `tests/dogfood/cli_tests/test_cli_b_record.py::test_b16_action_types_replay_scroll_bug`.
 
 ---
 
@@ -141,14 +171,18 @@ This document tracks all defects, inconsistencies, and functional regressions di
 
 | Bug ID | Title | Component | Dedicated Test Node ID | Test Marker |
 |---|---|---|---|---|
-| **BUG-001** | Root `annotated_doc` stub shadows package | `annotated_doc/` | `test_cli_a_help.py::test_a1_root_annotated_doc_shadowing_bug` | `xfail(strict=True)` |
-| **BUG-002** | Healing candidate order prioritizes XPath over ID | `replay/healing.py` | `test_cli_c_replay_healing.py::test_c10_healing_tiers_and_false_positive_audit` | Passed (audit assertion) |
+| **BUG-001** | Root `annotated_doc` stub shadows package | `annotated_doc/` | `test_cli_a_install_env.py::test_bug001_annotated_doc_shadowing_regression`<br>`test_cli_a_install_env.py::test_bug001_annotated_doc_correct_behavior` | Passed (characterization)<br>`xfail(strict=True)` (correct behavior) |
+| **BUG-002** | Healing candidate order prioritizes XPath over ID | `replay/healing.py` | `test_cli_c_replay_healing.py::test_c10_healing_tiers_and_false_positive_audit`<br>`test_cli_c_replay_healing.py::test_bug002_healing_order_correct_behavior` | Passed (characterization)<br>`xfail(strict=True)` (correct behavior) |
 | **BUG-003** | Replay exits with code 2 on missing element | `cli.py`, `replay/` | `test_cli_c_replay_healing.py::test_c8_replay_without_heal_version_b` | `xfail(strict=True)` |
 | **BUG-004** | Diff pads canvas without warning on dimension mismatch | `replay/visual.py` | `test_cli_d_diff.py::test_d4_dimension_mismatch_warning_reported` | `xfail(strict=True)` |
 | **BUG-005** | Incomplete mutation strategies (skip, reorder, latency) | `mutation.py` | `test_cli_g_mutate.py::test_g3_missing_skip_action_mutation`<br>`test_cli_g_mutate.py::test_g3_missing_reorder_inputs_mutation`<br>`test_cli_g_mutate.py::test_g4_missing_latency_fault_mutation` | `xfail(strict=True)` (3 tests) |
-| **BUG-006** | Legacy `__qa_` DOM IDs in injected control panel | `control_panel.py` | `test_cli_b_record.py::test_b12_control_panel_legacy_qa_ids_audit` | Passed (audit assertion) |
-| **BUG-007** | Codegen generates async test requiring `pytest-asyncio` | `codegen/` | `test_cli_f_codegen.py::test_f11_codegen_requires_pytest_asyncio_audit` | Passed (audit assertion) |
+| **BUG-006** | Legacy `__qa_` DOM IDs in injected control panel | `control_panel.py` | `test_cli_b_record.py::test_b12_control_panel_legacy_qa_ids_audit`<br>`test_cli_b_record.py::test_bug006_control_panel_clean_ids` | Passed (characterization)<br>`xfail(strict=True)` (correct behavior) |
+| **BUG-007** | Codegen generates async test requiring `pytest-asyncio` | `codegen/` | `test_cli_f_codegen.py::test_f11_codegen_requires_pytest_asyncio_audit`<br>`test_cli_f_codegen.py::test_bug007_codegen_clean_playwright_test` | Passed (characterization)<br>`xfail(strict=True)` (correct behavior) |
 | **BUG-008** | Unhandled connection error dumps raw Python traceback | `cli.py` (record) | `test_cli_b_record.py::test_b11_unreachable_url` | `xfail(strict=True)` |
-| **BUG-009** | Plaintext credential leakage in password input | `events.py` | `test_cli_b_record.py::test_b27_password_masking_audit` | `xfail(strict=True)` |
+| **BUG-009A** | Plaintext credential leakage in `testcase.json` | `events.py`, `recorder.py` | `test_cli_b_record.py::test_b27_password_masking_json` | `xfail(strict=True)` |
+| **BUG-009B** | Plaintext credential leakage in `testcase.md` | `templates/`, `recorder.py` | `test_cli_b_record.py::test_b27_password_masking_markdown` | `xfail(strict=True)` |
+| **BUG-009C** | Plaintext credential leakage in `testcase.html` | `templates/`, `recorder.py` | `test_cli_b_record.py::test_b27_password_masking_html` | `xfail(strict=True)` |
+| **BUG-009D** | Plaintext credential leakage via MCP `get_testcase` | `mcp/server.py` | `test_cli_i_corpus_mcp.py::test_i20_mcp_password_masking` | `xfail(strict=True)` |
 | **BUG-010** | ReplayEngine crashes on action_type `scroll` | `replay/engine.py` | `test_cli_b_record.py::test_b16_action_types_replay_scroll_bug` | `xfail(strict=True)` |
+
 

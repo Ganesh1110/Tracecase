@@ -433,6 +433,25 @@ def test_c10_healing_tiers_and_false_positive_audit(
     assert step2["selector_used"] == "xpath=//div[@id='container']/button[1]"
 
 
+@pytest.mark.flow("C10")
+@pytest.mark.xfail(strict=True, reason="BUG-002: healing priority inverts fallback order placing xpath before ID and testid")
+def test_bug002_healing_order_correct_behavior():
+    """BUG-002 (Strict XFail of Correct Behavior): Robust selectors (#id, testid) must precede fragile XPath."""
+    from tracecase.replay.healing import candidate_selectors
+    elem = ElementInfo(
+        selector="button.cls:hover",
+        xpath="//button[1]",
+        tag_name="button",
+        text="Submit",
+        attributes={"id": "btn-id", "data-testid": "btn-test"},
+        bounding_box={"x": 0, "y": 0, "width": 10, "height": 10},
+    )
+    candidates = candidate_selectors(elem)
+    id_index = candidates.index("#btn-id")
+    xpath_index = candidates.index("xpath=//button[1]")
+    assert id_index < xpath_index, "Robust ID selector must precede fragile XPath selector"
+
+
 @pytest.mark.flow("C11")
 def test_c11_visual_diff_pass_identical_ui(
     isolated_workspace: Path,

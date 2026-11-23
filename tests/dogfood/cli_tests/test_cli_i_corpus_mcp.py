@@ -446,3 +446,31 @@ def test_i22_mcp_stdout_protocol_purity(isolated_workspace: Path, isolated_env: 
         proc.stdin.close()
         proc.terminate()
         proc.wait(timeout=2.0)
+
+
+@pytest.mark.flow("I19")
+@pytest.mark.xfail(strict=True, reason="BUG-009D: MCP get_testcase returns plaintext password credentials")
+def test_i20_mcp_password_masking(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """I19 / BUG-009D: MCP get_testcase must NOT return unmasked plaintext passwords."""
+    from tracecase.mcp.server import MCPServer
+    import asyncio
+    db_path = isolated_workspace / "mcp_pwd.db"
+    tc_path = _create_sample_testcase(isolated_workspace, "tc_mcp_pwd", "Password Flow", "http://127.0.0.1:9010/login.html")
+    # Inject sensitive password into step
+    tc = TestCase.model_validate_json(tc_path.read_text(encoding="utf-8"))
+    tc.steps[1].element.attributes["type"] = "password"
+    tc.steps[1].input_value = "SuperSecretPassword123!"
+    tc_path.write_text(tc.model_dump_json(indent=2), encoding="utf-8")
+
+    run_tracecase(["index", str(isolated_workspace), "--db", str(db_path)], env=isolated_env)
+
+    mcp = MCPServer(db_path=db_path)
+    res = asyncio.run(mcp.handle_request({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "get_testcase", "arguments": {"testcase_id": "tc_mcp_pwd"}},
+    }))
+    res_str = json.dumps(res)
+    assert "SuperSecretPassword123!" not in res_str, "Plaintext password leaked in MCP response"
+

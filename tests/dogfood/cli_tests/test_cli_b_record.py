@@ -254,6 +254,22 @@ def test_b12_control_panel_lifecycle(isolated_workspace: Path, playground_server
     assert (out_dir / "testcase.json").exists()
 
 
+@pytest.mark.flow("B12")
+def test_b12_control_panel_legacy_qa_ids_audit():
+    """B12 / BUG-006 (Characterization): Assert that control panel currently contains legacy __qa_ prefixes."""
+    from tracecase.control_panel import CONTROL_PANEL_JS
+    assert "__qa_start_btn__" in CONTROL_PANEL_JS
+    assert "__qa_stop_btn__" in CONTROL_PANEL_JS
+
+
+@pytest.mark.flow("B12")
+@pytest.mark.xfail(strict=True, reason="BUG-006: Control panel internal elements retain legacy __qa_ prefixes instead of tracecase branding")
+def test_bug006_control_panel_clean_ids():
+    """BUG-006 (Strict XFail of Correct Behavior): Control panel HTML/JS must NOT contain legacy __qa_ prefixes."""
+    from tracecase.control_panel import CONTROL_PANEL_JS
+    assert "__qa_" not in CONTROL_PANEL_JS, "Control panel JS contains legacy __qa_ prefixes"
+
+
 @pytest.mark.flow("B13")
 def test_b13_stop_with_zero_steps(isolated_workspace: Path, playground_server_url: str):
     """B13: Stop recording with zero steps prints notice and skips export."""
@@ -582,10 +598,10 @@ def test_b26_path_with_spaces_unicode(isolated_workspace: Path, playground_serve
 
 
 @pytest.mark.flow("B27")
-@pytest.mark.xfail(strict=True, reason="BUG-009: Password input values stored in plaintext without credential masking")
-def test_b27_password_masking_audit(isolated_workspace: Path, playground_server_url: str):
-    """B27 (Security Audit): Password input values masked with asterisks."""
-    out_dir = isolated_workspace / "b27_password"
+@pytest.mark.xfail(strict=True, reason="BUG-009A: Password input values stored in plaintext in testcase.json")
+def test_b27_password_masking_json(isolated_workspace: Path, playground_server_url: str):
+    """B27 / BUG-009A: Password input values masked with asterisks in testcase.json."""
+    out_dir = isolated_workspace / "b27_json"
     url = f"{playground_server_url}/login.html"
     secret = "SuperSecretPassword123!"
 
@@ -601,3 +617,44 @@ def test_b27_password_masking_audit(isolated_workspace: Path, playground_server_
     pwd_step = next(s for s in tc.steps if s.element and s.element.attributes.get("type") == "password")
     assert pwd_step.input_value != secret
     assert all(c == "*" for c in (pwd_step.input_value or ""))
+
+
+@pytest.mark.flow("B27")
+@pytest.mark.xfail(strict=True, reason="BUG-009B: Plaintext password leaked in exported testcase.md")
+def test_b27_password_masking_markdown(isolated_workspace: Path, playground_server_url: str):
+    """B27 / BUG-009B: Password values must NOT leak into exported testcase.md."""
+    out_dir = isolated_workspace / "b27_md"
+    url = f"{playground_server_url}/login.html"
+    secret = "SuperSecretPassword123!"
+
+    async def actions(page, rec):
+        await page.wait_for_selector("#password")
+        await page.fill("#password", secret)
+        await asyncio.sleep(0.7)
+        await page.click("#btn-login")
+        await asyncio.sleep(0.2)
+
+    asyncio.run(_run_recorder(out_dir, url, actions_callback=actions))
+    md_content = (out_dir / "testcase.md").read_text(encoding="utf-8")
+    assert secret not in md_content, "Plaintext password found in testcase.md"
+
+
+@pytest.mark.flow("B27")
+@pytest.mark.xfail(strict=True, reason="BUG-009C: Plaintext password leaked in exported testcase.html")
+def test_b27_password_masking_html(isolated_workspace: Path, playground_server_url: str):
+    """B27 / BUG-009C: Password values must NOT leak into exported testcase.html."""
+    out_dir = isolated_workspace / "b27_html"
+    url = f"{playground_server_url}/login.html"
+    secret = "SuperSecretPassword123!"
+
+    async def actions(page, rec):
+        await page.wait_for_selector("#password")
+        await page.fill("#password", secret)
+        await asyncio.sleep(0.7)
+        await page.click("#btn-login")
+        await asyncio.sleep(0.2)
+
+    asyncio.run(_run_recorder(out_dir, url, actions_callback=actions))
+    html_content = (out_dir / "testcase.html").read_text(encoding="utf-8")
+    assert secret not in html_content, "Plaintext password found in testcase.html"
+

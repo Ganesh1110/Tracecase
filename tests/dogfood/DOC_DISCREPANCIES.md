@@ -71,13 +71,14 @@ This document tracks all discrepancies discovered between the documentation (`RE
 ---
 
 ## 5. ActionTypes: Code Enum vs Docs
-- **Location**: `src/tracecase/models.py` vs `docs/USER_GUIDE.md`
-- **Docs**: Mentions recording `radio`, `scroll`, `checkbox`.
-- **Code**:
-  - `ActionType` enum in `src/tracecase/models.py`:
-    `Literal["click", "dblclick", "input", "select", "check", "uncheck", "navigate", "scroll", "hover", "keypress", "wait"]`
-  - Radios are recorded under `check` or `click`.
-  - `hover`, `wait`, `navigate`, `check`, `uncheck` are first-class action types in code.
+- **Location**: `src/tracecase/models.py`, `src/tracecase/events.py`, `src/tracecase/replay/engine.py` vs `docs/USER_GUIDE.md`
+- **Docs**:
+  - `docs/USER_GUIDE.md` explicitly lists `scroll`, `radio`, `checkbox` as captured browser actions.
+- **Code & Actual Behavior**:
+  - `ActionType` enum in `src/tracecase/models.py` defines 11 types: `Literal["click", "dblclick", "input", "select", "check", "uncheck", "navigate", "scroll", "hover", "keypress", "wait"]`.
+  - **Scroll is never recorded and crashes replay (BUG-010)**: `events.py` does not attach `scroll` event listeners in `EVENT_LISTENER_JS`, so user scrolling is never emitted. If a testcase with `action_type="scroll"` is fed to `ReplayEngine._perform`, it crashes with `ValueError: Unsupported action type: scroll`.
+  - **Hover and wait are modeled but unrecordable**: `hover` and `wait` are first-class enum values in `ActionType`, but `events.py` has no `mouseenter`/`mouseover` listeners for hover, and `wait` is purely a synthetic construct. They cannot be recorded interactively from the browser.
+  - Radios and checkboxes are recorded as `click` or `check`/`uncheck`.
 
 ---
 

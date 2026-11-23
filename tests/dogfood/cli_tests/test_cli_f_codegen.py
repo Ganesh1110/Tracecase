@@ -216,3 +216,26 @@ def test_f7_name_sanitization(
     assert len(found) >= 1
     generated_name = found[0].name
     assert "&" not in generated_name and "@" not in generated_name and "$" not in generated_name
+
+
+@pytest.mark.flow("F1")
+def test_f11_codegen_requires_pytest_asyncio_audit(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """F1 / BUG-007 (Characterization): Assert that generated code uses async def requiring pytest-asyncio."""
+    tc_path = _create_codegen_testcase(isolated_workspace)
+    out_file = isolated_workspace / "test_async_char.py"
+    run_tracecase(["codegen", str(tc_path), "-o", str(out_file)], env=isolated_env)
+    content = out_file.read_text(encoding="utf-8")
+    assert "async def test_" in content
+
+
+@pytest.mark.flow("F1")
+@pytest.mark.xfail(strict=True, reason="BUG-007: Codegen generates async test requiring pytest-asyncio rather than standard pytest-playwright sync fixtures")
+def test_bug007_codegen_clean_playwright_test(isolated_workspace: Path, isolated_env: dict[str, str]):
+    """BUG-007 (Strict XFail of Correct Behavior): Generated code must run with standard sync pytest-playwright fixtures."""
+    tc_path = _create_codegen_testcase(isolated_workspace)
+    out_file = isolated_workspace / "test_standard.py"
+    run_tracecase(["codegen", str(tc_path), "-o", str(out_file)], env=isolated_env)
+    content = out_file.read_text(encoding="utf-8")
+    assert not content.startswith("import pytest_asyncio")
+    assert "async def test_" not in content, "Generated code uses async functions requiring pytest-asyncio"
+

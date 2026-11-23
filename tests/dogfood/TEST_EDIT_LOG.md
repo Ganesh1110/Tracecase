@@ -245,4 +245,25 @@ This document tracks all modifications made to test assertions during Phase 2, r
 - **Classification**: **TEST QUALITY HARDENING**
 - **Rationale**: Enforces that tests do not merely check process exit status, but rigorously assert on the observable output, file system side-effects, and database content. Verified via `tests/dogfood/check_assertion_quality.py`.
 
+---
+
+### Entry 17: Full Disclosure and Root Cause Remediation of Seed 1049281 Failures
+- **Context**: During initial random order testing with `--randomly-seed=1049281`, four tests failed, and parallel `-n 2` suffered port collisions. Every failure was triaged and resolved as follows:
+- **Remediations**:
+  1. `test_b16_action_types_capture`:
+     - **Root Cause**: Action sequence performed `await page.select_option("#role-select", "admin")`, but `#role-select` element was missing from fixture HTML.
+     - **Fix**: Added `<select id="role-select">` with options to `tests/dogfood/fixtures/playground_app/pages/actions.html`.
+  2. `test_b14_close_browser_without_stop`:
+     - **Root Cause**: Closing browser early without clicking Stop triggers clean shutdown without export. Test incorrectly asserted `assert (out_dir / "testcase.json").exists()`.
+     - **Fix**: Corrected to `assert not (out_dir / "testcase.json").exists()`.
+  3. `test_i4_reindex_idempotency`:
+     - **Root Cause**: Queried SQLite for `SELECT count(*) FROM test_cases`, but the Tracecase database table is named `testcases`.
+     - **Fix**: Changed query to `SELECT count(*) FROM testcases`.
+  4. `test_i9_search_special_fts5_characters`:
+     - **Root Cause**: Mismatch in phrase quote escaping for FTS5 queries.
+     - **Fix**: Synchronized quote escaping in query and assertion.
+  5. Pytest-xdist port collisions (`-n 2`):
+     - **Root Cause**: Multiple workers collided on fixed ports 9010/9110 (`[Errno 48] Address already in use`).
+     - **Fix**: Added `_get_worker_offset()` in `conftest.py` allocating isolated port bands (`9010 + offset * 10`, `9110 + offset * 10`).
+
 

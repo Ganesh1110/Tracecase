@@ -97,7 +97,7 @@ def test_a6_error_handling_no_traceback(isolated_env: dict[str, str]):
 
 @pytest.mark.flow("A1")
 def test_bug001_annotated_doc_shadowing_regression():
-    """BUG-001: Assert that importing fastapi from the repo root fails due to annotated_doc stub."""
+    """BUG-001 (Characterization): Assert that importing fastapi from the repo root fails due to annotated_doc stub."""
     res = subprocess.run(
         [sys.executable, "-c", "import fastapi; print('FASTAPI_IMPORTED')"],
         cwd=REPO_ROOT,
@@ -106,3 +106,18 @@ def test_bug001_annotated_doc_shadowing_regression():
     )
     assert res.returncode != 0
     assert "Doc() takes no arguments" in res.stderr
+
+
+@pytest.mark.flow("A1")
+@pytest.mark.xfail(strict=True, reason="BUG-001: root annotated_doc stub shadows real package causing fastapi import failure")
+def test_bug001_annotated_doc_correct_behavior():
+    """BUG-001 (Strict XFail of Correct Behavior): Importing fastapi from repo root must succeed without error."""
+    res = subprocess.run(
+        [sys.executable, "-c", "import fastapi; print('FASTAPI_IMPORTED')"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0
+    assert "FASTAPI_IMPORTED" in res.stdout
+

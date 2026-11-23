@@ -6,6 +6,7 @@ Injects 12 intentional regressions into a throwaway copy of `src/` at
 against each fault. Reports all failing tests per fault in a markdown table.
 """
 
+import difflib
 import json
 import os
 import shutil
@@ -16,6 +17,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 THROWAWAY_DIR = Path("/tmp/tc_fault_injection")
 SRC_COPY = THROWAWAY_DIR / "src"
+EVIDENCE_DIR = REPO_ROOT / "tests" / "dogfood" / "evidence"
 
 FAULTS = [
     {
@@ -124,20 +126,36 @@ def reset_throwaway_src():
     shutil.copytree(REPO_ROOT / "src", SRC_COPY)
 
 
-def apply_fault(fault: dict) -> None:
+def apply_fault(fault: dict) -> str:
     target_path = SRC_COPY / fault["file"]
-    content = target_path.read_text(encoding="utf-8")
-    if fault["find"] not in content:
+    orig_content = target_path.read_text(encoding="utf-8")
+    if fault["find"] not in orig_content:
         raise ValueError(f"Could not find patch target in {target_path}:\n{fault['find']}")
-    patched = content.replace(fault["find"], fault["replace"], 1)
-    target_path.write_text(patched, encoding="utf-8")
+    patched_content = orig_content.replace(fault["find"], fault["replace"], 1)
+    target_path.write_text(patched_content, encoding="utf-8")
+
+    # Generate unified diff
+    diff_lines = list(difflib.unified_diff(
+        orig_content.splitlines(keepends=True),
+        patched_content.splitlines(keepends=True),
+        fromfile=f"a/{fault['file']}",
+        tofile=f"b/{fault['file']}",
+    ))
+    diff_text = "".join(diff_lines)
+    if not diff_text.strip():
+        raise RuntimeError(f"FATAL: Generated diff for {fault['id']} is empty!")
+
+    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+    diff_path = EVIDENCE_DIR / f"fault_{fault['id'].lower().replace('-', '_')}.diff"
+    diff_path.write_text(diff_text, encoding="utf-8")
+    return diff_text
 
 
 def run_full_suite() -> list[str]:
     """Runs the whole CLI dogfood suite and returns list of failing test node IDs."""
     env = os.environ.copy()
     env["PYTHONPATH"] = str(SRC_COPY)
-    
+
     cmd = [
         str(REPO_ROOT / ".venv" / "bin" / "pytest"),
         "tests/dogfood/cli_tests/",
@@ -154,7 +172,6 @@ def run_full_suite() -> list[str]:
         text=True,
     )
     # Parse failing tests from pytest output
-    # Lines starting with 'FAILED ' contain the node ID
     failing = []
     for line in proc.stdout.splitlines():
         if line.startswith("FAILED "):
@@ -163,16 +180,59 @@ def run_full_suite() -> list[str]:
     return failing
 
 
-def main():
-    print("================================================================================", flush=True)
-    print("STRICT 12-FAULT INJECTION BENCHMARK (WHOLE CLI SUITE PER FAULT)", flush=True)
-    print("================================================================================", flush=True)
+def verify_throwaway_env() -> None:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(SRC_COPY)
+    proc = subprocess.run(
+        [str(REPO_ROOT / ".venv" / "bin" / "python"), "-c", "import tracecase; print(tracecase.__file__)"],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    imported_path = proc.stdout.strip()
+    assert str(SRC_COPY) in imported_path, f"Throwaway environment failed to import from {SRC_COPY}: got {imported_path}"
+    out_file = EVIDENCE_DIR / "throwaway_env_paths.txt"
+    out_file.write_text(f"PYTHONPATH: {SRC_COPY}\ntracecase.__file__: {imported_path}\n", encoding="utf-8")
+    print(f"Verified throwaway module import: {imported_path}")
+
+
+def run_baseline() -> None:
+    print("================================================================================")
+    print("FAULT INJECTION BASELINE (NO FAULT INJECTED IN THROWAWAY SRC)")
+    print("================================================================================")
+    reset_throwaway_src()
+    verify_throwaway_env()
+
+    print("Running full test suite on clean throwaway copy...")
+    failing_tests = run_full_suite()
+    print(f"\nBaseline failing tests: {len(failing_tests)}")
+    for t in failing_tests:
+        print(f"  - {t}")
+
+    out_file = EVIDENCE_DIR / "fault_baseline.txt"
+    if failing_tests:
+        out_file.write_text(f"BASELINE FAILED with {len(failing_tests)} failing test(s):\n" + "\n".join(failing_tests) + "\n", encoding="utf-8")
+        print("\n❌ BASELINE NOT CLEAN! Fix failing tests before proceeding with fault injection.")
+        sys.exit(1)
+    else:
+        out_file.write_text("BASELINE CLEAN: 0 failing tests (all xfails expected).\n", encoding="utf-8")
+        print("\n✓ BASELINE VERIFIED CLEAN: 0 failing tests!")
+
+
+def run_all_faults() -> None:
+    print("================================================================================")
+    print("STRICT 12-FAULT INJECTION BENCHMARK (WHOLE CLI SUITE PER FAULT)")
+    print("================================================================================")
+
+    # 1. Run baseline first
+    run_baseline()
 
     results = []
     for fault in FAULTS:
         print(f"\n[Injecting {fault['id']}] {fault['name']}...", flush=True)
         reset_throwaway_src()
-        apply_fault(fault)
+        diff_text = apply_fault(fault)
 
         failing_tests = run_full_suite()
         status = "CAUGHT" if len(failing_tests) > 0 else "MISSED"
@@ -215,7 +275,9 @@ def main():
     # Save to json/markdown
     out_file = REPO_ROOT / "tests" / "dogfood" / "FAULT_INJECTION_REPORT.md"
     out_file.write_text(table_md + "\n", encoding="utf-8")
-    print(f"\nWrote full report to: {out_file}")
+    summary_file = EVIDENCE_DIR / "fault_injection_summary.txt"
+    summary_file.write_text(table_md + "\n", encoding="utf-8")
+    print(f"\nWrote full report to: {out_file} and {summary_file}")
 
     all_caught = all(r["status"] == "CAUGHT" for r in results)
     if not all_caught:
@@ -223,6 +285,13 @@ def main():
         sys.exit(1)
     else:
         print("\n✓ SUCCESS: All 12 faults caught by the full test suite!")
+
+
+def main():
+    if "--baseline" in sys.argv:
+        run_baseline()
+    else:
+        run_all_faults()
 
 
 if __name__ == "__main__":

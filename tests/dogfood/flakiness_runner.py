@@ -2,10 +2,9 @@
 Flakiness & Parallel Ordering Verification Runner (tests/dogfood/flakiness_runner.py)
 
 Runs the Tracecase CLI dogfood suite:
-1. Three times with different pytest-randomly seeds
-2. Once with pytest-xdist (-n 2) parallel workers
-
-Outputs a concise markdown table with results.
+1. Three times with NEW random seeds (20261123, 7749201, 8839102)
+2. Twice with pytest-xdist (-n 2) parallel workers
+Outputs raw logs to tests/dogfood/evidence/flakiness_runs.txt.
 """
 
 import os
@@ -15,6 +14,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+EVIDENCE_DIR = REPO_ROOT / "tests" / "dogfood" / "evidence"
 
 
 def run_suite(args: list[str]) -> dict:
@@ -24,11 +24,9 @@ def run_suite(args: list[str]) -> dict:
     proc = subprocess.run(cmd, cwd=REPO_ROOT, env=env, capture_output=True, text=True)
 
     stdout = proc.stdout + proc.stderr
-    # Extract seed if randomly was used
     seed_match = re.search(r"--randomly-seed=(\d+)", stdout)
     seed = seed_match.group(1) if seed_match else "N/A"
 
-    # Extract summary line, e.g., "131 passed, 7 xfailed in 45.12s"
     summary_match = re.search(r"(\d+)\s+passed.*?(\d+)\s+xfailed", stdout)
     passed = int(summary_match.group(1)) if summary_match else 0
     xfailed = int(summary_match.group(2)) if summary_match else 0
@@ -43,28 +41,32 @@ def run_suite(args: list[str]) -> dict:
         "xfailed": xfailed,
         "failed": failed,
         "exit_code": proc.returncode,
+        "raw_output": stdout,
     }
 
 
 def main():
     print("================================================================================")
-    print("FLAKINESS & ORDERING VERIFICATION (3 RANDOM RUNS + 1 PARALLEL RUN)")
+    print("FLAKINESS & CONCURRENCY VERIFICATION (3 NEW SEEDS + 2 PARALLEL RUNS)")
     print("================================================================================")
 
     runs = [
-        {"name": "Random Run 1", "args": ["--randomly-seed=1049281"]},
-        {"name": "Random Run 2", "args": ["--randomly-seed=5820491"]},
-        {"name": "Random Run 3", "args": ["--randomly-seed=9301824"]},
-        {"name": "Parallel Run (-n 2)", "args": ["-n", "2", "-p", "no:randomly"]},
+        {"name": "Random Run 1 (Seed 20261123)", "args": ["--randomly-seed=20261123"]},
+        {"name": "Random Run 2 (Seed 7749201)", "args": ["--randomly-seed=7749201"]},
+        {"name": "Random Run 3 (Seed 8839102)", "args": ["--randomly-seed=8839102"]},
+        {"name": "Parallel Run 1 (-n 2)", "args": ["-n", "2", "-p", "no:randomly"]},
+        {"name": "Parallel Run 2 (-n 2)", "args": ["-n", "2", "-p", "no:randomly"]},
     ]
 
     results = []
+    raw_logs = []
     for r in runs:
         print(f"\nExecuting {r['name']} ({' '.join(r['args'])})...", flush=True)
         res = run_suite(r["args"])
         res["name"] = r["name"]
         print(f"  Result: {res['passed']} passed, {res['xfailed']} xfailed, {res['failed']} failed", flush=True)
         results.append(res)
+        raw_logs.append(f"=== {r['name']} ===\nArgs: {res['args']}\nExit Code: {res['exit_code']}\nSummary: {res['passed']} passed, {res['xfailed']} xfailed, {res['failed']} failed\n{res['raw_output']}\n")
 
     print("\n" + "="*80)
     print("FLAKINESS & CONCURRENCY RESULTS")
@@ -86,7 +88,10 @@ def main():
 
     out_file = REPO_ROOT / "tests" / "dogfood" / "FLAKINESS_REPORT.md"
     out_file.write_text(table_md + "\n", encoding="utf-8")
-    print(f"\nWrote flakiness report to: {out_file}")
+    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+    ev_file = EVIDENCE_DIR / "flakiness_runs.txt"
+    ev_file.write_text(table_md + "\n\n" + "\n".join(raw_logs), encoding="utf-8")
+    print(f"\nWrote flakiness report to: {out_file} and {ev_file}")
 
 
 if __name__ == "__main__":
