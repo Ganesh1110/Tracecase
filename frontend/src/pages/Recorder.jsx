@@ -107,6 +107,8 @@ export function Recorder() {
     hasMountedAppRef.current = hasMountedApp;
   }, [hasMountedApp]);
 
+  const targetAppUrlRef = useRef("");
+
   const getBrowserMeta = (b) => {
     switch (b) {
       case "webkit":
@@ -303,15 +305,20 @@ export function Recorder() {
   // Subscribe to general system WebSockets
   useEffect(() => {
     const unsubStep = subscribe("recording_step", (payload) => {
-      if (payload && payload.step) {
-        setLiveSteps((prev) => [...prev, payload.step]);
-        setPassedCount((prev) => prev + 1);
+      const stepData = payload?.data?.step || payload?.step;
+      if (stepData) {
+        setLiveSteps((prev) => {
+          if (prev.some((s) => s.number === stepData.number)) return prev;
+          return [...prev, stepData];
+        });
+        setPassedCount((prev) => Math.max(prev, payload?.data?.total_steps || payload?.total_steps || prev + 1));
       }
-      if (payload && payload.console_errors_count !== undefined) {
+      const dataObj = payload?.data || payload;
+      if (dataObj?.console_errors_count !== undefined) {
         setStatus((prev) => ({
           ...prev,
-          console_errors_count: payload.console_errors_count,
-          network_requests_count: payload.network_requests_count,
+          console_errors_count: dataObj.console_errors_count,
+          network_requests_count: dataObj.network_requests_count,
         }));
       }
     });
@@ -406,14 +413,14 @@ export function Recorder() {
 
           const curUrl = chromeUrlRef.current;
           const isTargetMounted = curUrl && curUrl !== "about:blank" && !curUrl.includes("about:blank");
-          if (isTargetMounted) {
+          if (isTargetMounted && !hasMountedAppRef.current) {
             setHasMountedApp(true);
             setPrepStage(4);
             if (isPreparingEngineRef.current) {
               setTimeout(() => {
                 setIsPreparingEngine(false);
                 setLoading(false);
-              }, 400);
+              }, 600);
             }
           }
           const img = offscreenImgRef.current;
@@ -433,6 +440,28 @@ export function Recorder() {
             ctx.drawImage(img, 0, 0);
           };
           img.src = "data:image/jpeg;base64," + payload.data_base64;
+        } else if (type === "step_recorded") {
+          const stepData = payload?.step;
+          if (stepData) {
+            setLiveSteps((prev) => {
+              if (prev.some((s) => s.number === stepData.number)) return prev;
+              return [...prev, stepData];
+            });
+            setPassedCount((prev) => Math.max(prev, payload?.total_steps || prev + 1));
+          }
+        } else if (type === "app_mounted") {
+          if (payload.url && payload.url !== "about:blank" && !payload.url.includes("about:blank")) {
+            setChromeUrl(payload.url);
+            chromeUrlRef.current = payload.url;
+            setHasMountedApp(true);
+            setPrepStage(4);
+            if (isPreparingEngineRef.current) {
+              setTimeout(() => {
+                setIsPreparingEngine(false);
+                setLoading(false);
+              }, 600);
+            }
+          }
         } else if (type === "session_state") {
           if (payload.url) {
             setChromeUrl(payload.url);
@@ -444,7 +473,7 @@ export function Recorder() {
                 setTimeout(() => {
                   setIsPreparingEngine(false);
                   setLoading(false);
-                }, 400);
+                }, 600);
               }
             }
           }
@@ -880,6 +909,10 @@ export function Recorder() {
     const finalUrl = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
 
     try {
+      if (status.status === "recording" || status.status === "paused") {
+        await api.stopRecording().catch(() => {});
+      }
+
       setLoading(true);
       setIsPreparingEngine(true);
       setHasFirstFrame(false);
@@ -888,8 +921,9 @@ export function Recorder() {
       setElapsedSeconds(0);
       setTabs([{ page_id: 0, title: finalUrl, url: finalUrl }]);
       setActiveTabId(0);
-      setChromeUrl(finalUrl);
-      chromeUrlRef.current = finalUrl;
+      targetAppUrlRef.current = finalUrl;
+      setChromeUrl("about:blank");
+      chromeUrlRef.current = "about:blank";
 
       // Progressive preparation indicators
       setTimeout(() => setPrepStage((s) => Math.max(s, 2)), 600);
@@ -1768,7 +1802,7 @@ export function Recorder() {
                       Preparing {browserMeta.name} Browser Kit
                     </h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate">
-                      Target: {chromeUrl === "about:blank" ? (tabs[0]?.url || url || "Target Application") : chromeUrl}
+                      Target: {targetAppUrlRef.current || (chromeUrl === "about:blank" ? (tabs[0]?.url || url || "Target Application") : chromeUrl)}
                     </p>
                   </div>
 

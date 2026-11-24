@@ -328,6 +328,9 @@ class Recorder:
             except Exception as nav_err:
                 console.print(f"[yellow]![/yellow] Initial navigation notice for {self.start_url}: {nav_err}")
 
+            with contextlib.suppress(Exception):
+                await page.wait_for_load_state("domcontentloaded", timeout=4000)
+
             page_title = ""
             with contextlib.suppress(Exception):
                 page_title = await page.title()
@@ -336,6 +339,14 @@ class Recorder:
 
             nav_url = page.url
             if nav_url and nav_url not in ("about:blank", ""):
+                await self.broadcast_stream_message({
+                    "type": "app_mounted",
+                    "payload": {
+                        "page_id": 0,
+                        "url": nav_url,
+                        "title": page_title or "Tab 1",
+                    },
+                })
                 await self.broadcast_stream_message({
                     "type": "tab_switched",
                     "payload": {
@@ -1077,6 +1088,16 @@ class Recorder:
         )
 
         self.steps.append(step)
+
+        # Broadcast step directly over active screencast stream WebSocket as well
+        with contextlib.suppress(Exception):
+            await self.broadcast_stream_message({
+                "type": "step_recorded",
+                "payload": {
+                    "step": step.model_dump(mode="json"),
+                    "total_steps": len(self.steps),
+                },
+            })
 
         if self.step_callback:
             try:
