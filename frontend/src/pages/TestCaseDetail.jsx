@@ -529,7 +529,7 @@ export function TestCaseDetail() {
         </div>
       </div>
 
-      {/* Navigation Tabs (KaneAI Style: Test Summary, Code, Assertions, History) */}
+      {/* Navigation Tabs (Test Summary, Code, Assertions, History) */}
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-surface-borderDark pb-px">
         <button
           onClick={() => setActiveTab("steps")}
@@ -568,12 +568,12 @@ export function TestCaseDetail() {
         </button>
       </div>
 
-      {/* Tab: Recorded Steps / KaneAI Test Summary */}
+      {/* Tab: Recorded Steps / Test Summary */}
       {activeTab === "steps" && (
         <div className="grid grid-cols-12 gap-5">
           {/* Main Column: Steps sequence and actions (8 cols) */}
           <div className="col-span-12 lg:col-span-8 space-y-4">
-            {/* KaneAI Steps Status Strip */}
+            {/* Steps Status Strip */}
             <div className="flex flex-wrap items-center justify-between p-3.5 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs font-semibold shadow-sm gap-3">
               <div className="flex items-center gap-3">
                 <span className="text-slate-900 dark:text-white font-bold">
@@ -925,7 +925,7 @@ export function TestCaseDetail() {
           </div>
           </div>
 
-          {/* Right Column: KaneAI Metadata & Execution Sidebar (4 cols) */}
+          {/* Right Column: Metadata & Execution Sidebar (4 cols) */}
           <div className="col-span-12 lg:col-span-4 space-y-4">
             <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm space-y-4">
               {/* Primary Execute Button */}
@@ -1336,10 +1336,10 @@ export function TestCaseDetail() {
         </div>
       )}
 
-      {/* Tab: Code Generation (KaneAI Code View: AssertiveAction & AssertiveValidator) */}
+      {/* Tab: Code Generation (Code View: AssertiveAction & AssertiveValidator) */}
       {activeTab === "codegen" && (
         <div className="space-y-4">
-          {/* KaneAI Code Artifacts Strip */}
+          {/* Code Artifacts Strip */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-950/20 flex items-center justify-between">
               <div>

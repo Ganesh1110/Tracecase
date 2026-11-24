@@ -24,6 +24,8 @@ import {
   ChevronRight,
   ShieldCheck,
   Zap,
+  KeyRound,
+  Bot,
 } from "lucide-react";
 
 const navSections = [
@@ -74,6 +76,12 @@ const navSections = [
         icon: Sparkles,
         badge: "AI",
       },
+      {
+        name: "Agent Assurance",
+        to: "/agent-testing",
+        icon: Bot,
+        badge: "Assure",
+      },
       { name: "Test Analysis", to: "/test-analysis", icon: BarChart3 },
       { name: "Negative Test Generation", to: "/mutations", icon: Dna },
       { name: "Test Repository", to: "/repository", icon: Database },
@@ -90,6 +98,7 @@ const navSections = [
   {
     title: "Administration",
     items: [
+      { name: "Variables & Vault", to: "/variables", icon: KeyRound, badge: "2FA" },
       { name: "Settings", to: "/settings", icon: Settings },
       { name: "Storage Management", to: "/storage", icon: HardDrive },
     ],

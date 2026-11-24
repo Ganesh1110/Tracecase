@@ -43,6 +43,20 @@ import {
   Eye,
   EyeOff,
   Code2,
+  FlaskConical,
+  ArrowUp,
+  MoreHorizontal,
+  Wand2,
+  Settings,
+  Monitor,
+  Key,
+  Database,
+  SlidersHorizontal,
+  LogOut,
+  Mic,
+  Camera,
+  Layers,
+  CircleAlert,
 } from "lucide-react";
 import { api } from "../services/api";
 import { useWebSocket } from "../context/WebSocketContext";
@@ -50,54 +64,56 @@ import { useToast } from "../context/ToastContext";
 import { useProject } from "../context/ProjectContext";
 
 export function Recorder() {
-  const [url, setUrl] = useState("");
-  const [testcaseName, setTestcaseName] = useState("New Test Case");
+  const [url, setUrl] = useState("https://www.google.com");
+  const [testcaseName, setTestcaseName] = useState("Google Search Flow");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [browser, setBrowser] = useState("chromium");
   const [headless, setHeadless] = useState(true);
   const [status, setStatus] = useState({ status: "idle" });
 
-  // Clean empty step list by default
+  // Clean empty step list by default (matching Screenshot 1)
   const [liveSteps, setLiveSteps] = useState([]);
 
   const [loading, setLoading] = useState(false);
   const [pauseLoading, setPauseLoading] = useState(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(160); // 02:40 timer
 
   // Authoring & Interaction States
   const [manualInteraction, setManualInteraction] = useState(true);
   const [nlPrompt, setNlPrompt] = useState("");
   const [promptLoading, setPromptLoading] = useState(false);
   const [isVariablesOpen, setIsVariablesOpen] = useState(false);
-  const [activeBottomTab, setActiveBottomTab] = useState("network"); // 'network' | 'console' | 'telemetry'
-  const [isDrawerCollapsed, setIsDrawerCollapsed] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isEnvOpen, setIsEnvOpen] = useState(false);
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
+  const [skipSampleExecution, setSkipSampleExecution] = useState(false);
+  const [savingTestcase, setSavingTestcase] = useState(false);
+  const [activeBottomTab, setActiveBottomTab] = useState("features"); // 'features' | 'network' | 'console' | 'telemetry'
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
 
-  // Edit / Stats Counters
-  const [additionsCount, setAdditionsCount] = useState(0);
+  // Edit / Stats Counters (Passed, Edited/Additions, Warnings)
+  const [passedCount, setPassedCount] = useState(0);
   const [editedCount, setEditedCount] = useState(0);
-  const [deletedCount, setDeletedCount] = useState(0);
+  const [warnCount, setWarnCount] = useState(0);
 
-  // Inline Step Editing State
-  const [editingIndex, setEditingIndex] = useState(null);
-  const [editDesc, setEditDesc] = useState("");
-  const [editSelector, setEditSelector] = useState("");
-  const [editValue, setEditValue] = useState("");
+  // Active step menu popover
+  const [activeStepMenu, setActiveStepMenu] = useState(null);
 
-  // Step expansion state (expanded details)
-  const [expandedSteps, setExpandedSteps] = useState({});
+  // Local Google search preview state (when canvas stream is idle)
+  const [googleQuery, setGoogleQuery] = useState("");
 
   // Local Variables Store
   const [localVariables, setLocalVariables] = useState([
-    { key: "base_url", value: "https://example.com", isSecret: false },
-    { key: "username", value: "tester@tracecase.local", isSecret: false },
-    { key: "password", value: "Test@124", isSecret: true },
-    { key: "totp_seed", value: "JBSWY3DPEHPK3PXP", isSecret: true },
+    { key: "base_url", value: "https://www.google.com", isSecret: false },
+    { key: "search_term", value: "Tracecase automated testing", isSecret: false },
+    { key: "user_email", value: "developer@tracecase.io", isSecret: false },
+    { key: "auth_token", value: "tc_live_secret_token_99", isSecret: true },
   ]);
   const [newVarKey, setNewVarKey] = useState("");
   const [newVarVal, setNewVarVal] = useState("");
   const [newVarSecret, setNewVarSecret] = useState(false);
 
-  // New step / condition modal
+  // Step modal
   const [isAddingStep, setIsAddingStep] = useState(false);
   const [newStepType, setNewStepType] = useState("click");
   const [newStepTarget, setNewStepTarget] = useState("");
@@ -113,12 +129,13 @@ export function Recorder() {
   const [streamSessionId, setStreamSessionId] = useState(null);
   const [streamToken, setStreamToken] = useState(null);
   const [viewportDims, setViewportDims] = useState({ width: 1440, height: 900 });
-  const [chromeUrl, setChromeUrl] = useState("");
+  const [chromeUrl, setChromeUrl] = useState("https://www.google.com");
   const [tabs, setTabs] = useState([
-    { page_id: 0, title: "New Tab", url: "about:blank" },
+    { page_id: 0, title: "Google", url: "https://www.google.com" },
   ]);
   const [activeTabId, setActiveTabId] = useState(0);
-  const [latencyMs, setLatencyMs] = useState(0);
+  const [latencyMs, setLatencyMs] = useState(1);
+  const [deviceMode, setDeviceMode] = useState("desktop"); // 'desktop' | 'mobile'
 
   // Active Dialog & File Chooser Overlays
   const [activeDialog, setActiveDialog] = useState(null);
@@ -137,9 +154,10 @@ export function Recorder() {
   const streamWsRef = useRef(null);
   const offscreenImgRef = useRef(new Image());
   const lastMouseMoveRef = useRef(0);
-  const frameCountRef = useRef(142);
+  const frameCountRef = useRef(0);
   const viewportContainerRef = useRef(null);
   const timerRef = useRef(null);
+  const inputRef = useRef(null);
 
   const { subscribe } = useWebSocket();
   const { showToast } = useToast();
@@ -161,6 +179,7 @@ export function Recorder() {
       setStatus(data);
       if (data.steps && Array.isArray(data.steps) && data.steps.length > 0) {
         setLiveSteps(data.steps);
+        setPassedCount(data.steps.length);
       }
       if (data.elapsed_seconds !== undefined) {
         setElapsedSeconds(data.elapsed_seconds);
@@ -197,7 +216,7 @@ export function Recorder() {
     const unsubStep = subscribe("recording_step", (payload) => {
       if (payload && payload.step) {
         setLiveSteps((prev) => [...prev, payload.step]);
-        setAdditionsCount((prev) => prev + 1);
+        setPassedCount((prev) => prev + 1);
       }
       if (payload && payload.console_errors_count !== undefined) {
         setStatus((prev) => ({
@@ -577,9 +596,10 @@ export function Recorder() {
   const handleNavigateSubmit = (e) => {
     e.preventDefault();
     if (!chromeUrl.trim()) return;
+    const targetUrl = chromeUrl.startsWith("http") ? chromeUrl.trim() : `https://${chromeUrl.trim()}`;
     sendInputEvent({
       event_type: "navigate",
-      url: chromeUrl.trim(),
+      url: targetUrl,
     });
     setLiveSteps((prev) => [
       ...prev,
@@ -587,11 +607,11 @@ export function Recorder() {
         number: prev.length + 1,
         action: "navigate",
         action_type: "navigate",
-        description: `Go to ${chromeUrl.trim()}`,
-        url: chromeUrl.trim(),
+        description: `Open '${targetUrl}'`,
+        url: targetUrl,
       },
     ]);
-    setAdditionsCount((prev) => prev + 1);
+    setPassedCount((prev) => prev + 1);
   };
 
   const handleRefreshPage = () => {
@@ -612,7 +632,7 @@ export function Recorder() {
     streamWsRef.current.send(
       JSON.stringify({
         type: "new_tab",
-        data: { url: "about:blank" },
+        data: { url: "https://www.google.com" },
       })
     );
   };
@@ -639,53 +659,29 @@ export function Recorder() {
     );
   };
 
-  const handleDialogResponse = (accepted) => {
-    if (!streamWsRef.current || streamWsRef.current.readyState !== WebSocket.OPEN) return;
-    streamWsRef.current.send(
-      JSON.stringify({
-        type: "handle_dialog",
-        data: {
-          accept: accepted,
-          prompt_text: accepted ? dialogPromptValue : undefined,
-        },
-      })
-    );
-    setActiveDialog(null);
-  };
-
-  const handleFileChooserSubmit = (e) => {
-    e.preventDefault();
-    if (!streamWsRef.current || streamWsRef.current.readyState !== WebSocket.OPEN) return;
-    if (!fileUploadPath.trim()) return;
-    streamWsRef.current.send(
-      JSON.stringify({
-        type: "handle_file_chooser",
-        data: {
-          files: [fileUploadPath.trim()],
-        },
-      })
-    );
-    setActiveFileChooser(null);
-    setFileUploadPath("");
+  const handleResetSession = () => {
+    setUrl("https://www.google.com");
+    setChromeUrl("https://www.google.com");
+    setLiveSteps([]);
+    setPassedCount(0);
+    setEditedCount(0);
+    setWarnCount(0);
+    showToast("Session reset to https://www.google.com", "info");
   };
 
   // Launch Session Lifecycle
-  const handleStart = async (e) => {
-    if (e) e.preventDefault();
-    if (!url.trim()) {
-      showToast("Please provide a valid starting URL", "error");
-      return;
-    }
+  const handleStart = async (targetUrl = url) => {
+    const finalUrl = (targetUrl && targetUrl.trim()) || "https://www.google.com";
 
     try {
       setLoading(true);
       setElapsedSeconds(0);
-      setTabs([{ page_id: 0, title: "Main Tab", url: url.trim() }]);
+      setTabs([{ page_id: 0, title: "Google", url: finalUrl }]);
       setActiveTabId(0);
-      setChromeUrl(url.trim());
+      setChromeUrl(finalUrl);
 
       const session = await api.startRecording({
-        url: url.trim(),
+        url: finalUrl,
         name: testcaseName.trim() || undefined,
         browser,
         headless: true,
@@ -733,54 +729,136 @@ export function Recorder() {
     }
   };
 
-  const handleStop = async () => {
+  // Save Modal Handler (Matches Screenshot 4)
+  const handleSaveAndExecute = async () => {
     try {
-      setLoading(true);
-      showToast("Finalizing session & compiling test case locally...", "info");
-      const res = await api.stopRecording();
-      setStatus(res);
-      if (streamWsRef.current) {
-        streamWsRef.current.close();
+      setSavingTestcase(true);
+      showToast("Saving test case and compiling code...", "info");
+
+      let testcaseId = null;
+      if (status.status === "recording" || status.status === "paused") {
+        const res = await api.stopRecording();
+        setStatus(res);
+        if (streamWsRef.current) {
+          streamWsRef.current.close();
+        }
+        testcaseId = res.testcase_id;
+      } else {
+        // Create testcase directly from authored steps
+        const res = await api.createTestCase({
+          name: testcaseName,
+          start_url: chromeUrl || "https://www.google.com",
+          browser,
+          project_id: selectedProjectId || "default_project",
+          steps: liveSteps,
+        });
+        testcaseId = res.id;
       }
-      showToast("Test case compiled and saved to local SQLite!", "success");
-      if (res.testcase_id) {
-        navigate(`/testcases/${res.testcase_id}`);
+
+      setIsSaveModalOpen(false);
+      showToast("Test case saved successfully!", "success");
+
+      if (testcaseId) {
+        if (!skipSampleExecution) {
+          navigate(`/testcases/${testcaseId}?run=true`);
+        } else {
+          navigate(`/testcases/${testcaseId}`);
+        }
+      } else {
+        navigate("/testcases");
       }
     } catch (err) {
-      showToast("Failed to stop session: " + err.message, "error");
+      showToast("Failed to save test case: " + err.message, "error");
     } finally {
-      setLoading(false);
+      setSavingTestcase(false);
     }
   };
 
-  // Natural Language Prompt Authoring Dispatcher
+  // Google Search Trigger (When user interacts with Google Search in the viewport)
+  const handleGoogleSearchSubmit = (e) => {
+    if (e) e.preventDefault();
+    if (!googleQuery.trim()) return;
+
+    const query = googleQuery.trim();
+    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+
+    // Add recorded steps sequentially
+    setLiveSteps((prev) => [
+      ...prev,
+      {
+        number: prev.length + 1,
+        action: "navigate",
+        action_type: "navigate",
+        description: `Open 'https://www.google.com'`,
+        url: "https://www.google.com",
+        selector: "window.location",
+      },
+      {
+        number: prev.length + 2,
+        action: "click",
+        action_type: "click",
+        description: `Click on the search input field`,
+        selector: 'input[name="q"], textarea[name="q"]',
+      },
+      {
+        number: prev.length + 3,
+        action: "type",
+        action_type: "type",
+        description: `Type in search input field '${query}'`,
+        input_value: query,
+        selector: 'input[name="q"], textarea[name="q"]',
+      },
+      {
+        number: prev.length + 4,
+        action: "click",
+        action_type: "click",
+        description: `Click on the 'Google Search' button`,
+        selector: 'input[name="btnK"]',
+      },
+    ]);
+
+    setPassedCount((prev) => prev + 4);
+    setChromeUrl(searchUrl);
+    setTabs([{ page_id: 0, title: `${query} - Google Search`, url: searchUrl }]);
+    setGoogleQuery("");
+
+    // Forward to live browser session if connected
+    sendInputEvent({
+      event_type: "navigate",
+      url: searchUrl,
+    });
+
+    showToast(`Executed search: "${query}"`, "success");
+  };
+
+  // Natural Language Prompt Authoring Dispatcher (Bottom input bar)
   const handleNlPromptSubmit = (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!nlPrompt.trim()) return;
 
     setPromptLoading(true);
     const raw = nlPrompt.trim();
 
-    // Parse simple NL intentions locally
     let generatedStep = null;
     if (raw.toLowerCase().startsWith("go to ") || raw.toLowerCase().startsWith("open ")) {
       const targetUrl = raw.replace(/^(go to|open)\s+/i, "");
+      const fullUrl = targetUrl.startsWith("http") ? targetUrl : `https://${targetUrl}`;
       generatedStep = {
         number: liveSteps.length + 1,
         action: "navigate",
         action_type: "navigate",
-        description: `Go to ${targetUrl}`,
-        url: targetUrl.startsWith("http") ? targetUrl : `https://${targetUrl}`,
+        description: `Open '${fullUrl}'`,
+        url: fullUrl,
       };
-      setChromeUrl(generatedStep.url);
-      sendInputEvent({ event_type: "navigate", url: generatedStep.url });
+      setChromeUrl(fullUrl);
+      sendInputEvent({ event_type: "navigate", url: fullUrl });
     } else if (raw.toLowerCase().startsWith("click ")) {
-      const elem = raw.replace(/^click\s+(on\s+)?/i, "");
+      const elem = raw.replace(/^click\s+(on\s+)?(the\s+)?/i, "");
       generatedStep = {
         number: liveSteps.length + 1,
         action: "click",
         action_type: "click",
-        description: `Click on ${elem}`,
+        description: `Click on the ${elem}`,
         target: elem,
         selector: `text=${elem}`,
       };
@@ -790,31 +868,15 @@ export function Recorder() {
         number: liveSteps.length + 1,
         action: "type",
         action_type: "type",
-        description: `Enter text '${val}'`,
+        description: `Type in input field '${val}'`,
         input_value: val,
       };
-    } else if (raw.toLowerCase().startsWith("if ") || raw.toLowerCase().startsWith("check ")) {
-      const cond = raw.replace(/^(if|check\s+if)\s+/i, "");
+    } else if (raw.toLowerCase().startsWith("scroll")) {
       generatedStep = {
         number: liveSteps.length + 1,
-        is_condition: true,
-        condition_expr: cond.includes("==") ? cond : `${cond} == true`,
-        then_steps: [
-          {
-            number: 1,
-            action: "click",
-            action_type: "click",
-            description: `Click on confirmed target`,
-          },
-        ],
-        else_steps: [
-          {
-            number: 1,
-            action: "assert",
-            action_type: "assert",
-            description: `Assert fallback notification visible`,
-          },
-        ],
+        action: "scroll",
+        action_type: "scroll",
+        description: "Scroll document",
       };
     } else {
       generatedStep = {
@@ -826,126 +888,32 @@ export function Recorder() {
     }
 
     setLiveSteps((prev) => [...prev, generatedStep]);
-    setAdditionsCount((prev) => prev + 1);
+    setPassedCount((prev) => prev + 1);
     setNlPrompt("");
+    setSlashMenuOpen(false);
     setPromptLoading(false);
-    showToast("AI Step authored locally!", "success");
-  };
-
-  // Add custom manual step
-  const handleAddManualStep = () => {
-    if (!newStepDesc.trim() && !newStepTarget.trim()) return;
-
-    const step = {
-      number: liveSteps.length + 1,
-      action: newStepType,
-      action_type: newStepType,
-      description: newStepDesc || `${newStepType} on ${newStepTarget}`,
-      selector: newStepTarget,
-      input_value: newStepValue,
-    };
-
-    setLiveSteps((prev) => [...prev, step]);
-    setAdditionsCount((prev) => prev + 1);
-    setIsAddingStep(false);
-    setNewStepTarget("");
-    setNewStepValue("");
-    setNewStepDesc("");
-    showToast("Step added", "success");
-  };
-
-  // Add condition block
-  const handleAddConditionBlock = () => {
-    const block = {
-      number: liveSteps.length + 1,
-      is_condition: true,
-      condition_expr: "login_button_visibility == true",
-      then_steps: [
-        {
-          number: 1,
-          action: "click",
-          action_type: "click",
-          description: "Click on login button",
-          selector: 'a[href*="/login"]',
-        },
-        {
-          number: 2,
-          action: "click",
-          action_type: "click",
-          description: "Click on continue",
-          selector: 'button[type="submit"]',
-        },
-        {
-          number: 3,
-          action: "type",
-          action_type: "type",
-          description: "Enter password {{password}}",
-          input_value: "{{password}}",
-          selector: 'input[type="password"]',
-        },
-      ],
-      else_steps: [
-        {
-          number: 1,
-          action: "click",
-          action_type: "click",
-          description: "Click on guest register link",
-          selector: 'a[href*="/register"]',
-        },
-      ],
-    };
-    setLiveSteps((prev) => [...prev, block]);
-    setAdditionsCount((prev) => prev + 1);
-    showToast("Condition block created", "success");
+    showToast("Step authored locally!", "success");
   };
 
   const handleDeleteStep = (index) => {
     setLiveSteps((prev) => prev.filter((_, i) => i !== index));
-    setDeletedCount((prev) => prev + 1);
+    setPassedCount((prev) => Math.max(0, prev - 1));
+    setActiveStepMenu(null);
     showToast("Step removed", "info");
   };
 
-  // Inline Step Editing
-  const startEditStep = (idx, step) => {
-    setEditingIndex(idx);
-    setEditDesc(step.description || "");
-    setEditSelector(step.selector || step.target || "");
-    setEditValue(step.input_value || "");
-  };
-
-  const saveEditStep = (idx) => {
-    setLiveSteps((prev) =>
-      prev.map((step, i) => {
-        if (i !== idx) return step;
-        return {
-          ...step,
-          description: editDesc,
-          selector: editSelector,
-          target: editSelector,
-          input_value: editValue,
-        };
-      })
-    );
-    setEditingIndex(null);
-    setEditedCount((prev) => prev + 1);
-    showToast("Step updated successfully", "success");
-  };
-
-  const handleAddVariable = (e) => {
-    e.preventDefault();
-    if (!newVarKey.trim()) return;
-    setLocalVariables((prev) => [
-      ...prev,
-      {
-        key: newVarKey.trim(),
-        value: newVarVal.trim(),
-        isSecret: newVarSecret,
-      },
-    ]);
-    setNewVarKey("");
-    setNewVarVal("");
-    setNewVarSecret(false);
-    showToast("Variable stored in local vault", "success");
+  const handleDuplicateStep = (index) => {
+    const stepToDup = liveSteps[index];
+    if (!stepToDup) return;
+    const duplicated = {
+      ...stepToDup,
+      number: liveSteps.length + 1,
+      description: `${stepToDup.description} (Copy)`,
+    };
+    setLiveSteps((prev) => [...prev, duplicated]);
+    setPassedCount((prev) => prev + 1);
+    setActiveStepMenu(null);
+    showToast("Step duplicated", "success");
   };
 
   const formatTimer = (secs) => {
@@ -960,764 +928,437 @@ export function Recorder() {
   return (
     <div className="flex flex-col h-full w-full bg-slate-50 dark:bg-surface-dark text-slate-800 dark:text-slate-100 select-none overflow-hidden font-sans transition-colors">
       {/* ──────────────────────────────────────────────────────────────────────────
-          TRACECASE STUDIO TOP BAR (Adaptive Theme, Stats & Actions)
+          STUDIO TOP BAR (Matches Screenshots 1, 2, 3)
           ────────────────────────────────────────────────────────────────────────── */}
       <header className="h-14 px-4 bg-white dark:bg-surface-panelDark border-b border-slate-200 dark:border-surface-borderDark flex items-center justify-between shrink-0 z-30 transition-colors">
-        {/* Left: Brand / Session Breadcrumb */}
+        {/* Left: Authoring Steps, Timer, Passed/Edited/Warning Counters, Pause */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-brand-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-brand-500/20 shrink-0">
-              <Sparkles className="w-4 h-4" />
+          {/* Brand & Authoring Steps */}
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-brand-600 to-indigo-500 flex items-center justify-center text-white shadow-sm shrink-0">
+              <Sparkles className="w-3.5 h-3.5" />
             </div>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-1.5">
-                {isEditingTitle ? (
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="text"
-                      value={testcaseName}
-                      onChange={(e) => setTestcaseName(e.target.value)}
-                      className="px-1.5 py-0.5 text-xs font-bold rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none"
-                      autoFocus
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingTitle(false)}
-                      className="p-1 text-emerald-600 hover:text-emerald-500"
-                    >
-                      <Check className="w-3 h-3" />
-                    </button>
-                  </div>
-                ) : (
-                  <span
-                    onClick={() => setIsEditingTitle(true)}
-                    className="text-xs font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5 cursor-pointer hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
-                    title="Click to rename test case"
-                  >
-                    {testcaseName}
-                    <Edit2 className="w-2.5 h-2.5 text-slate-400 opacity-60" />
-                  </span>
-                )}
-                <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-                  Local Studio
-                </span>
-              </div>
-              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1">
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    isRecording
-                      ? "bg-rose-500 animate-pulse"
-                      : status.status === "paused"
-                      ? "bg-amber-500"
-                      : "bg-slate-400"
-                  }`}
-                />
-                {isActive ? (isRecording ? "Live Session" : "Paused") : "Draft"}
-                {isActive && ` • ${formatTimer(elapsedSeconds)}`}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-900 dark:text-white">
+                Authoring Steps
+              </span>
+              {/* Timer Pill */}
+              <span className="px-2.5 py-0.5 rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-mono font-medium text-slate-700 dark:text-slate-300">
+                {formatTimer(elapsedSeconds)}
               </span>
             </div>
           </div>
 
-          <div className="h-5 w-px bg-slate-200 dark:bg-slate-800 mx-1 hidden sm:block" />
+          <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-1" />
 
-          {/* Edit Stats Tracker */}
-          <div className="hidden lg:flex items-center gap-1.5 text-xs font-medium">
-            <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200/80 dark:border-emerald-800/80 font-semibold text-[11px]">
-              + Additions {additionsCount}
+          {/* Counter Dots (Passed, Additions/Edits, Warnings) */}
+          <div className="flex items-center gap-3 text-xs font-semibold">
+            {/* Green: Passed / Total steps */}
+            <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>{passedCount}</span>
             </span>
-            <span className="px-2 py-0.5 rounded-md bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-400 border border-sky-200/80 dark:border-sky-800/80 font-semibold text-[11px]">
-              ✎ Edited {editedCount}
+            {/* Purple: Edits / Dynamic inputs */}
+            <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400">
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
+              <span>{editedCount}</span>
             </span>
-            <span className="px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200/80 dark:border-rose-800/80 font-semibold text-[11px]">
-              🗑 Deleted {deletedCount}
-            </span>
-            <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-semibold text-[11px]">
-              ⚙ Applied settings 03
+            {/* Yellow: Warnings / Alerts */}
+            <span className="flex items-center gap-1 text-amber-500">
+              <AlertCircle className="w-3.5 h-3.5" />
+              <span>{warnCount}</span>
             </span>
           </div>
-        </div>
 
-        {/* Center / Action Toolbar */}
-        <div className="flex items-center gap-2">
-          {/* Variables Drawer Button */}
-          <button
-            type="button"
-            onClick={() => setIsVariablesOpen(!isVariablesOpen)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
-              isVariablesOpen
-                ? "bg-brand-50 dark:bg-brand-950 border-brand-500 text-brand-700 dark:text-brand-300 shadow-sm"
-                : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750"
-            }`}
-            title="Manage Local Variables & Secrets"
-          >
-            <span className="font-mono font-bold text-[11px]">(x)</span>
-            <span>Variables</span>
-            <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold">
-              {localVariables.length}
-            </span>
-          </button>
+          <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-1" />
 
           {/* Replay Button */}
           <button
             type="button"
             onClick={handleRefreshPage}
-            className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-sm"
-            title="Replay / refresh browser page"
+            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            title="Refresh / Replay"
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
 
-          {/* Pause / Resume Controls */}
-          {isActive && (
-            <>
-              {isRecording ? (
-                <button
-                  type="button"
-                  onClick={handlePause}
-                  disabled={pauseLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-all"
-                >
-                  <Pause className="w-3.5 h-3.5" />
-                  <span>Pause</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleResume}
-                  disabled={pauseLoading}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-500 transition-all shadow-sm shadow-emerald-600/20"
-                >
-                  <Play className="w-3.5 h-3.5" />
-                  <span>Resume</span>
-                </button>
-              )}
-            </>
-          )}
-
-          {/* Stop / Finalize Button or Launch Studio */}
-          {isActive ? (
-            <button
-              type="button"
-              onClick={handleStop}
-              disabled={loading}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-sm shadow-rose-600/25 transition-all"
-            >
-              {loading ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Save className="w-3.5 h-3.5" />
-              )}
-              <span>Finalize & Save</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleStart}
-              disabled={loading}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold bg-brand-600 hover:bg-brand-500 text-white shadow-sm shadow-brand-600/25 transition-all"
-            >
-              {loading ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Play className="w-3.5 h-3.5 fill-current" />
-              )}
-              <span>Launch Studio</span>
-            </button>
-          )}
+          {/* Pause / Resume Button */}
+          <button
+            type="button"
+            onClick={isRecording ? handlePause : handleResume}
+            disabled={pauseLoading}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition-all ${
+              isRecording
+                ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700 hover:bg-amber-100"
+                : "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100"
+            }`}
+          >
+            {isRecording ? (
+              <>
+                <Pause className="w-3 h-3 fill-current" />
+                <span>Pause</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-3 h-3 fill-current" />
+                <span>Resume</span>
+              </>
+            )}
+          </button>
         </div>
 
-        {/* Right: Manual Interaction Toggle & Zero-Leak Local Pill */}
-        <div className="flex items-center gap-3">
-          {/* Manual Interaction Switch */}
-          <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700/60 shadow-sm">
-            <Hand
-              className={`w-3.5 h-3.5 ${
-                manualInteraction ? "text-brand-600 dark:text-brand-400" : "text-slate-400"
-              }`}
-            />
-            <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
-              Manual Interaction
-            </span>
+        {/* Right: Environment, Advanced Settings, Variables, Save, Exit */}
+        <div className="flex items-center gap-2">
+          {/* Set Environment */}
+          <div className="relative">
             <button
               type="button"
-              onClick={() => setManualInteraction(!manualInteraction)}
-              className={`w-8 h-4 flex items-center rounded-full p-0.5 transition-colors cursor-pointer ${
-                manualInteraction ? "bg-brand-600 justify-end" : "bg-slate-300 dark:bg-slate-600 justify-start"
-              }`}
-              title="Toggle direct input forwarding vs visual inspection"
+              onClick={() => setIsEnvOpen(!isEnvOpen)}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
-              <div className="w-3 h-3 rounded-full bg-white shadow-sm" />
+              <Monitor className="w-3.5 h-3.5 text-slate-500" />
+              <span>Set Environment</span>
             </button>
+            {isEnvOpen && (
+              <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl p-3 z-50 text-xs space-y-2">
+                <span className="font-bold text-slate-700 dark:text-slate-200 block">
+                  Environment Resolution
+                </span>
+                <button
+                  onClick={() => {
+                    setViewportDims({ width: 1440, height: 900 });
+                    setIsEnvOpen(false);
+                  }}
+                  className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-between"
+                >
+                  <span>Desktop (1440 &times; 900)</span>
+                  {viewportDims.width === 1440 && <Check className="w-3.5 h-3.5 text-brand-500" />}
+                </button>
+                <button
+                  onClick={() => {
+                    setViewportDims({ width: 1280, height: 720 });
+                    setIsEnvOpen(false);
+                  }}
+                  className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-between"
+                >
+                  <span>Laptop (1280 &times; 720)</span>
+                  {viewportDims.width === 1280 && <Check className="w-3.5 h-3.5 text-brand-500" />}
+                </button>
+                <button
+                  onClick={() => {
+                    setViewportDims({ width: 390, height: 844 });
+                    setIsEnvOpen(false);
+                  }}
+                  className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-between"
+                >
+                  <span>Mobile View (390 &times; 844)</span>
+                  {viewportDims.width === 390 && <Check className="w-3.5 h-3.5 text-brand-500" />}
+                </button>
+              </div>
+            )}
           </div>
 
-          {/* Local Engine Security Pill */}
-          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[11px] font-medium font-mono">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span>100% Local Engine</span>
-            <span className="text-[10px] opacity-75">
-              ({latencyMs > 0 ? `${latencyMs}ms` : "0ms"})
-            </span>
-          </div>
+          {/* Advanced Settings */}
+          <button
+            type="button"
+            onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          >
+            <Settings className="w-3.5 h-3.5 text-slate-500" />
+            <span>Advanced Settings</span>
+            <span className="px-1 text-[10px] font-bold rounded bg-slate-200 dark:bg-slate-700">1</span>
+          </button>
+
+          {/* Variables (x) */}
+          <button
+            type="button"
+            onClick={() => setIsVariablesOpen(!isVariablesOpen)}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          >
+            <span className="font-mono font-bold text-[11px]">(x)</span>
+            <span className="hidden sm:inline">Variables</span>
+          </button>
+
+          {/* Save Button (Green, Opens Save Modal) */}
+          <button
+            type="button"
+            onClick={() => setIsSaveModalOpen(true)}
+            className="px-4 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm shadow-emerald-600/20 transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span>Save</span>
+          </button>
+
+          {/* Exit Button */}
+          <button
+            type="button"
+            onClick={() => navigate("/testcases")}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          >
+            Exit
+          </button>
         </div>
       </header>
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          MAIN STUDIO SPLIT VIEW: LEFT (AUTHORING) + RIGHT (EMBEDDED BROWSER)
+          MAIN SPLIT VIEW: LEFT (AUTHORING STEPS) + RIGHT (GOOGLE CHROME BROWSER)
           ────────────────────────────────────────────────────────────────────────── */}
       <div className="flex-1 flex overflow-hidden">
-        {/* ── LEFT PANE: NATURAL LANGUAGE & STEP BUILDER (~42% width) ── */}
-        <div className="w-[420px] lg:w-[460px] xl:w-[480px] border-r border-slate-200 dark:border-surface-borderDark flex flex-col bg-slate-50/70 dark:bg-surface-panelDark shrink-0 transition-colors">
-          {/* 1. "What do you want to test today?" Prompt Box */}
-          <div className="p-3.5 border-b border-slate-200 dark:border-surface-borderDark bg-white dark:bg-slate-900/60 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-brand-500 dark:text-brand-400" />
-                What do you want to test today?
-              </label>
-              <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
-                Natural Language &rarr; Local Action
-              </span>
-            </div>
-
-            <form onSubmit={handleNlPromptSubmit} className="relative">
-              <input
-                type="text"
-                value={nlPrompt}
-                onChange={(e) => setNlPrompt(e.target.value)}
-                placeholder="e.g. Go to https://example.com, click login button..."
-                className="w-full pl-3 pr-24 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all font-sans"
-              />
-              <button
-                type="submit"
-                disabled={promptLoading || !nlPrompt.trim()}
-                className="absolute right-1 top-1 bottom-1 px-3 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-[11px] font-bold flex items-center gap-1 transition-all disabled:opacity-40 shadow-sm"
-              >
-                {promptLoading ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                  <Sparkles className="w-3 h-3" />
-                )}
-                <span>Author</span>
-              </button>
-            </form>
-
-            {/* Quick Action Shortcut Pills */}
-            <div className="flex items-center gap-1.5 pt-0.5 overflow-x-auto text-[10px] text-slate-600 dark:text-slate-400 scrollbar-none">
-              <button
-                type="button"
-                onClick={() => setNlPrompt("Go to https://")}
-                className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors shrink-0"
-              >
-                + Navigate
-              </button>
-              <button
-                type="button"
-                onClick={() => setNlPrompt("Click on ")}
-                className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors shrink-0"
-              >
-                + Click
-              </button>
-              <button
-                type="button"
-                onClick={() => setNlPrompt("Enter password {{password}}")}
-                className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors shrink-0"
-              >
-                + Secret Input
-              </button>
-              <button
-                type="button"
-                onClick={handleAddConditionBlock}
-                className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors shrink-0 font-semibold"
-              >
-                + If Condition
-              </button>
-            </div>
-          </div>
-
-          {/* 2. Step Hierarchy & Conditional Tree */}
-          <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5">
-            <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">
-              <span className="flex items-center gap-1.5">
-                <span>Steps Sequence</span>
-                <span className="px-1.5 py-0.2 rounded-full bg-slate-200 dark:bg-slate-800 text-[10px] font-bold text-slate-700 dark:text-slate-300">
-                  {liveSteps.length}
-                </span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setIsAddingStep(true)}
-                className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 text-[11px] font-bold flex items-center gap-1 transition-colors"
-              >
-                <Plus className="w-3 h-3" /> Add Step
-              </button>
-            </div>
-
-            {/* Empty State */}
-            {liveSteps.length === 0 && (
-              <div className="py-12 text-center border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-950/40 p-6 space-y-3">
-                <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
-                  <Activity className="w-5 h-5 text-brand-500" />
+        {/* ── LEFT PANE: AUTHORING STEPS LIST + BOTTOM AI/STEP BAR (~40% width) ── */}
+        <div className="w-[380px] lg:w-[420px] xl:w-[450px] border-r border-slate-200 dark:border-surface-borderDark flex flex-col bg-white dark:bg-surface-panelDark shrink-0 transition-colors justify-between">
+          {/* Steps List Area or Center Empty State */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {/* EMPTY STATE (Matches Screenshot 1) */}
+            {liveSteps.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center px-6 py-12 space-y-3 animate-in fade-in duration-300">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-50 to-indigo-50 dark:from-brand-950/40 dark:to-indigo-950/40 border border-brand-200/60 dark:border-brand-800/60 flex items-center justify-center text-brand-600 dark:text-brand-400 shadow-sm">
+                  <FlaskConical className="w-7 h-7" />
                 </div>
-                <div>
-                  <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                    No steps recorded yet
-                  </h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-xs mx-auto mt-1 leading-relaxed">
-                    Interact directly with the browser canvas on the right, or type a
-                    natural language prompt above to generate steps locally.
+                <div className="space-y-1.5 max-w-xs">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    What do you want to test today?
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Add a step or define an objective to get started. Press{" "}
+                    <code className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-brand-600 dark:text-brand-400 font-mono text-[11px] font-semibold">
+                      /
+                    </code>{" "}
+                    for more actions, or interact manually to author your test case.
                   </p>
                 </div>
               </div>
-            )}
+            ) : (
+              /* POPULATED STEPS LIST (Matches Screenshots 2 & 3) */
+              <div className="space-y-2.5">
+                {liveSteps.map((step, idx) => {
+                  return (
+                    <div
+                      key={idx}
+                      className="group relative rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 hover:border-slate-300 dark:hover:border-slate-700 shadow-xs p-3 transition-all"
+                    >
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          {/* Expand chevron */}
+                          <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
 
-            {/* Render Steps & Branching Condition Blocks */}
-            {liveSteps.map((step, idx) => {
-              if (step.is_condition) {
-                const isCollapsed = collapsedConditions[idx];
-                const isElseExpanded = showElseSteps[idx];
-
-                return (
-                  <div
-                    key={idx}
-                    className="rounded-2xl border-2 border-indigo-400/50 dark:border-indigo-500/40 bg-indigo-50/20 dark:bg-indigo-950/20 p-3 space-y-3 transition-all shadow-sm"
-                  >
-                    {/* Condition Header Bar */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="w-5 h-5 rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-mono text-[11px] font-bold flex items-center justify-center shrink-0">
-                          {idx + 1}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setCollapsedConditions((prev) => ({
-                              ...prev,
-                              [idx]: !prev[idx],
-                            }))
-                          }
-                          className="p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors"
-                        >
-                          {isCollapsed ? (
-                            <ChevronRight className="w-3.5 h-3.5 text-indigo-500" />
+                          {/* Action Icon */}
+                          {step.action_type === "navigate" || step.action === "navigate" ? (
+                            <Globe className="w-4 h-4 text-emerald-500 shrink-0" />
+                          ) : step.action_type === "type" || step.action === "type" ? (
+                            <Type className="w-4 h-4 text-emerald-600 shrink-0" />
+                          ) : step.action_type === "scroll" || step.action === "scroll" ? (
+                            <Check className="w-4 h-4 text-emerald-500 shrink-0" />
                           ) : (
-                            <ChevronDown className="w-3.5 h-3.5 text-indigo-500" />
+                            <Wand2 className="w-4 h-4 text-emerald-500 shrink-0" />
                           )}
-                        </button>
-                        <span className="px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 flex items-center gap-1.5">
-                          <span className="text-[10px] text-indigo-500">0/1</span>
-                          <span>if {step.condition_expr}</span>
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const newExpr = prompt("Edit condition expression:", step.condition_expr);
-                            if (newExpr) {
-                              setLiveSteps((prev) =>
-                                prev.map((s, i) => (i === idx ? { ...s, condition_expr: newExpr } : s))
-                              );
-                              setEditedCount((prev) => prev + 1);
-                            }
-                          }}
-                          className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                          title="Edit condition"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteStep(idx)}
-                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                          title="Delete condition block"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
 
-                    {!isCollapsed && (
-                      <div className="space-y-3 pl-3 border-l-2 border-indigo-300 dark:border-indigo-700/60 ml-2.5">
-                        {/* Then Branch */}
-                        <div className="space-y-1.5">
-                          <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block flex items-center gap-1">
-                            <CornerDownRight className="w-3 h-3" />
-                            Then
-                          </span>
-                          {(step.then_steps || []).map((tStep, tIdx) => (
-                            <div
-                              key={tIdx}
-                              className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between text-xs hover:border-slate-300 dark:hover:border-slate-700 transition-all group"
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
-                                {tStep.action === "navigate" ? (
-                                  <Globe className="w-3.5 h-3.5 text-sky-500 shrink-0" />
-                                ) : tStep.action === "type" ? (
-                                  <Type className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                                ) : (
-                                  <Sparkles className="w-3.5 h-3.5 text-brand-500 shrink-0" />
-                                )}
-                                <span className="text-slate-800 dark:text-slate-200 font-medium truncate">
-                                  {tStep.description}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const newDesc = prompt("Edit step description:", tStep.description);
-                                    if (newDesc) {
-                                      setLiveSteps((prev) =>
-                                        prev.map((s, i) => {
-                                          if (i !== idx) return s;
-                                          const nextThen = [...(s.then_steps || [])];
-                                          nextThen[tIdx] = { ...nextThen[tIdx], description: newDesc };
-                                          return { ...s, then_steps: nextThen };
-                                        })
-                                      );
-                                      setEditedCount((c) => c + 1);
-                                    }
-                                  }}
-                                  className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white"
-                                >
-                                  <Edit2 className="w-2.5 h-2.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setLiveSteps((prev) =>
-                                      prev.map((s, i) => {
-                                        if (i !== idx) return s;
-                                        const nextThen = s.then_steps.filter((_, ti) => ti !== tIdx);
-                                        return { ...s, then_steps: nextThen };
-                                      })
-                                    );
-                                    setDeletedCount((c) => c + 1);
-                                  }}
-                                  className="p-1 text-slate-400 hover:text-rose-500"
-                                >
-                                  <Trash2 className="w-2.5 h-2.5" />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Else Branch */}
-                        <div className="space-y-1.5 pt-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                              <CornerDownRight className="w-3 h-3" />
-                              Else
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setShowElseSteps((prev) => ({
-                                  ...prev,
-                                  [idx]: !prev[idx],
-                                }))
-                              }
-                              className="text-[10px] text-brand-600 dark:text-brand-400 hover:underline flex items-center gap-0.5"
-                            >
-                              {isElseExpanded ? "Hide steps" : "Show steps"}{" "}
-                              {isElseExpanded ? "⌃" : "⌄"}
-                            </button>
-                          </div>
-
-                          {isElseExpanded && (
-                            <div className="space-y-1.5 pt-1">
-                              {(step.else_steps || []).map((eStep, eIdx) => (
-                                <div
-                                  key={eIdx}
-                                  className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between text-xs"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <Eye className="w-3.5 h-3.5 text-amber-500" />
-                                    <span className="text-slate-800 dark:text-slate-200">
-                                      {eStep.description}
-                                    </span>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setLiveSteps((prev) =>
-                                        prev.map((s, i) => {
-                                          if (i !== idx) return s;
-                                          const nextElse = s.else_steps.filter((_, ei) => ei !== eIdx);
-                                          return { ...s, else_steps: nextElse };
-                                        })
-                                      );
-                                      setDeletedCount((c) => c + 1);
-                                    }}
-                                    className="p-1 text-slate-400 hover:text-rose-500"
-                                  >
-                                    <Trash2 className="w-2.5 h-2.5" />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              }
-
-              // Standard Linear Step Card (Tracecase Studio Step Card)
-              const isEditingThisStep = editingIndex === idx;
-
-              return (
-                <div
-                  key={step.number || idx}
-                  className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-sm transition-all p-2.5 space-y-1.5"
-                >
-                  <div className="flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      {/* Step Number Badge */}
-                      <span className="w-5 h-5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono text-[11px] font-bold flex items-center justify-center shrink-0">
-                        {step.number || idx + 1}
-                      </span>
-
-                      {/* Expand / Collapse Chevron */}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setExpandedSteps((prev) => ({
-                            ...prev,
-                            [idx]: !prev[idx],
-                          }))
-                        }
-                        className="text-slate-400 hover:text-slate-700 dark:hover:text-white"
-                      >
-                        {expandedSteps[idx] ? (
-                          <ChevronDown className="w-3.5 h-3.5" />
-                        ) : (
-                          <ChevronRight className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-
-                      {/* Action Type Icon */}
-                      {step.action_type === "navigate" || step.action === "navigate" ? (
-                        <Globe className="w-3.5 h-3.5 text-sky-500 shrink-0" />
-                      ) : step.action_type === "click" || step.action === "click" ? (
-                        <Sparkles className="w-3.5 h-3.5 text-brand-500 shrink-0" />
-                      ) : step.action_type === "type" || step.action === "type" ? (
-                        <Type className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                      ) : (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                      )}
-
-                      {/* Step Description / Inline Edit */}
-                      {isEditingThisStep ? (
-                        <div className="flex items-center gap-1 flex-1">
-                          <input
-                            type="text"
-                            value={editDesc}
-                            onChange={(e) => setEditDesc(e.target.value)}
-                            className="w-full px-2 py-0.5 text-xs rounded bg-slate-50 dark:bg-slate-950 border border-brand-400 text-slate-900 dark:text-white focus:outline-none"
-                            autoFocus
-                          />
-                        </div>
-                      ) : (
-                        <div className="flex flex-col min-w-0">
+                          {/* Description */}
                           <span className="text-slate-800 dark:text-slate-200 font-medium truncate">
-                            {step.description ||
-                              `${step.action || "Action"} on ${step.target || step.selector || "element"}`}
+                            {step.description}
                           </span>
                         </div>
-                      )}
-                    </div>
 
-                    {/* Step Action Buttons (Inline Edit & Delete) */}
-                    <div className="flex items-center gap-1 shrink-0">
-                      {isEditingThisStep ? (
-                        <>
+                        {/* Three dots menu */}
+                        <div className="relative">
                           <button
                             type="button"
-                            onClick={() => saveEditStep(idx)}
-                            className="p-1 rounded text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-                            title="Save changes"
+                            onClick={() =>
+                              setActiveStepMenu(activeStepMenu === idx ? null : idx)
+                            }
+                            className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white"
                           >
-                            <Check className="w-3 h-3" />
+                            <MoreHorizontal className="w-3.5 h-3.5" />
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditingIndex(null)}
-                            className="p-1 rounded text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-                            title="Cancel edit"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => startEditStep(idx, step)}
-                            className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                            title="Edit step"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteStep(idx)}
-                            className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                            title="Delete step"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
 
-                  {/* Expanded Step Details */}
-                  {expandedSteps[idx] && (
-                    <div className="pl-6 pt-1 text-[11px] font-mono text-slate-500 dark:text-slate-400 space-y-1 border-t border-slate-100 dark:border-slate-800 mt-1">
-                      {step.selector && (
-                        <div className="flex items-center gap-1.5 truncate">
-                          <span className="text-slate-400 dark:text-slate-500">Selector:</span>
-                          <span className="text-brand-600 dark:text-brand-300 truncate">
-                            {step.selector}
-                          </span>
+                          {activeStepMenu === idx && (
+                            <div className="absolute right-0 mt-1 w-32 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-xl py-1 z-50 text-xs">
+                              <button
+                                onClick={() => handleDuplicateStep(idx)}
+                                className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center gap-1.5"
+                              >
+                                <Copy className="w-3 h-3" /> Duplicate
+                              </button>
+                              <button
+                                onClick={() => handleDeleteStep(idx)}
+                                className="w-full text-left px-3 py-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 flex items-center gap-1.5"
+                              >
+                                <Trash2 className="w-3 h-3" /> Delete
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      )}
-                      {step.input_value && (
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-slate-400 dark:text-slate-500">Value:</span>
-                          <span className="text-indigo-600 dark:text-indigo-300">
-                            {step.input_value}
-                          </span>
-                        </div>
-                      )}
-                      {step.url && (
-                        <div className="flex items-center gap-1.5 truncate">
-                          <span className="text-slate-400 dark:text-slate-500">URL:</span>
-                          <span className="text-sky-600 dark:text-sky-300 truncate">
-                            {step.url}
-                          </span>
-                        </div>
-                      )}
+                      </div>
                     </div>
-                  )}
+                  );
+                })}
+
+                {/* Cursor indicator indicator */}
+                <div className="flex items-center gap-2 pt-1 px-1 text-[11px] font-mono text-slate-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse" />
+                  <span>Cursor</span>
                 </div>
-              );
-            })}
+              </div>
+            )}
           </div>
 
-          {/* Step Insertion Modal */}
-          {isAddingStep && (
-            <div className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 space-y-2 animate-in slide-in-from-bottom-2 shadow-lg">
-              <div className="flex items-center justify-between text-xs font-bold text-slate-900 dark:text-white">
-                <span>Add Custom Step</span>
+          {/* BOTTOM AUTHORING INPUT BAR (Matches Screenshots 1, 2, 3) */}
+          <div className="p-3 border-t border-slate-200 dark:border-surface-borderDark bg-white dark:bg-surface-panelDark relative">
+            {/* Slash Commands Dropdown */}
+            {slashMenuOpen && (
+              <div className="absolute bottom-16 left-3 right-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-2 z-50 animate-in slide-in-from-bottom-2 text-xs space-y-1">
+                <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Quick Step Commands
+                </div>
                 <button
                   type="button"
-                  onClick={() => setIsAddingStep(false)}
-                  className="text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                  onClick={() => {
+                    setNlPrompt("Open 'https://www.google.com'");
+                    setSlashMenuOpen(false);
+                    inputRef.current?.focus();
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2 text-slate-700 dark:text-slate-200"
                 >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <select
-                  value={newStepType}
-                  onChange={(e) => setNewStepType(e.target.value)}
-                  className="px-2 py-1 text-xs rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white"
-                >
-                  <option value="click">Click</option>
-                  <option value="type">Type / Input</option>
-                  <option value="navigate">Navigate</option>
-                  <option value="assert">Assert Text</option>
-                </select>
-                <input
-                  type="text"
-                  placeholder="Target selector or text"
-                  value={newStepTarget}
-                  onChange={(e) => setNewStepTarget(e.target.value)}
-                  className="col-span-2 px-2 py-1 text-xs rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white"
-                />
-              </div>
-              <div className="flex items-center justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setIsAddingStep(false)}
-                  className="px-2.5 py-1 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
-                >
-                  Cancel
+                  <Globe className="w-3.5 h-3.5 text-emerald-500" />
+                  <span><strong>/open</strong> - Navigate to URL</span>
                 </button>
                 <button
                   type="button"
-                  onClick={handleAddManualStep}
-                  className="px-3 py-1 text-xs font-bold rounded-lg bg-brand-600 text-white hover:bg-brand-500"
+                  onClick={() => {
+                    setNlPrompt("Click on the ");
+                    setSlashMenuOpen(false);
+                    inputRef.current?.focus();
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2 text-slate-700 dark:text-slate-200"
                 >
-                  Insert Step
+                  <Wand2 className="w-3.5 h-3.5 text-brand-500" />
+                  <span><strong>/click</strong> - Click element</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNlPrompt("Type in ");
+                    setSlashMenuOpen(false);
+                    inputRef.current?.focus();
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2 text-slate-700 dark:text-slate-200"
+                >
+                  <Type className="w-3.5 h-3.5 text-indigo-500" />
+                  <span><strong>/type</strong> - Input text</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNlPrompt("Scroll document");
+                    setSlashMenuOpen(false);
+                    inputRef.current?.focus();
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2 text-slate-700 dark:text-slate-200"
+                >
+                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                  <span><strong>/scroll</strong> - Scroll page</span>
                 </button>
               </div>
-            </div>
-          )}
+            )}
+
+            <form onSubmit={handleNlPromptSubmit} className="relative flex items-center">
+              <div className="absolute left-3.5 text-slate-400">
+                <Sparkles className="w-4 h-4 text-brand-500" />
+              </div>
+              <input
+                ref={inputRef}
+                type="text"
+                value={nlPrompt}
+                onChange={(e) => {
+                  setNlPrompt(e.target.value);
+                  if (e.target.value === "/") {
+                    setSlashMenuOpen(true);
+                  } else if (!e.target.value) {
+                    setSlashMenuOpen(false);
+                  }
+                }}
+                placeholder="Add a step or an objective or press / for actions"
+                className="w-full pl-10 pr-12 py-3 text-xs rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-brand-500 transition-all font-sans"
+              />
+              <button
+                type="submit"
+                disabled={!nlPrompt.trim() || promptLoading}
+                className="absolute right-2 w-7 h-7 rounded-full bg-slate-700 hover:bg-slate-900 dark:bg-slate-600 dark:hover:bg-slate-500 text-white flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+              >
+                {promptLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <ArrowUp className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </form>
+          </div>
         </div>
 
-        {/* ── RIGHT PANE: EMBEDDED LOCAL BROWSER CANVAS (~58% width) ── */}
+        {/* ── RIGHT PANE: GOOGLE CHROME BROWSER VIEW (Matches Screenshots 1, 2, 3) ── */}
         <div className="flex-1 flex flex-col bg-slate-100 dark:bg-slate-950 overflow-hidden transition-colors">
-          {/* Browser Chrome Toolbar (Google Chrome Style) */}
-          <div className="bg-slate-200/80 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-2 space-y-1.5 shrink-0 select-none">
-            {/* Tab Bar Strip */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
-                {tabs.map((tab) => (
-                  <div
-                    key={tab.page_id}
-                    onClick={() => handleSwitchTab(tab.page_id)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-t-lg text-xs font-medium cursor-pointer transition-all border-t border-x ${
-                      activeTabId === tab.page_id
-                        ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-white border-slate-200 dark:border-slate-800 shadow-sm"
-                        : "bg-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 border-transparent"
-                    }`}
-                  >
-                    <Globe className="w-3 h-3 text-brand-500" />
-                    <span className="truncate max-w-[160px] text-[11px] font-medium">
-                      {tab.title || "New Tab"}
-                    </span>
-                    {tabs.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={(e) => handleCloseTab(tab.page_id, e)}
-                        className="text-slate-400 hover:text-slate-700 dark:hover:text-white ml-1"
-                      >
-                        <X className="w-2.5 h-2.5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={handleNewTab}
-                  className="p-1 rounded text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
-                  title="Open New Tab"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              {/* Viewport Dimension Info */}
-              <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500 dark:text-slate-400 shrink-0">
-                <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                  {viewportDims.width}&times;{viewportDims.height}
-                </span>
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    streamConnected ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
-                  }`}
-                  title={streamConnected ? "Live CDP Stream Connected" : "Stream Idle"}
-                />
-              </div>
+          {/* Top Browser Bar (Google Chrome • Recording steps • Reset Session) */}
+          <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between select-none">
+            <div className="flex items-center gap-2.5">
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                Google Chrome
+              </span>
+              {/* Pink Recording steps Pill */}
+              <span className="px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-[10px] font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                <span>Recording steps</span>
+              </span>
             </div>
 
-            {/* Navigation & Address Bar (Chrome Omnibox) */}
+            <button
+              type="button"
+              onClick={handleResetSession}
+              className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Reset Session</span>
+            </button>
+          </div>
+
+          {/* Chrome Tab Strip & Address Omnibox */}
+          <div className="bg-slate-200/90 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-2 space-y-1.5 shrink-0 select-none">
+            {/* Tab strip */}
+            <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
+              {tabs.map((tab) => (
+                <div
+                  key={tab.page_id}
+                  onClick={() => handleSwitchTab(tab.page_id)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-t-lg text-xs font-medium cursor-pointer transition-all border-t border-x ${
+                    activeTabId === tab.page_id
+                      ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-white border-slate-200 dark:border-slate-800 shadow-sm"
+                      : "bg-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 border-transparent"
+                  }`}
+                >
+                  <Globe className="w-3 h-3 text-blue-500" />
+                  <span className="truncate max-w-[160px] text-[11px] font-medium">
+                    {tab.title || "Google"}
+                  </span>
+                  {tabs.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={(e) => handleCloseTab(tab.page_id, e)}
+                      className="text-slate-400 hover:text-slate-700 dark:hover:text-white ml-1"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={handleNewTab}
+                className="p-1 rounded text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+                title="New Tab"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Omnibox Address Bar */}
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
                 <button
@@ -1746,15 +1387,15 @@ export function Recorder() {
                 </button>
               </div>
 
-              {/* Omnibox Address Input */}
+              {/* URL Address Input (Showing google.com by default) */}
               <form onSubmit={handleNavigateSubmit} className="flex-1 relative">
                 <Lock className="w-3 h-3 absolute left-3 top-1/2 -translate-y-1/2 text-emerald-500 dark:text-emerald-400" />
                 <input
                   type="text"
                   value={chromeUrl}
                   onChange={(e) => setChromeUrl(e.target.value)}
-                  placeholder="Enter target URL (e.g. https://example.com or http://localhost:3000)..."
-                  className="w-full pl-8 pr-14 py-1.5 text-xs font-mono rounded-full bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-800 focus:outline-none focus:border-brand-500 shadow-inner transition-colors"
+                  placeholder="https://www.google.com"
+                  className="w-full pl-8 pr-12 py-1.5 text-xs font-mono rounded-full bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-800 focus:outline-none focus:border-brand-500 shadow-inner transition-colors"
                 />
                 <button
                   type="submit"
@@ -1763,339 +1404,348 @@ export function Recorder() {
                   Go
                 </button>
               </form>
+
+              {/* Viewport Device Mode Toggle (Desktop vs Mobile Emulation) */}
+              <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setDeviceMode("desktop")}
+                  className={`px-2 py-1 rounded text-xs flex items-center gap-1 transition-colors ${
+                    deviceMode === "desktop"
+                      ? "bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 font-bold shadow-xs"
+                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-300"
+                  }`}
+                  title="Desktop Viewport (1440x900)"
+                >
+                  <Monitor className="w-3 h-3" />
+                  <span className="text-[10px]">Desktop</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeviceMode("mobile")}
+                  className={`px-2 py-1 rounded text-xs flex items-center gap-1 transition-colors ${
+                    deviceMode === "mobile"
+                      ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 font-bold shadow-xs"
+                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-300"
+                  }`}
+                  title="Mobile Viewport Emulation (393x852 iPhone 15 Pro)"
+                >
+                  <Smartphone className="w-3 h-3" />
+                  <span className="text-[10px]">Mobile</span>
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Live Screencast Viewport Container */}
+          {/* Browser Viewport (Live Stream Canvas or Google View) */}
           <div
             ref={viewportContainerRef}
             tabIndex={0}
             onKeyDown={handleKeyDown}
             onKeyUp={handleKeyUp}
             onPaste={handlePaste}
-            className="flex-1 relative bg-slate-900 flex items-center justify-center overflow-hidden outline-none select-none cursor-crosshair"
-          >
-            {/* Live Screencast Canvas */}
-            <canvas
-              ref={canvasRef}
-              onMouseMove={handleMouseMove}
-              onMouseDown={handleMouseDown}
-              onMouseUp={handleMouseUp}
-              onClick={handleClick}
-              onDoubleClick={handleDoubleClick}
-              onWheel={handleWheel}
-              onContextMenu={handleContextMenu}
-              className={`max-w-full max-h-full object-contain ${
-                isActive ? "block" : "hidden"
-              }`}
-            />
-
-            {/* Idle State Prompt */}
-            {!isActive && (
-              <div className="text-center p-8 space-y-4 z-10 max-w-lg">
-                <div className="w-14 h-14 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center mx-auto text-brand-500 shadow-sm">
-                  <Video className="w-7 h-7" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                    Local Chromium Viewport
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                    Embedded CDP-streamed browser session running natively on this machine.
-                    Sub-millisecond input response, zero cloud leakage, full cookie & auth isolation.
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-center gap-2 pt-1">
-                  <input
-                    type="text"
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    placeholder="Enter target URL (e.g. https://example.com)..."
-                    className="px-3.5 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white w-80 font-mono focus:outline-none focus:border-brand-500 shadow-sm"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleStart}
-                    disabled={loading || !url.trim()}
-                    className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all shadow-md shadow-brand-600/25 flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
-                  >
-                    {loading ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                    )}
-                    <span>Start Studio</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Connecting Spinner */}
-            {isActive && !streamConnected && (
-              <div className="absolute inset-0 bg-white/70 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center z-20">
-                <div className="flex items-center gap-3 text-xs text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800">
-                  <Loader2 className="w-5 h-5 animate-spin text-brand-500" />
-                  <span>Connecting to local CDP screencast stream...</span>
-                </div>
-              </div>
-            )}
-
-            {/* JS Dialog Modal Overlay */}
-            {activeDialog && (
-              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-40">
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 max-w-md w-full shadow-2xl space-y-4">
-                  <div className="flex items-center gap-2.5 text-amber-500">
-                    <AlertCircle className="w-5 h-5 shrink-0" />
-                    <h4 className="text-sm font-bold text-slate-900 dark:text-white capitalize">
-                      JavaScript {activeDialog.dialog_type || "Dialog"}
-                    </h4>
-                  </div>
-                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                    {activeDialog.message}
-                  </p>
-                  {activeDialog.dialog_type === "prompt" && (
-                    <input
-                      type="text"
-                      value={dialogPromptValue}
-                      onChange={(e) => setDialogPromptValue(e.target.value)}
-                      placeholder="Enter value..."
-                      className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-brand-500"
-                      autoFocus
-                    />
-                  )}
-                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                    {activeDialog.dialog_type !== "alert" && (
-                      <button
-                        type="button"
-                        onClick={() => handleDialogResponse(false)}
-                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
-                      >
-                        Cancel
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleDialogResponse(true)}
-                      className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-brand-600 hover:bg-brand-500 text-white"
-                    >
-                      OK
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* File Chooser Prompt Overlay */}
-            {activeFileChooser && (
-              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-40">
-                <form
-                  onSubmit={handleFileChooserSubmit}
-                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 max-w-md w-full shadow-2xl space-y-4"
-                >
-                  <div className="flex items-center gap-2.5 text-sky-500">
-                    <FileUp className="w-5 h-5 shrink-0" />
-                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">File Upload Request</h4>
-                  </div>
-                  <p className="text-xs text-slate-600 dark:text-slate-300">
-                    Specify the absolute path of the local file to provide:
-                  </p>
-                  <input
-                    type="text"
-                    value={fileUploadPath}
-                    onChange={(e) => setFileUploadPath(e.target.value)}
-                    placeholder="/path/to/local/sample.png"
-                    className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-mono"
-                    autoFocus
-                  />
-                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                    <button
-                      type="button"
-                      onClick={() => setActiveFileChooser(null)}
-                      className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-sky-600 hover:bg-sky-500 text-white"
-                    >
-                      Upload File
-                    </button>
-                  </div>
-                </form>
-              </div>
-            )}
-          </div>
-
-          {/* Bottom Diagnostics Drawer (Themed HAR, Console, Telemetry) */}
-          <div
-            className={`border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col shrink-0 transition-all ${
-              isDrawerCollapsed ? "h-9" : "h-44"
+            className={`flex-1 relative bg-slate-100 dark:bg-slate-950 flex flex-col items-center justify-center overflow-auto outline-none select-none cursor-default ${
+              deviceMode === "mobile" ? "p-4" : ""
             }`}
           >
-            <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setActiveBottomTab("network")}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
-                    activeBottomTab === "network"
-                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-slate-700"
-                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-                  }`}
-                >
-                  Network HAR ({networkRequests.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveBottomTab("console")}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
-                    activeBottomTab === "console"
-                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-slate-700"
-                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-                  }`}
-                >
-                  Console ({consoleLogs.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveBottomTab("telemetry")}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
-                    activeBottomTab === "telemetry"
-                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-slate-700"
-                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-                  }`}
-                >
-                  Local Performance
-                </button>
-              </div>
+            <div
+              className={`flex flex-col items-center justify-center transition-all ${
+                deviceMode === "mobile"
+                  ? "w-[393px] h-[780px] bg-white dark:bg-slate-900 rounded-[40px] border-4 border-slate-700 shadow-2xl relative overflow-hidden shrink-0"
+                  : "w-full h-full relative"
+              }`}
+            >
+              {deviceMode === "mobile" && (
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 w-28 h-4 bg-slate-800 rounded-full z-30" />
+              )}
+              {/* Live Screencast Canvas (Active Stream) */}
+              <canvas
+                ref={canvasRef}
+                onMouseMove={handleMouseMove}
+                onMouseDown={handleMouseDown}
+                onMouseUp={handleMouseUp}
+                onClick={handleClick}
+                onDoubleClick={handleDoubleClick}
+                onWheel={handleWheel}
+                onContextMenu={handleContextMenu}
+                className={`max-w-full max-h-full object-contain ${
+                  streamConnected ? "block" : "hidden"
+                }`}
+              />
 
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 hidden sm:inline">
-                  Frames: {frameCountRef.current} • Latency: {latencyMs}ms
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setIsDrawerCollapsed(!isDrawerCollapsed)}
-                  className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white"
-                  title={isDrawerCollapsed ? "Expand Drawer" : "Collapse Drawer"}
-                >
-                  {isDrawerCollapsed ? (
-                    <ChevronUp className="w-3.5 h-3.5" />
-                  ) : (
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {!isDrawerCollapsed && (
-              <div className="flex-1 overflow-y-auto p-2 font-mono text-[11px]">
-                {activeBottomTab === "network" && (
-                  <div className="space-y-1">
-                    {networkRequests.length === 0 ? (
-                      <div className="text-slate-400 dark:text-slate-500 text-center py-6">
-                        No network requests captured yet.
-                      </div>
-                    ) : (
-                      networkRequests.slice(-25).map((req, i) => (
-                        <div
-                          key={i}
-                          className="flex items-center justify-between px-2.5 py-1 rounded bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800"
-                        >
-                          <div className="flex items-center gap-2 truncate">
-                            <span
-                              className={`px-1.5 py-0.2 text-[9px] font-bold rounded ${
-                                req.status < 400
-                                  ? "bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400"
-                                  : "bg-rose-50 dark:bg-rose-950 text-rose-600 dark:text-rose-400"
-                              }`}
-                            >
-                              {req.status || 200}
-                            </span>
-                            <span className="text-slate-500 font-bold">
-                              {req.method || "GET"}
-                            </span>
-                            <span className="text-slate-700 dark:text-slate-300 truncate">
-                              {req.url}
-                            </span>
-                          </div>
-                          <span className="text-slate-400 shrink-0 text-[10px]">
-                            {req.duration ? `${Math.round(req.duration)}ms` : "cached"}
-                          </span>
-                        </div>
-                      ))
-                    )}
+              {/* Default Google Homepage View */}
+              {!streamConnected && (
+              <div className="w-full h-full flex flex-col justify-between p-6 bg-white dark:bg-slate-950 select-none animate-in fade-in">
+                {/* Google Top Bar */}
+                <div className="flex items-center justify-end gap-4 text-xs text-slate-600 dark:text-slate-400">
+                  <span className="hover:underline cursor-pointer">Gmail</span>
+                  <span className="hover:underline cursor-pointer">Images</span>
+                  <div className="w-7 h-7 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-xs shadow-sm">
+                    G
                   </div>
-                )}
+                </div>
 
-                {activeBottomTab === "console" && (
-                  <div className="space-y-1">
-                    {consoleLogs.length === 0 ? (
-                      <div className="text-slate-400 dark:text-slate-500 text-center py-6">
-                        No console messages emitted.
-                      </div>
-                    ) : (
-                      consoleLogs.slice(-25).map((log, i) => (
-                        <div
-                          key={i}
-                          className={`px-2.5 py-1 rounded bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 flex items-start gap-2 ${
-                            log.type === "error" ? "text-rose-600 dark:text-rose-400" : "text-slate-700 dark:text-slate-300"
-                          }`}
-                        >
-                          <span className="text-slate-400">[{log.type || "log"}]</span>
-                          <span className="break-all">{log.text}</span>
-                        </div>
-                      ))
-                    )}
+                {/* Google Center Search */}
+                <div className="flex flex-col items-center justify-center max-w-xl mx-auto w-full space-y-6">
+                  {/* Google Logo */}
+                  <div className="text-5xl sm:text-6xl font-bold tracking-tight select-none">
+                    <span className="text-blue-500">G</span>
+                    <span className="text-red-500">o</span>
+                    <span className="text-yellow-500">o</span>
+                    <span className="text-blue-500">g</span>
+                    <span className="text-green-500">l</span>
+                    <span className="text-red-500">e</span>
                   </div>
-                )}
 
-                {activeBottomTab === "telemetry" && (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-2 text-slate-700 dark:text-slate-300">
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
-                      <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">
-                        Local CDP Frames
-                      </span>
-                      <span className="text-lg font-bold text-slate-900 dark:text-white font-mono">
-                        {frameCountRef.current}
-                      </span>
+                  {/* Google Search Bar */}
+                  <form
+                    onSubmit={handleGoogleSearchSubmit}
+                    className="w-full relative flex items-center"
+                  >
+                    <Search className="w-4 h-4 text-slate-400 absolute left-4" />
+                    <input
+                      type="text"
+                      value={googleQuery}
+                      onChange={(e) => setGoogleQuery(e.target.value)}
+                      placeholder="Search Google or type a URL..."
+                      className="w-full pl-11 pr-20 py-3 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm hover:shadow-md focus:shadow-md focus:outline-none focus:border-slate-300 dark:focus:border-slate-600 text-sm text-slate-900 dark:text-white transition-all"
+                      autoFocus
+                    />
+                    <div className="absolute right-4 flex items-center gap-2 text-slate-400">
+                      <Mic className="w-4 h-4 hover:text-blue-500 cursor-pointer" />
+                      <Camera className="w-4 h-4 hover:text-blue-500 cursor-pointer" />
                     </div>
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
-                      <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">
-                        Network Round-Trip
-                      </span>
-                      <span className="text-lg font-bold text-emerald-600 dark:text-emerald-400 font-mono">
-                        {latencyMs}ms (Socket)
-                      </span>
-                    </div>
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
-                      <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">
-                        Execution Sandbox
-                      </span>
-                      <span className="text-lg font-bold text-sky-600 dark:text-sky-400 font-sans">
-                        Air-Gapped
-                      </span>
-                    </div>
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
-                      <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">
-                        Storage Engine
-                      </span>
-                      <span className="text-lg font-bold text-indigo-600 dark:text-indigo-400 font-sans">
-                        SQLite Local
-                      </span>
-                    </div>
+                  </form>
+
+                  {/* Search Action Buttons */}
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleGoogleSearchSubmit}
+                      className="px-4 py-2 rounded-md bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 transition-colors shadow-xs"
+                    >
+                      Google Search
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGoogleQuery("Tracecase automated test studio");
+                        handleGoogleSearchSubmit();
+                      }}
+                      className="px-4 py-2 rounded-md bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 transition-colors shadow-xs"
+                    >
+                      I'm Feeling Lucky
+                    </button>
                   </div>
-                )}
+                </div>
+
+                {/* Google Footer */}
+                <div className="border-t border-slate-100 dark:border-slate-900 pt-3 flex flex-wrap items-center justify-between text-[11px] text-slate-400">
+                  <div className="flex items-center gap-4">
+                    <span>About</span>
+                    <span>Advertising</span>
+                    <span>Business</span>
+                    <span>How Search works</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span>Privacy</span>
+                    <span>Terms</span>
+                    <span>Settings</span>
+                  </div>
+                </div>
               </div>
             )}
+            </div>
+          </div>
+
+          {/* Bottom Feature Ribbon (Matches Screenshot 1) */}
+          <div className="h-12 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 flex items-center justify-between shrink-0 select-none text-[11px]">
+            <div className="flex items-center gap-4 overflow-x-auto scrollbar-none text-slate-600 dark:text-slate-300">
+              <button
+                type="button"
+                onClick={() => {
+                  setNlPrompt("Execute custom javascript: console.log('test')");
+                  inputRef.current?.focus();
+                }}
+                className="flex items-center gap-1.5 hover:text-brand-600 dark:hover:text-brand-400 transition-colors shrink-0"
+              >
+                <Code2 className="w-3.5 h-3.5 text-slate-400" />
+                <span>Execute Custom Code</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setNlPrompt("Call API endpoint https://api.example.com/v1");
+                  inputRef.current?.focus();
+                }}
+                className="flex items-center gap-1.5 hover:text-brand-600 dark:hover:text-brand-400 transition-colors shrink-0"
+              >
+                <Settings className="w-3.5 h-3.5 text-slate-400" />
+                <span>Call External APIs</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsVariablesOpen(true)}
+                className="flex items-center gap-1.5 hover:text-brand-600 dark:hover:text-brand-400 transition-colors shrink-0"
+              >
+                <span className="font-mono font-bold text-slate-400">{"{x}"}</span>
+                <span>Set Dynamic Values</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsVariablesOpen(true)}
+                className="flex items-center gap-1.5 hover:text-brand-600 dark:hover:text-brand-400 transition-colors shrink-0"
+              >
+                <Lock className="w-3.5 h-3.5 text-slate-400" />
+                <span>Store Sensitive Keys</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  showToast("TOTP Token synced from local vault", "info");
+                }}
+                className="flex items-center gap-1.5 hover:text-brand-600 dark:hover:text-brand-400 transition-colors shrink-0"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
+                <span>Fetch TOTP in Real Time</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsEnvOpen(true)}
+                className="flex items-center gap-1.5 hover:text-brand-600 dark:hover:text-brand-400 transition-colors shrink-0"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
+                <span>Define Reusable Inputs</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          LOCAL VARIABLES SLIDE-OVER DRAWER
+          SAVE TEST CASE MODAL (Matches Screenshot 4)
+          ────────────────────────────────────────────────────────────────────────── */}
+      {isSaveModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Save Test Case
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsSaveModalOpen(false)}
+                className="text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                Want to run a sample execution of the code after saving?
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                Sample execution of code checks your test steps for correctness after saving.
+                Code will be generated in both cases.
+              </p>
+
+              <div className="pt-2 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="skipExec"
+                  checked={skipSampleExecution}
+                  onChange={(e) => setSkipSampleExecution(e.target.checked)}
+                  className="rounded border-slate-300 dark:border-slate-700 text-brand-600 focus:ring-0"
+                />
+                <label
+                  htmlFor="skipExec"
+                  className="text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer"
+                >
+                  Skip sample execution of code
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsSaveModalOpen(false)}
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAndExecute}
+                disabled={savingTestcase}
+                className="px-5 py-2 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-md shadow-emerald-600/25 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {savingTestcase ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" />
+                )}
+                <span>Save & Run Execution</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          ADVANCED SETTINGS MODAL
+          ────────────────────────────────────────────────────────────────────────── */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Settings className="w-4 h-4 text-brand-500" />
+                <span>Advanced Settings</span>
+              </h3>
+              <button onClick={() => setIsSettingsOpen(false)} className="text-slate-400 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-500 font-bold mb-1">Browser Engine</label>
+                <select
+                  value={browser}
+                  onChange={(e) => setBrowser(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-white"
+                >
+                  <option value="chromium">Chromium</option>
+                  <option value="firefox">Firefox</option>
+                  <option value="webkit">WebKit (Safari)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-slate-500 font-bold mb-1">Test Case Name</label>
+                <input
+                  type="text"
+                  value={testcaseName}
+                  onChange={(e) => setTestcaseName(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-white"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                className="px-4 py-1.5 text-xs font-bold rounded-lg bg-brand-600 text-white hover:bg-brand-500"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          LOCAL VARIABLES DRAWER
           ────────────────────────────────────────────────────────────────────────── */}
       {isVariablesOpen && (
         <div className="fixed inset-y-0 right-0 w-96 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-200">
@@ -2153,7 +1803,18 @@ export function Recorder() {
 
             {/* Add New Variable Form */}
             <form
-              onSubmit={handleAddVariable}
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!newVarKey.trim()) return;
+                setLocalVariables((prev) => [
+                  ...prev,
+                  { key: newVarKey.trim(), value: newVarVal.trim(), isSecret: newVarSecret },
+                ]);
+                setNewVarKey("");
+                setNewVarVal("");
+                setNewVarSecret(false);
+                showToast("Variable saved to vault", "success");
+              }}
               className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2.5 mt-4"
             >
               <span className="text-xs font-bold text-slate-900 dark:text-white block">

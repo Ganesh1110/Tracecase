@@ -21,8 +21,10 @@ import { NetworkInspector } from './pages/NetworkInspector';
 import { MCPIntegrations } from './pages/MCPIntegrations';
 import { Settings } from './pages/Settings';
 import { StorageManagement } from './pages/StorageManagement';
+import { Variables } from './pages/Variables';
 import { RegressionSelection } from './pages/RegressionSelection';
 import { CIDashboard } from './pages/CIDashboard';
+import AgentTesting from './pages/AgentTesting';
 
 export function App() {
   return (
@@ -48,6 +50,7 @@ export function App() {
         <Route path="regression-selection" element={<RegressionSelection />} />
         <Route path="explore" element={<AutonomousExploration />} />
         <Route path="ai-assistant" element={<AIAssistant />} />
+        <Route path="agent-testing" element={<AgentTesting />} />
         <Route path="test-analysis" element={<TestAnalysis />} />
         <Route path="mutations" element={<Mutations />} />
         <Route path="repository" element={<TestRepository />} />
@@ -58,6 +61,7 @@ export function App() {
         <Route path="mcp" element={<MCPIntegrations />} />
 
         {/* Administration */}
+        <Route path="variables" element={<Variables />} />
         <Route path="settings" element={<Settings />} />
         <Route path="storage" element={<StorageManagement />} />
 

@@ -369,4 +369,60 @@ export const api = {
       body: JSON.stringify(payload),
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }),
+
+  // Variables & TOTP Vault (Phase 3)
+  getVariables: (params = {}) => {
+    const q = new URLSearchParams(params);
+    return request(`/variables?${q.toString()}`);
+  },
+  saveVariable: (data) =>
+    request('/variables', { method: 'POST', body: JSON.stringify(data) }),
+  deleteVariable: (id) =>
+    request(`/variables/${id}`, { method: 'DELETE' }),
+  generateTotp: (data) =>
+    request('/variables/totp/generate', { method: 'POST', body: JSON.stringify(data) }),
+  interpolateVariables: (data) =>
+    request('/variables/interpolate', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Database Connections (Phase 3)
+  getDbConnections: (projectId = 'default_project') =>
+    request(`/db-connections?project_id=${projectId}`),
+  saveDbConnection: (data) =>
+    request('/db-connections', { method: 'POST', body: JSON.stringify(data) }),
+  deleteDbConnection: (id) =>
+    request(`/db-connections/${id}`, { method: 'DELETE' }),
+  executeDbQuery: (connId, query) =>
+    request(`/db-connections/${connId}/query`, { method: 'POST', body: JSON.stringify({ query }) }),
+
+  // Response Schemas (Phase 3)
+  getResponseSchemas: (projectId = 'default_project') =>
+    request(`/schemas?project_id=${projectId}`),
+  saveResponseSchema: (data) =>
+    request('/schemas', { method: 'POST', body: JSON.stringify(data) }),
+  deleteResponseSchema: (id) =>
+    request(`/schemas/${id}`, { method: 'DELETE' }),
+
+  // Local Device & Browser Discovery Hub (Phase 4)
+  getAvailableDevices: () =>
+    request('/devices/available'),
+
+  // Agent Assurance & Multi-Agent Testing (Phase 4)
+  getAgentSuites: (projectId = 'default_project') =>
+    request(`/agents/suites?project_id=${projectId}`),
+  saveAgentSuite: (data) =>
+    request('/agents/suites', { method: 'POST', body: JSON.stringify(data) }),
+  deleteAgentSuite: (suiteId) =>
+    request(`/agents/suites/${suiteId}`, { method: 'DELETE' }),
+  getAgentTestCases: (suiteId) =>
+    request(`/agents/suites/${suiteId}/cases`),
+  saveAgentTestCase: (data) =>
+    request('/agents/cases', { method: 'POST', body: JSON.stringify(data) }),
+  deleteAgentTestCase: (caseId) =>
+    request(`/agents/cases/${caseId}`, { method: 'DELETE' }),
+  runAgentEvaluation: (suiteId, payload = {}) =>
+    request(`/agents/suites/${suiteId}/run`, { method: 'POST', body: JSON.stringify(payload) }),
+  getAgentRuns: (suiteId = '') =>
+    request(`/agents/runs${suiteId ? `?suite_id=${suiteId}` : ''}`),
+  getAgentRunDetails: (runId) =>
+    request(`/agents/runs/${runId}`),
 };

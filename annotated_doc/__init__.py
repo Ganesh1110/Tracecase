@@ -2,4 +2,6 @@
 
 class Doc:
     """Placeholder for FastAPI's annotated_doc.Doc"""
-    pass
+    def __init__(self, *args, **kwargs):
+        self.doc = args[0] if args else None
+

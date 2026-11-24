@@ -113,6 +113,18 @@ from tracecase.ui.db import (
     update_settings,
     update_suite,
     update_synthesized_draft,
+    delete_database_connection,
+    delete_response_schema,
+    delete_variable,
+    execute_db_query,
+    generate_totp_code,
+    interpolate_variables,
+    list_database_connections,
+    list_response_schemas,
+    list_variables,
+    save_database_connection,
+    save_response_schema,
+    save_variable,
 )
 from tracecase.ui.executor import orchestrator
 from tracecase.ui.service import (
@@ -3409,4 +3421,334 @@ async def record_stream_websocket(
         session.remove_frame_listener(frame_sender)
         if hasattr(session, "remove_broadcast_listener"):
             session.remove_broadcast_listener(broadcast_sender)
+
+
+# ---------------------------------------------------------------------------
+# Local Variables, TOTP 2FA Vault, DB Connections & Schemas (Studio Engine)
+# ---------------------------------------------------------------------------
+
+class VariableCreateRequest(BaseModel):
+    key: str
+    value: str
+    var_type: str = "string"
+    environment: str = "global"
+    is_secret: bool = False
+    totp_digits: int = 6
+    totp_period: int = 30
+    description: str = ""
+    project_id: str = "default_project"
+
+
+class VariableInterpolateRequest(BaseModel):
+    text: str
+    project_id: str = "default_project"
+    environment: str = "global"
+
+
+class TotpGenerateRequest(BaseModel):
+    secret: str
+    digits: int = 6
+    period: int = 30
+
+
+class DbConnectionCreateRequest(BaseModel):
+    name: str
+    db_type: str = "sqlite"
+    connection_string: str
+    description: str = ""
+    project_id: str = "default_project"
+
+
+class DbQueryRequest(BaseModel):
+    query: str
+
+
+class SchemaCreateRequest(BaseModel):
+    name: str
+    schema_json: str = "{}"
+    description: str = ""
+    project_id: str = "default_project"
+
+
+@router.get("/variables")
+async def get_variables(
+    project_id: str = "default_project",
+    environment: str | None = None,
+) -> list[dict[str, Any]]:
+    """List local variables and active TOTP keys for project."""
+    return list_variables(project_id=project_id, environment=environment)
+
+
+@router.post("/variables")
+async def create_or_update_variable(req: VariableCreateRequest) -> dict[str, Any]:
+    """Store or update a key/value, secret, or TOTP seed in local SQLite vault."""
+    try:
+        return save_variable(req.model_dump())
+    except Exception as exc:
+        logger.exception("Failed to save variable: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not save variable: {exc}",
+        ) from exc
+
+
+@router.delete("/variables/{var_id}")
+async def remove_variable(var_id: str) -> dict[str, bool]:
+    """Delete a variable from local vault."""
+    success = delete_variable(var_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variable not found")
+    return {"deleted": True}
+
+
+@router.post("/variables/totp/generate")
+async def generate_totp_endpoint(req: TotpGenerateRequest) -> dict[str, Any]:
+    """Generate live RFC 6238 TOTP code without cloud or network access."""
+    try:
+        code, remaining = generate_totp_code(req.secret, digits=req.digits, period=req.period)
+        return {
+            "code": code,
+            "remaining_seconds": remaining,
+            "period": req.period,
+            "digits": req.digits,
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid TOTP seed or parameters: {exc}",
+        ) from exc
+
+
+@router.post("/variables/interpolate")
+async def interpolate_variables_endpoint(req: VariableInterpolateRequest) -> dict[str, str]:
+    """Resolve {{variable_name}} and {{totp:key}} tokens in text strings."""
+    result = interpolate_variables(
+        req.text,
+        project_id=req.project_id,
+        environment=req.environment,
+    )
+    return {"result": result}
+
+
+@router.get("/db-connections")
+async def get_db_connections(project_id: str = "default_project") -> list[dict[str, Any]]:
+    """List configured local database connections."""
+    return list_database_connections(project_id=project_id)
+
+
+@router.post("/db-connections")
+async def create_db_connection(req: DbConnectionCreateRequest) -> dict[str, Any]:
+    """Save local database connection string."""
+    try:
+        return save_database_connection(req.model_dump())
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not save database connection: {exc}",
+        ) from exc
+
+
+@router.delete("/db-connections/{conn_id}")
+async def remove_db_connection(conn_id: str) -> dict[str, bool]:
+    """Delete database connection."""
+    success = delete_database_connection(conn_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
+    return {"deleted": True}
+
+
+@router.post("/db-connections/{conn_id}/query")
+async def execute_query_endpoint(conn_id: str, req: DbQueryRequest) -> dict[str, Any]:
+    """Execute read-only SQL query against local database for test assertions."""
+    try:
+        return execute_db_query(conn_id=conn_id, query=req.query)
+    except FileNotFoundError as fnf:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(fnf)) from fnf
+    except ValueError as val_err:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(val_err)) from val_err
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Query execution error: {exc}",
+        ) from exc
+
+
+@router.get("/schemas")
+async def get_response_schemas(project_id: str = "default_project") -> list[dict[str, Any]]:
+    """List response schemas for API contract validations."""
+    return list_response_schemas(project_id=project_id)
+
+
+@router.post("/schemas")
+async def create_response_schema(req: SchemaCreateRequest) -> dict[str, Any]:
+    """Save response schema for contract assertions."""
+    try:
+        return save_response_schema(req.model_dump())
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not save schema: {exc}",
+        ) from exc
+
+
+@router.delete("/schemas/{schema_id}")
+async def remove_response_schema(schema_id: str) -> dict[str, bool]:
+    """Delete response schema."""
+    success = delete_response_schema(schema_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schema not found")
+    return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# Local Device Discovery Hub & Agent Assurance Routes (Phase 4)
+# ---------------------------------------------------------------------------
+
+from tracecase.ui.devices import get_all_available_devices
+from tracecase.ui.db import (
+    list_agent_suites,
+    get_agent_suite,
+    save_agent_suite,
+    delete_agent_suite,
+    list_agent_test_cases,
+    save_agent_test_case,
+    delete_agent_test_case,
+    run_agent_suite_evaluation,
+    list_agent_eval_runs,
+    get_agent_eval_run_details,
+)
+
+
+class AgentSuiteCreateRequest(BaseModel):
+    name: str
+    description: str | None = ""
+    target_type: str = "ollama"
+    endpoint_url: str = "http://localhost:11434/api/generate"
+    model_name: str = "llama3"
+    system_prompt: str | None = ""
+    project_id: str = "default_project"
+
+
+class AgentTestCaseCreateRequest(BaseModel):
+    suite_id: str
+    name: str
+    category: str = "guardrails"
+    prompt_input: str
+    expected_output_keywords: list[str] = []
+    forbidden_keywords: list[str] = []
+    expected_tools: list[str] = []
+    eval_criteria: str | None = ""
+    status: str = "active"
+
+
+class AgentEvalRunRequest(BaseModel):
+    case_ids: list[str] | None = None
+
+
+@router.get("/devices/available")
+async def get_available_devices_endpoint() -> dict[str, Any]:
+    """Auto-discover locally installed desktop browsers, ADB Android devices, and iOS simulators."""
+    try:
+        return get_all_available_devices()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Device discovery error: {exc}",
+        ) from exc
+
+
+@router.get("/agents/suites")
+async def get_agent_suites(project_id: str = "default_project") -> list[dict[str, Any]]:
+    """List agent test suites for evaluating local LLMs and bots."""
+    return list_agent_suites(project_id=project_id)
+
+
+@router.post("/agents/suites")
+async def create_agent_suite(req: AgentSuiteCreateRequest) -> dict[str, Any]:
+    """Create or update agent test suite."""
+    try:
+        return save_agent_suite(req.model_dump())
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not save agent suite: {exc}",
+        ) from exc
+
+
+@router.get("/agents/suites/{suite_id}")
+async def get_agent_suite_endpoint(suite_id: str) -> dict[str, Any]:
+    """Get single agent test suite."""
+    suite = get_agent_suite(suite_id)
+    if not suite:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent suite not found")
+    return suite
+
+
+@router.delete("/agents/suites/{suite_id}")
+async def remove_agent_suite(suite_id: str) -> dict[str, bool]:
+    """Delete agent test suite."""
+    success = delete_agent_suite(suite_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent suite not found")
+    return {"deleted": True}
+
+
+@router.get("/agents/suites/{suite_id}/cases")
+async def get_agent_test_cases(suite_id: str) -> list[dict[str, Any]]:
+    """List test cases in an agent suite."""
+    return list_agent_test_cases(suite_id=suite_id)
+
+
+@router.post("/agents/cases")
+async def create_agent_test_case(req: AgentTestCaseCreateRequest) -> dict[str, Any]:
+    """Create or update agent test case."""
+    try:
+        return save_agent_test_case(req.model_dump())
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not save agent test case: {exc}",
+        ) from exc
+
+
+@router.delete("/agents/cases/{case_id}")
+async def remove_agent_test_case(case_id: str) -> dict[str, bool]:
+    """Delete agent test case."""
+    success = delete_agent_test_case(case_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent test case not found")
+    return {"deleted": True}
+
+
+@router.post("/agents/suites/{suite_id}/run")
+async def execute_agent_evaluation(suite_id: str, req: AgentEvalRunRequest = AgentEvalRunRequest()) -> dict[str, Any]:
+    """Run evaluation benchmark against agent test suite."""
+    try:
+        return run_agent_suite_evaluation(suite_id=suite_id, case_ids=req.case_ids)
+    except FileNotFoundError as fnf:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(fnf)) from fnf
+    except ValueError as val_err:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(val_err)) from val_err
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Agent evaluation error: {exc}",
+        ) from exc
+
+
+@router.get("/agents/runs")
+async def get_agent_runs(suite_id: str | None = None) -> list[dict[str, Any]]:
+    """List evaluation runs."""
+    return list_agent_eval_runs(suite_id=suite_id)
+
+
+@router.get("/agents/runs/{run_id}")
+async def get_agent_run_endpoint(run_id: str) -> dict[str, Any]:
+    """Get single evaluation run details with individual test case outputs."""
+    run_data = get_agent_eval_run_details(run_id)
+    if not run_data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation run not found")
+    return run_data
+
+
 
