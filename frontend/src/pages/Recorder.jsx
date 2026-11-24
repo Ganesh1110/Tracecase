@@ -7,8 +7,6 @@ import {
   AlertCircle,
   Clock,
   ArrowRight,
-  ArrowLeft,
-  RotateCcw,
   Loader2,
   StopCircle,
   Pause,
@@ -18,13 +16,37 @@ import {
   Layers,
   Bug,
   Radio,
-  Plus,
-  X,
   FileUp,
   Download,
-  Terminal,
+  RefreshCw,
+  Sliders,
+  Sparkles,
+  Plus,
+  Trash2,
+  Edit3,
+  ChevronDown,
+  ChevronRight,
+  MousePointer,
+  MousePointerClick,
+  Type,
+  Lock,
+  Shield,
   ShieldCheck,
+  Eye,
+  GitBranch,
+  Split,
+  Save,
   Maximize2,
+  Terminal,
+  Copy,
+  X,
+  ExternalLink,
+  Hand,
+  Check,
+  Variable,
+  Database,
+  ArrowLeft,
+  RotateCcw,
 } from "lucide-react";
 import { api } from "../services/api";
 import { useWebSocket } from "../context/WebSocketContext";
@@ -32,7 +54,7 @@ import { useToast } from "../context/ToastContext";
 import { useProject } from "../context/ProjectContext";
 
 export function Recorder() {
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState("https://");
   const [name, setName] = useState("");
   const [browser, setBrowser] = useState("chromium");
   const [headless, setHeadless] = useState(true);
@@ -42,32 +64,57 @@ export function Recorder() {
   const [pauseLoading, setPauseLoading] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
-  // Streaming Viewport State
+  // KaneAI-style Interaction & Authoring States
+  const [manualInteraction, setManualInteraction] = useState(true);
+  const [nlPrompt, setNlPrompt] = useState("");
+  const [promptLoading, setPromptLoading] = useState(false);
+  const [isVariablesOpen, setIsVariablesOpen] = useState(false);
+  const [activeBottomTab, setActiveBottomTab] = useState("network"); // 'network' | 'console' | 'telemetry'
+
+  // Edit / Stats Counters
+  const [additionsCount, setAdditionsCount] = useState(0);
+  const [editedCount, setEditedCount] = useState(0);
+  const [deletedCount, setDeletedCount] = useState(0);
+
+  // Local Variables Store
+  const [localVariables, setLocalVariables] = useState([
+    { key: "base_url", value: "https://example.com", isSecret: false },
+    { key: "username", value: "tester@tracecase.local", isSecret: false },
+    { key: "password", value: "Test@124!Secure", isSecret: true },
+    { key: "totp_seed", value: "JBSWY3DPEHPK3PXP", isSecret: true },
+  ]);
+  const [newVarKey, setNewVarKey] = useState("");
+  const [newVarVal, setNewVarVal] = useState("");
+  const [newVarSecret, setNewVarSecret] = useState(false);
+
+  // New step / condition modal
+  const [isAddingStep, setIsAddingStep] = useState(false);
+  const [newStepType, setNewStepType] = useState("click");
+  const [newStepTarget, setNewStepTarget] = useState("");
+  const [newStepValue, setNewStepValue] = useState("");
+  const [newStepDesc, setNewStepDesc] = useState("");
+
+  // Condition collapse states
+  const [collapsedConditions, setCollapsedConditions] = useState({});
+
+  // Embedded CDP Screencast & Browser Chrome States
   const [streamConnected, setStreamConnected] = useState(false);
   const [streamSessionId, setStreamSessionId] = useState(null);
   const [streamToken, setStreamToken] = useState(null);
-  const [latencyMs, setLatencyMs] = useState(null);
-  const [fps, setFps] = useState(0);
-  const [viewportDims, setViewportDims] = useState({ width: 1280, height: 720 });
-
-  // Browser Chrome State
-  const [tabs, setTabs] = useState([{ page_id: 0, title: "Main Tab", url: "" }]);
+  const [viewportDims, setViewportDims] = useState({ width: 1440, height: 900 });
+  const [chromeUrl, setChromeUrl] = useState("https://");
+  const [tabs, setTabs] = useState([{ page_id: 0, title: "New Tab", url: "https://" }]);
   const [activeTabId, setActiveTabId] = useState(0);
-  const [chromeUrl, setChromeUrl] = useState("");
+  const [latencyMs, setLatencyMs] = useState(0);
 
-  // JS Dialog State (alert, confirm, prompt)
+  // Active Dialog & File Chooser Overlays
   const [activeDialog, setActiveDialog] = useState(null);
   const [dialogPromptValue, setDialogPromptValue] = useState("");
-
-  // File Upload Chooser State
   const [activeFileChooser, setActiveFileChooser] = useState(null);
   const [fileUploadPath, setFileUploadPath] = useState("");
-
-  // Download Notification State
   const [downloadNotice, setDownloadNotice] = useState(null);
 
-  // Diagnostics Tabs: "steps" | "network" | "console" | "errors"
-  const [activeDiagTab, setActiveDiagTab] = useState("steps");
+  // Diagnostics & Event Logs
   const [consoleLogs, setConsoleLogs] = useState([]);
   const [networkRequests, setNetworkRequests] = useState([]);
   const [pageErrors, setPageErrors] = useState([]);
@@ -75,12 +122,11 @@ export function Recorder() {
   // Refs
   const canvasRef = useRef(null);
   const streamWsRef = useRef(null);
+  const offscreenImgRef = useRef(new Image());
   const lastMouseMoveRef = useRef(0);
   const frameCountRef = useRef(0);
-  const fpsTimerRef = useRef(null);
-  const timerRef = useRef(null);
-  const offscreenImgRef = useRef(new Image());
   const viewportContainerRef = useRef(null);
+  const timerRef = useRef(null);
 
   const { subscribe } = useWebSocket();
   const { showToast } = useToast();
@@ -90,28 +136,11 @@ export function Recorder() {
   );
   const navigate = useNavigate();
 
-  const isRecording = status.status === "recording";
-  const isPaused = status.status === "paused";
-  const isActive = isRecording || isPaused;
-
   useEffect(() => {
     if (currentProject?.id && !selectedProjectId) {
       setSelectedProjectId(currentProject.id);
     }
   }, [currentProject]);
-
-  // Warn on tab close or navigate away if actively recording (BUG-012)
-  useEffect(() => {
-    const handleBeforeUnload = (e) => {
-      if (isActive) {
-        e.preventDefault();
-        e.returnValue = "A recording is in progress. Are you sure you want to leave?";
-        return e.returnValue;
-      }
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [isActive]);
 
   const fetchStatus = async () => {
     try {
@@ -123,23 +152,22 @@ export function Recorder() {
       if (data.elapsed_seconds !== undefined) {
         setElapsedSeconds(data.elapsed_seconds);
       }
-      if (data.url && !chromeUrl) {
-        setChromeUrl(data.url);
+      if (data.session_id && data.status === "recording" && !streamConnected) {
+        setStreamSessionId(data.session_id);
+        connectStreamWebSocket(data.session_id, data.stream_token);
       }
     } catch (err) {
-      console.error(err);
+      console.debug("Failed to fetch recording status:", err);
     }
   };
 
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 2500);
-    return () => clearInterval(interval);
   }, []);
 
-  // Timer loop when actively recording
+  // Timer interval when recording is active
   useEffect(() => {
-    if (status.status === "recording") {
+    if (status.status === "recording" && !status.is_paused) {
       timerRef.current = setInterval(() => {
         setElapsedSeconds((prev) => prev + 1);
       }, 1000);
@@ -149,56 +177,64 @@ export function Recorder() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [status.status]);
+  }, [status.status, status.is_paused]);
 
-  // Global WebSocket event subscription
+  // Subscribe to general system WebSockets
   useEffect(() => {
-    const unsubRecorder = subscribe("recorder", () => {
-      fetchStatus();
-    });
-    const unsubStep = subscribe("recording_step", (event) => {
-      if (event?.data?.step) {
-        setLiveSteps((prev) => {
-          const exists = prev.some((s) => s.number === event.data.step.number);
-          if (exists) return prev;
-          return [...prev, event.data.step];
-        });
-        if (event.data.step.console_logs) {
-          setConsoleLogs((prev) => [...prev, ...event.data.step.console_logs]);
-        }
-        if (event.data.step.network_requests) {
-          setNetworkRequests((prev) => [...prev, ...event.data.step.network_requests]);
-        }
+    const unsubStep = subscribe("recording_step", (payload) => {
+      if (payload && payload.step) {
+        setLiveSteps((prev) => [...prev, payload.step]);
+        setAdditionsCount((prev) => prev + 1);
       }
-      fetchStatus();
+      if (payload && payload.console_errors_count !== undefined) {
+        setStatus((prev) => ({
+          ...prev,
+          console_errors_count: payload.console_errors_count,
+          network_requests_count: payload.network_requests_count,
+        }));
+      }
     });
+
+    const unsubCompleted = subscribe("recording_completed", (payload) => {
+      setStatus((prev) => ({ ...prev, status: "completed" }));
+      showToast("Recording session completed successfully!", "success");
+      if (streamWsRef.current) {
+        streamWsRef.current.close();
+      }
+      if (payload && payload.testcase_id) {
+        navigate(`/testcases/${payload.testcase_id}`);
+      }
+    });
+
+    const unsubPaused = subscribe("recording_paused", () => {
+      setStatus((prev) => ({ ...prev, status: "paused", is_paused: true }));
+      showToast("Recording paused", "info");
+    });
+
+    const unsubResumed = subscribe("recording_resumed", () => {
+      setStatus((prev) => ({ ...prev, status: "recording", is_paused: false }));
+      showToast("Recording resumed", "success");
+    });
+
+    const unsubError = subscribe("recording_error", (payload) => {
+      setStatus((prev) => ({ ...prev, status: "error", error: payload?.error }));
+      showToast("Recording error: " + (payload?.error || "Unknown error"), "error");
+    });
+
     return () => {
-      unsubRecorder();
       unsubStep();
+      unsubCompleted();
+      unsubPaused();
+      unsubResumed();
+      unsubError();
     };
-  }, [subscribe]);
+  }, [subscribe, navigate, showToast]);
 
-  // FPS calculation timer
-  useEffect(() => {
-    if (streamConnected) {
-      fpsTimerRef.current = setInterval(() => {
-        setFps(frameCountRef.current);
-        frameCountRef.current = 0;
-      }, 1000);
-    } else {
-      setFps(0);
-      if (fpsTimerRef.current) clearInterval(fpsTimerRef.current);
-    }
-    return () => {
-      if (fpsTimerRef.current) clearInterval(fpsTimerRef.current);
-    };
-  }, [streamConnected]);
-
-  // Latency periodic ping loop
+  // Periodic ping for WebSocket keep-alive & RTT measurement
   useEffect(() => {
     if (!streamConnected) return;
     const pingInterval = setInterval(() => {
-      if (streamWsRef.current?.readyState === WebSocket.OPEN) {
+      if (streamWsRef.current && streamWsRef.current.readyState === WebSocket.OPEN) {
         streamWsRef.current.send(
           JSON.stringify({
             type: "ping",
@@ -206,7 +242,8 @@ export function Recorder() {
           })
         );
       }
-    }, 2500);
+    }, 5000);
+
     return () => clearInterval(pingInterval);
   }, [streamConnected]);
 
@@ -278,25 +315,37 @@ export function Recorder() {
                 {
                   page_id: payload.page_id,
                   title: payload.title || `Tab ${payload.page_id + 1}`,
-                  url: payload.url || "",
+                  url: payload.url || "about:blank",
                 },
               ];
             });
             setActiveTabId(payload.page_id);
-            if (payload.url) setChromeUrl(payload.url);
           } else if (type === "tab_closed") {
             setTabs((prev) => prev.filter((t) => t.page_id !== payload.page_id));
-          } else if (type === "tab_switched") {
-            setActiveTabId(payload.page_id);
-            if (payload.url) setChromeUrl(payload.url);
-          } else if (type === "dialog") {
-            setActiveDialog(payload);
-            setDialogPromptValue(payload.default_value || "");
-          } else if (type === "file_chooser") {
-            setActiveFileChooser(payload);
+            setActiveTabId(0);
+          } else if (type === "dialog_opened") {
+            setActiveDialog({
+              dialog_type: payload.dialog_type,
+              message: payload.message,
+              default_prompt: payload.default_prompt || "",
+            });
+            setDialogPromptValue(payload.default_prompt || "");
+          } else if (type === "file_chooser_opened") {
+            setActiveFileChooser({
+              multiple: payload.multiple || false,
+            });
+          } else if (type === "console_log") {
+            setConsoleLogs((prev) => [...prev.slice(-99), payload]);
+          } else if (type === "page_error") {
+            setPageErrors((prev) => [...prev.slice(-49), payload]);
+          } else if (type === "network_request") {
+            setNetworkRequests((prev) => [...prev.slice(-99), payload]);
           } else if (type === "download_started") {
-            setDownloadNotice({ status: "downloading", filename: payload.filename });
-          } else if (type === "download_completed") {
+            setDownloadNotice({
+              status: "downloading",
+              filename: payload.suggested_filename || "download",
+            });
+          } else if (type === "download_finished") {
             setDownloadNotice({
               status: "completed",
               filename: payload.filename,
@@ -321,7 +370,6 @@ export function Recorder() {
     []
   );
 
-  // Clean up WebSocket on unmount
   useEffect(() => {
     return () => {
       if (streamWsRef.current) {
@@ -353,8 +401,9 @@ export function Recorder() {
     };
   };
 
-  // Input event dispatchers
+  // Input event dispatchers (forwarded only when manualInteraction is true)
   const sendInputEvent = (inputData) => {
+    if (!manualInteraction) return;
     if (!streamWsRef.current || streamWsRef.current.readyState !== WebSocket.OPEN) return;
     streamWsRef.current.send(
       JSON.stringify({
@@ -364,10 +413,9 @@ export function Recorder() {
     );
   };
 
-  // Mouse handlers with throttling on mousemove
   const handleMouseMove = (e) => {
     const now = performance.now();
-    if (now - lastMouseMoveRef.current < 25) return; // ~40 fps max
+    if (now - lastMouseMoveRef.current < 25) return;
     lastMouseMoveRef.current = now;
 
     const coords = getCoordinates(e);
@@ -463,9 +511,8 @@ export function Recorder() {
     });
   };
 
-  // Keyboard and Paste handlers
   const handleKeyDown = (e) => {
-    if (!streamConnected) return;
+    if (!streamConnected || !manualInteraction) return;
     const specialKeys = [
       "Enter",
       "Escape",
@@ -487,7 +534,6 @@ export function Recorder() {
       client_ts: now,
     });
 
-    // If typing printable character
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
       sendInputEvent({
         event_type: "type",
@@ -497,7 +543,7 @@ export function Recorder() {
   };
 
   const handleKeyUp = (e) => {
-    if (!streamConnected) return;
+    if (!streamConnected || !manualInteraction) return;
     sendInputEvent({
       event_type: "key_up",
       key: e.key,
@@ -506,7 +552,7 @@ export function Recorder() {
   };
 
   const handlePaste = (e) => {
-    if (!streamConnected) return;
+    if (!streamConnected || !manualInteraction) return;
     e.preventDefault();
     const text = e.clipboardData.getData("text");
     if (text) {
@@ -520,68 +566,92 @@ export function Recorder() {
   // Browser Chrome Actions
   const handleNavigateSubmit = (e) => {
     e.preventDefault();
-    if (!chromeUrl.trim() || !streamWsRef.current) return;
+    if (!chromeUrl.trim()) return;
+    sendInputEvent({
+      event_type: "navigate",
+      url: chromeUrl.trim(),
+    });
+    // Add navigation step
+    setLiveSteps((prev) => [
+      ...prev,
+      {
+        number: prev.length + 1,
+        action: "navigate",
+        action_type: "navigate",
+        description: `Go to ${chromeUrl.trim()}`,
+        url: chromeUrl.trim(),
+      },
+    ]);
+    setAdditionsCount((prev) => prev + 1);
+  };
+
+  const handleRefreshPage = () => {
+    sendInputEvent({ event_type: "reload" });
+  };
+
+  const handleGoBack = () => {
+    sendInputEvent({ event_type: "go_back" });
+  };
+
+  const handleGoForward = () => {
+    sendInputEvent({ event_type: "go_forward" });
+  };
+
+  const handleNewTab = () => {
+    if (!streamWsRef.current || streamWsRef.current.readyState !== WebSocket.OPEN) return;
     streamWsRef.current.send(
       JSON.stringify({
-        type: "navigate",
-        data: { url: chromeUrl.trim() },
+        type: "new_tab",
+        data: { url: "about:blank" },
       })
     );
   };
 
-  const handleGoBack = () => {
-    if (!streamWsRef.current) return;
-    streamWsRef.current.send(JSON.stringify({ type: "go_back", data: {} }));
-  };
-
-  const handleGoForward = () => {
-    if (!streamWsRef.current) return;
-    streamWsRef.current.send(JSON.stringify({ type: "go_forward", data: {} }));
-  };
-
-  const handleReload = () => {
-    if (!streamWsRef.current) return;
-    streamWsRef.current.send(JSON.stringify({ type: "reload", data: {} }));
-  };
-
   const handleSwitchTab = (pageId) => {
-    setActiveTabId(pageId);
-    if (!streamWsRef.current) return;
+    if (!streamWsRef.current || streamWsRef.current.readyState !== WebSocket.OPEN) return;
     streamWsRef.current.send(
       JSON.stringify({
         type: "switch_tab",
         data: { page_id: pageId },
       })
     );
+    setActiveTabId(pageId);
   };
 
-  // JS Dialog Response Handler
-  const handleDialogResponse = (accept) => {
-    if (!activeDialog || !streamWsRef.current) return;
+  const handleCloseTab = (pageId, e) => {
+    e.stopPropagation();
+    if (!streamWsRef.current || streamWsRef.current.readyState !== WebSocket.OPEN) return;
     streamWsRef.current.send(
       JSON.stringify({
-        type: "dialog_response",
+        type: "close_tab",
+        data: { page_id: pageId },
+      })
+    );
+  };
+
+  const handleDialogResponse = (accepted) => {
+    if (!streamWsRef.current || streamWsRef.current.readyState !== WebSocket.OPEN) return;
+    streamWsRef.current.send(
+      JSON.stringify({
+        type: "handle_dialog",
         data: {
-          dialog_id: activeDialog.dialog_id,
-          accept,
-          prompt_text: dialogPromptValue || undefined,
+          accept: accepted,
+          prompt_text: accepted ? dialogPromptValue : undefined,
         },
       })
     );
     setActiveDialog(null);
-    setDialogPromptValue("");
   };
 
-  // File Upload Chooser Handler
   const handleFileChooserSubmit = (e) => {
     e.preventDefault();
-    if (!activeFileChooser || !streamWsRef.current) return;
+    if (!streamWsRef.current || streamWsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!fileUploadPath.trim()) return;
     streamWsRef.current.send(
       JSON.stringify({
-        type: "file_upload",
+        type: "handle_file_chooser",
         data: {
-          chooser_id: activeFileChooser.chooser_id,
-          files: fileUploadPath.trim() ? [fileUploadPath.trim()] : [],
+          files: [fileUploadPath.trim()],
         },
       })
     );
@@ -589,13 +659,14 @@ export function Recorder() {
     setFileUploadPath("");
   };
 
-  // Session Start / Pause / Resume / Stop
+  // Launch Session Lifecycle
   const handleStart = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!url.trim()) {
-      showToast("Please enter a target URL", "error");
+      showToast("Please provide a valid starting URL", "error");
       return;
     }
+
     try {
       setLoading(true);
       setLiveSteps([]);
@@ -611,21 +682,20 @@ export function Recorder() {
         url: url.trim(),
         name: name.trim() || undefined,
         browser,
-        headless: true, // Always headless in embedded mode
+        headless: true,
         timeout: 30000,
         project_id: selectedProjectId || "default_project",
         embedded: true,
       });
 
       setStatus(session);
-      showToast("Recording session launched!", "success");
+      showToast("Local Browser Studio session launched!", "success");
 
-      // Connect to embedded screencast WebSocket
       if (session.session_id) {
         connectStreamWebSocket(session.session_id, session.stream_token);
       }
     } catch (err) {
-      showToast("Failed to start recorder: " + err.message, "error");
+      showToast("Failed to start studio: " + err.message, "error");
     } finally {
       setLoading(false);
     }
@@ -636,9 +706,9 @@ export function Recorder() {
       setPauseLoading(true);
       const res = await api.pauseRecording();
       setStatus(res);
-      showToast("Recording paused", "info");
+      showToast("Session paused", "info");
     } catch (err) {
-      showToast("Failed to pause recording: " + err.message, "error");
+      showToast("Failed to pause session: " + err.message, "error");
     } finally {
       setPauseLoading(false);
     }
@@ -649,9 +719,9 @@ export function Recorder() {
       setPauseLoading(true);
       const res = await api.resumeRecording();
       setStatus(res);
-      showToast("Recording resumed", "success");
+      showToast("Session resumed", "success");
     } catch (err) {
-      showToast("Failed to resume recording: " + err.message, "error");
+      showToast("Failed to resume session: " + err.message, "error");
     } finally {
       setPauseLoading(false);
     }
@@ -660,412 +730,1074 @@ export function Recorder() {
   const handleStop = async () => {
     try {
       setLoading(true);
-      showToast("Finalizing recording and saving test case...", "info");
+      showToast("Finalizing session & compiling test case locally...", "info");
       const res = await api.stopRecording();
       setStatus(res);
       if (streamWsRef.current) {
         streamWsRef.current.close();
       }
-      showToast("Recording finalized and test case generated!", "success");
+      showToast("Test case compiled and saved to local SQLite!", "success");
       if (res.testcase_id) {
         navigate(`/testcases/${res.testcase_id}`);
       }
     } catch (err) {
-      showToast("Failed to stop recording: " + err.message, "error");
+      showToast("Failed to stop session: " + err.message, "error");
     } finally {
       setLoading(false);
     }
   };
 
-  const formatTimer = (secs) => {
-    const mins = Math.floor(secs / 60);
-    const remainderSecs = secs % 60;
-    return `${mins.toString().padStart(2, "0")}:${remainderSecs
-      .toString()
-      .padStart(2, "0")}`;
+  // Natural Language Prompt Authoring Dispatcher
+  const handleNlPromptSubmit = (e) => {
+    e.preventDefault();
+    if (!nlPrompt.trim()) return;
+
+    setPromptLoading(true);
+    const raw = nlPrompt.trim();
+
+    // Parse simple NL intentions locally
+    let generatedStep = null;
+    if (raw.toLowerCase().startsWith("go to ") || raw.toLowerCase().startsWith("open ")) {
+      const targetUrl = raw.replace(/^(go to|open)\s+/i, "");
+      generatedStep = {
+        number: liveSteps.length + 1,
+        action: "navigate",
+        action_type: "navigate",
+        description: `Go to ${targetUrl}`,
+        url: targetUrl.startsWith("http") ? targetUrl : `https://${targetUrl}`,
+      };
+      setChromeUrl(generatedStep.url);
+      sendInputEvent({ event_type: "navigate", url: generatedStep.url });
+    } else if (raw.toLowerCase().startsWith("click ")) {
+      const elem = raw.replace(/^click\s+(on\s+)?/i, "");
+      generatedStep = {
+        number: liveSteps.length + 1,
+        action: "click",
+        action_type: "click",
+        description: `Click on ${elem}`,
+        target: elem,
+        selector: `text=${elem}`,
+      };
+    } else if (raw.toLowerCase().startsWith("type ") || raw.toLowerCase().startsWith("enter ")) {
+      const val = raw.replace(/^(type|enter)\s+/i, "");
+      generatedStep = {
+        number: liveSteps.length + 1,
+        action: "type",
+        action_type: "type",
+        description: `Enter text '${val}'`,
+        input_value: val,
+      };
+    } else if (raw.toLowerCase().startsWith("if ") || raw.toLowerCase().startsWith("check ")) {
+      // Create KaneAI-style condition block
+      const cond = raw.replace(/^(if|check\s+if)\s+/i, "");
+      generatedStep = {
+        number: liveSteps.length + 1,
+        is_condition: true,
+        condition_expr: cond.includes("==") ? cond : `${cond} == true`,
+        then_steps: [
+          {
+            number: 1,
+            action: "click",
+            action_type: "click",
+            description: `Click on confirmed target`,
+          },
+        ],
+        else_steps: [
+          {
+            number: 1,
+            action: "assert",
+            action_type: "assert",
+            description: `Assert fallback notification visible`,
+          },
+        ],
+      };
+    } else {
+      generatedStep = {
+        number: liveSteps.length + 1,
+        action: "custom",
+        action_type: "ai_action",
+        description: raw,
+      };
+    }
+
+    setLiveSteps((prev) => [...prev, generatedStep]);
+    setAdditionsCount((prev) => prev + 1);
+    setNlPrompt("");
+    setPromptLoading(false);
+    showToast("AI Step authored locally!", "success");
   };
 
-  return (
-    <div className="space-y-5 animate-in fade-in duration-300">
-      {/* Header & Status Indicator */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
-            <Video className="w-6 h-6 text-rose-500" />
-            <span>Browser Recorder Workspace</span>
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Interact directly with the embedded browser below. Every click, type, and
-            navigation is captured in real time into an executable test case.
-          </p>
-        </div>
+  // Add custom manual step
+  const handleAddManualStep = () => {
+    if (!newStepDesc.trim() && !newStepTarget.trim()) return;
 
-        {/* Live Active Pill Indicator */}
-        {isActive && (
-          <div className="flex items-center gap-3 bg-white dark:bg-surface-cardDark px-4 py-2 rounded-xl border border-slate-200 dark:border-surface-borderDark shadow-sm">
-            <span className="relative flex h-3 w-3">
-              {isRecording && (
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-              )}
-              <span
-                className={`relative inline-flex rounded-full h-3 w-3 ${
-                  isRecording ? "bg-rose-500" : "bg-amber-500"
-                }`}
-              ></span>
-            </span>
-            <div className="text-xs">
-              <span className="font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                {isRecording ? "Recording Live" : "Paused"}
+    const step = {
+      number: liveSteps.length + 1,
+      action: newStepType,
+      action_type: newStepType,
+      description: newStepDesc || `${newStepType} on ${newStepTarget}`,
+      selector: newStepTarget,
+      input_value: newStepValue,
+    };
+
+    setLiveSteps((prev) => [...prev, step]);
+    setAdditionsCount((prev) => prev + 1);
+    setIsAddingStep(false);
+    setNewStepTarget("");
+    setNewStepValue("");
+    setNewStepDesc("");
+    showToast("Step added", "success");
+  };
+
+  // Add condition block
+  const handleAddConditionBlock = () => {
+    const block = {
+      number: liveSteps.length + 1,
+      is_condition: true,
+      condition_expr: "login_button_visibility == true",
+      then_steps: [
+        {
+          number: 1,
+          action: "click",
+          action_type: "click",
+          description: "Click on login button",
+        },
+        {
+          number: 2,
+          action: "click",
+          action_type: "click",
+          description: "Click on continue",
+        },
+        {
+          number: 3,
+          action: "type",
+          action_type: "type",
+          description: "Enter password {{password}}",
+          input_value: "{{password}}",
+        },
+      ],
+      else_steps: [
+        {
+          number: 1,
+          action: "click",
+          action_type: "click",
+          description: "Click on guest register link",
+        },
+      ],
+    };
+    setLiveSteps((prev) => [...prev, block]);
+    setAdditionsCount((prev) => prev + 1);
+    showToast("Condition block created", "success");
+  };
+
+  const handleDeleteStep = (index) => {
+    setLiveSteps((prev) => prev.filter((_, i) => i !== index));
+    setDeletedCount((prev) => prev + 1);
+    showToast("Step removed", "info");
+  };
+
+  const handleAddVariable = (e) => {
+    e.preventDefault();
+    if (!newVarKey.trim()) return;
+    setLocalVariables((prev) => [
+      ...prev,
+      {
+        key: newVarKey.trim(),
+        value: newVarVal.trim(),
+        isSecret: newVarSecret,
+      },
+    ]);
+    setNewVarKey("");
+    setNewVarVal("");
+    setNewVarSecret(false);
+    showToast("Variable stored in local vault", "success");
+  };
+
+  const formatTimer = (secs) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const isActive = status.status === "recording" || status.status === "paused";
+  const isRecording = status.status === "recording";
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-4rem)] bg-slate-950 text-slate-100 select-none overflow-hidden font-sans">
+      {/* ──────────────────────────────────────────────────────────────────────────
+          KANEAI TOP STUDIO BAR
+          ────────────────────────────────────────────────────────────────────────── */}
+      <header className="h-14 px-4 bg-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0 z-30">
+        {/* Left: Brand / Session Breadcrumb */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-brand-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-brand-500/20">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs font-bold tracking-tight text-white flex items-center gap-1.5">
+                KaneAI Studio
+                <span className="px-1.5 py-0.2 text-[9px] font-bold rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  Local
+                </span>
               </span>
-              <span className="text-slate-400 ml-2 font-mono">
-                {formatTimer(elapsedSeconds)}
+              <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    isRecording
+                      ? "bg-rose-500 animate-pulse"
+                      : status.status === "paused"
+                      ? "bg-amber-500"
+                      : "bg-slate-500"
+                  }`}
+                />
+                {isActive ? (isRecording ? "Live Session" : "Paused") : "Draft"}
+                {isActive && ` • ${formatTimer(elapsedSeconds)}`}
               </span>
             </div>
-            {streamConnected && (
-              <span className="ml-2 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">
-                <span>{fps} FPS</span>
-                {latencyMs !== null && <span>• {latencyMs}ms</span>}
-              </span>
-            )}
           </div>
-        )}
-      </div>
 
-      {/* Main Split Layout: Left Embedded Viewport & Controls, Right Captured Timeline & Diagnostics */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-        {/* Left Column (8 cols): Embedded Browser Chrome & Live Viewport */}
-        <div className="xl:col-span-8 space-y-4">
-          {/* Top Session Configuration & Controls Bar */}
-          <div className="p-4 rounded-2xl border border-slate-200 dark:border-surface-borderDark bg-white dark:bg-surface-cardDark shadow-sm">
-            <form onSubmit={handleStart} className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-                <div className="md:col-span-5">
-                  <div className="relative">
-                    <Globe className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="https://example.com or http://localhost:3000"
-                      value={url}
-                      onChange={(e) => setUrl(e.target.value)}
-                      disabled={isActive}
-                      className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50"
-                    />
-                  </div>
+          <div className="h-5 w-px bg-slate-800 mx-1" />
+
+          {/* Edit Stats Tracker */}
+          <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
+            <span className="text-emerald-400 font-semibold">
+              + Additions {additionsCount}
+            </span>
+            <span>•</span>
+            <span className="text-sky-400">✎ Edited {editedCount}</span>
+            <span>•</span>
+            <span className="text-rose-400">🗑 Deleted {deletedCount}</span>
+            <span>•</span>
+            <span className="text-slate-300">⚙ Applied settings 03</span>
+          </div>
+        </div>
+
+        {/* Center / Action Toolbar */}
+        <div className="flex items-center gap-2">
+          {/* Variables Drawer Button */}
+          <button
+            type="button"
+            onClick={() => setIsVariablesOpen(!isVariablesOpen)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+              isVariablesOpen
+                ? "bg-brand-950 border-brand-500 text-brand-300"
+                : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-750"
+            }`}
+            title="Manage Local Variables & TOTP Keys"
+          >
+            <span className="font-mono font-bold text-[11px]">(x)</span>
+            <span>Variables</span>
+            <span className="px-1 text-[10px] rounded bg-slate-700 text-slate-300">
+              {localVariables.length}
+            </span>
+          </button>
+
+          {/* Replay Button */}
+          <button
+            type="button"
+            onClick={handleRefreshPage}
+            disabled={!isActive}
+            className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white disabled:opacity-40 transition-colors"
+            title="Replay from initial step"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Pause / Resume Controls */}
+          {isActive && (
+            <>
+              {isRecording ? (
+                <button
+                  type="button"
+                  onClick={handlePause}
+                  disabled={pauseLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition-all"
+                >
+                  <Pause className="w-3.5 h-3.5" />
+                  <span>Pause</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleResume}
+                  disabled={pauseLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-500 transition-all"
+                >
+                  <Play className="w-3.5 h-3.5" />
+                  <span>Resume</span>
+                </button>
+              )}
+            </>
+          )}
+
+          {/* Stop / Finalize Button */}
+          {isActive ? (
+            <button
+              type="button"
+              onClick={handleStop}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-sm shadow-rose-600/30 transition-all"
+            >
+              {loading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Save className="w-3.5 h-3.5" />
+              )}
+              <span>Finalize & Save</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleStart}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold bg-brand-600 hover:bg-brand-500 text-white shadow-sm shadow-brand-600/30 transition-all"
+            >
+              {loading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Play className="w-3.5 h-3.5" />
+              )}
+              <span>Launch Studio</span>
+            </button>
+          )}
+        </div>
+
+        {/* Right: Manual Interaction Toggle & USP Pill */}
+        <div className="flex items-center gap-3">
+          {/* Manual Interaction Switch */}
+          <div className="flex items-center gap-2 bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60">
+            <Hand
+              className={`w-3.5 h-3.5 ${
+                manualInteraction ? "text-brand-400" : "text-slate-500"
+              }`}
+            />
+            <span className="text-[11px] font-semibold text-slate-300">
+              Manual Interaction
+            </span>
+            <button
+              type="button"
+              onClick={() => setManualInteraction(!manualInteraction)}
+              className={`w-8 h-4 flex items-center rounded-full p-0.5 transition-colors cursor-pointer ${
+                manualInteraction ? "bg-brand-500 justify-end" : "bg-slate-700 justify-start"
+              }`}
+              title="Toggle between direct input forwarding and visual inspection"
+            >
+              <div className="w-3 h-3 rounded-full bg-white shadow-sm" />
+            </button>
+          </div>
+
+          {/* Local USP Pill */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 text-[11px] font-medium font-mono">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>100% Local App</span>
+            <span className="text-[9px] opacity-75">
+              ({latencyMs > 0 ? `${latencyMs}ms` : "0ms"})
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MAIN STUDIO SPLIT VIEW: LEFT (AUTHORING) + RIGHT (EMBEDDED BROWSER)
+          ────────────────────────────────────────────────────────────────────────── */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* ── LEFT PANE: KANEAI NATURAL LANGUAGE & STEP BUILDER (~42% width) ── */}
+        <div className="w-[42%] border-r border-slate-800 flex flex-col bg-slate-900/60 shrink-0">
+          {/* 1. "What do you want to test today?" Prompt Box */}
+          <div className="p-4 border-b border-slate-800 bg-slate-900/90 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-brand-400" />
+                What do you want to test today?
+              </label>
+              <span className="text-[10px] text-slate-400 font-mono">
+                Natural Language &rarr; Local Action
+              </span>
+            </div>
+
+            <form onSubmit={handleNlPromptSubmit} className="relative">
+              <input
+                type="text"
+                value={nlPrompt}
+                onChange={(e) => setNlPrompt(e.target.value)}
+                placeholder="e.g. Go to airbnb.com, click login, or if login visible..."
+                className="w-full pl-3 pr-24 py-2.5 text-xs rounded-xl bg-slate-950 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all font-sans"
+              />
+              <button
+                type="submit"
+                disabled={promptLoading || !nlPrompt.trim()}
+                className="absolute right-1.5 top-1.5 bottom-1.5 px-3 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-[11px] font-bold flex items-center gap-1 transition-all disabled:opacity-40"
+              >
+                {promptLoading ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3 h-3" />
+                )}
+                <span>Author</span>
+              </button>
+            </form>
+
+            {/* Quick Action Shortcut Pills */}
+            <div className="flex items-center gap-1.5 pt-1 overflow-x-auto text-[10px] text-slate-400">
+              <button
+                type="button"
+                onClick={() => setNlPrompt("Go to https://")}
+                className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors shrink-0"
+              >
+                + Navigate
+              </button>
+              <button
+                type="button"
+                onClick={() => setNlPrompt("Click on ")}
+                className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors shrink-0"
+              >
+                + Click
+              </button>
+              <button
+                type="button"
+                onClick={() => setNlPrompt("Enter password {{password}}")}
+                className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors shrink-0"
+              >
+                + Secret Input
+              </button>
+              <button
+                type="button"
+                onClick={handleAddConditionBlock}
+                className="px-2 py-0.5 rounded bg-brand-950 border border-brand-500/40 text-brand-300 hover:bg-brand-900 transition-colors shrink-0 font-semibold"
+              >
+                + If Condition
+              </button>
+            </div>
+          </div>
+
+          {/* 2. Step Hierarchy & Conditional Tree */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-400 mb-1">
+              <span>Steps Sequence ({liveSteps.length})</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddingStep(true)}
+                  className="text-brand-400 hover:text-brand-300 text-[11px] font-bold flex items-center gap-1"
+                >
+                  <Plus className="w-3 h-3" /> Add Step
+                </button>
+              </div>
+            </div>
+
+            {/* Empty State */}
+            {liveSteps.length === 0 && (
+              <div className="py-14 text-center border border-dashed border-slate-800 rounded-2xl bg-slate-950/40 p-6 space-y-3">
+                <div className="w-10 h-10 rounded-xl bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
+                  <Activity className="w-5 h-5 text-brand-400" />
                 </div>
-
-                <div className="md:col-span-4">
-                  <input
-                    type="text"
-                    placeholder="Test case name (optional)"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    disabled={isActive}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50"
-                  />
-                </div>
-
-                <div className="md:col-span-3 flex items-center justify-end gap-2">
-                  {isActive ? (
-                    <>
-                      {isRecording ? (
-                        <button
-                          type="button"
-                          onClick={handlePause}
-                          disabled={pauseLoading}
-                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-white transition-all shadow-sm"
-                          title="Pause recording"
-                        >
-                          <Pause className="w-3.5 h-3.5" />
-                          <span>Pause</span>
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={handleResume}
-                          disabled={pauseLoading}
-                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-sm"
-                          title="Resume recording"
-                        >
-                          <Play className="w-3.5 h-3.5" />
-                          <span>Resume</span>
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={handleStop}
-                        disabled={loading}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/25 transition-all"
-                        title="Stop & Save test case"
-                      >
-                        {loading ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>Saving...</span>
-                          </>
-                        ) : (
-                          <>
-                            <StopCircle className="w-3.5 h-3.5" />
-                            <span>Stop & Save</span>
-                          </>
-                        )}
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className="flex items-center justify-center gap-2 w-full px-5 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/25 transition-all disabled:opacity-50"
-                    >
-                      {loading ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Launching Browser...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Video className="w-4 h-4" />
-                          <span>Start Recording</span>
-                        </>
-                      )}
-                    </button>
-                  )}
+                <div>
+                  <h4 className="text-xs font-bold text-slate-200">
+                    No steps recorded yet
+                  </h4>
+                  <p className="text-[11px] text-slate-500 max-w-xs mx-auto mt-1 leading-relaxed">
+                    Interact directly with the browser canvas on the right, or type a
+                    natural language prompt above to generate steps locally.
+                  </p>
                 </div>
               </div>
-            </form>
+            )}
+
+            {/* Render Steps & KaneAI Condition Blocks */}
+            {liveSteps.map((step, idx) => {
+              if (step.is_condition) {
+                const isCollapsed = collapsedConditions[idx];
+                return (
+                  <div
+                    key={idx}
+                    className="rounded-xl border border-indigo-500/40 bg-gradient-to-b from-indigo-950/20 to-slate-900/60 p-3 space-y-2.5 transition-all shadow-sm"
+                  >
+                    {/* Condition Header */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCollapsedConditions((prev) => ({
+                              ...prev,
+                              [idx]: !prev[idx],
+                            }))
+                          }
+                          className="p-1 text-slate-400 hover:text-white"
+                        >
+                          {isCollapsed ? (
+                            <ChevronRight className="w-3.5 h-3.5 text-indigo-400" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5 text-indigo-400" />
+                          )}
+                        </button>
+                        <span className="font-mono text-[11px] text-indigo-300 font-semibold flex items-center gap-1.5">
+                          <GitBranch className="w-3.5 h-3.5 text-indigo-400" />
+                          0/1 If {step.condition_expr}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteStep(idx)}
+                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {!isCollapsed && (
+                      <div className="space-y-2 pl-4 border-l-2 border-indigo-500/30 ml-2">
+                        {/* Then Branch */}
+                        <div className="space-y-1.5">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                            &crarr; Then
+                          </span>
+                          {(step.then_steps || []).map((tStep, tIdx) => (
+                            <div
+                              key={tIdx}
+                              className="px-3 py-2 rounded-lg bg-slate-900/90 border border-slate-800 flex items-center justify-between text-xs"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Sparkles className="w-3 h-3 text-brand-400" />
+                                <span className="text-slate-200">
+                                  {tStep.description}
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-mono text-slate-500">
+                                {tStep.action}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Else Branch */}
+                        <div className="space-y-1.5 pt-1">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                            &crarr; Else
+                          </span>
+                          {(step.else_steps || []).map((eStep, eIdx) => (
+                            <div
+                              key={eIdx}
+                              className="px-3 py-2 rounded-lg bg-slate-900/90 border border-slate-800 flex items-center justify-between text-xs"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Eye className="w-3 h-3 text-amber-400" />
+                                <span className="text-slate-200">
+                                  {eStep.description}
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-mono text-slate-500">
+                                {eStep.action}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
+              // Standard Linear Step Card
+              return (
+                <div
+                  key={step.number || idx}
+                  className="group px-3.5 py-2.5 rounded-xl border border-slate-800 bg-slate-900/70 hover:border-slate-700 flex items-center justify-between text-xs transition-all"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="w-5 h-5 rounded-md bg-slate-800 text-slate-400 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
+                      {step.number || idx + 1}
+                    </span>
+
+                    {/* Step Icon */}
+                    {step.action_type === "navigate" || step.action === "navigate" ? (
+                      <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    ) : step.action_type === "click" || step.action === "click" ? (
+                      <MousePointerClick className="w-3.5 h-3.5 text-brand-400 shrink-0" />
+                    ) : step.action_type === "type" || step.action === "type" ? (
+                      <Type className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    )}
+
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-slate-200 font-medium truncate">
+                        {step.description ||
+                          step.description_short ||
+                          `${step.action || "Action"} on ${step.target || step.selector || "element"}`}
+                      </span>
+                      {step.input_value && (
+                        <span className="text-[10px] font-mono text-indigo-300 truncate">
+                          Value: {step.input_value}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Actions on Step */}
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteStep(idx)}
+                      className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors"
+                      title="Delete step"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
-          {/* Embedded Browser Container */}
-          <div className="rounded-2xl border border-slate-200 dark:border-surface-borderDark bg-slate-900 overflow-hidden shadow-lg flex flex-col">
-            {/* Browser Chrome: Tab Strip */}
-            <div className="flex items-center gap-1 px-3 pt-2 bg-slate-800/90 border-b border-slate-700/80 overflow-x-auto select-none">
+          {/* Step Insertion Modal */}
+          {isAddingStep && (
+            <div className="p-3 bg-slate-900 border-t border-slate-800 space-y-2 animate-in slide-in-from-bottom-2">
+              <div className="flex items-center justify-between text-xs font-bold text-white">
+                <span>Add Custom Step</span>
+                <button
+                  type="button"
+                  onClick={() => setIsAddingStep(false)}
+                  className="text-slate-400 hover:text-white"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <select
+                  value={newStepType}
+                  onChange={(e) => setNewStepType(e.target.value)}
+                  className="px-2 py-1 text-xs rounded bg-slate-950 border border-slate-700 text-white"
+                >
+                  <option value="click">Click</option>
+                  <option value="type">Type / Input</option>
+                  <option value="navigate">Navigate</option>
+                  <option value="assert">Assert Text</option>
+                </select>
+                <input
+                  type="text"
+                  placeholder="Selector / Text"
+                  value={newStepTarget}
+                  onChange={(e) => setNewStepTarget(e.target.value)}
+                  className="col-span-2 px-2 py-1 text-xs rounded bg-slate-950 border border-slate-700 text-white"
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsAddingStep(false)}
+                  className="px-2.5 py-1 text-xs rounded bg-slate-800 text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddManualStep}
+                  className="px-3 py-1 text-xs font-bold rounded bg-brand-600 text-white hover:bg-brand-500"
+                >
+                  Insert Step
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── RIGHT PANE: EMBEDDED LOCAL BROWSER CANVAS (~58% width) ── */}
+        <div className="flex-1 flex flex-col bg-slate-950 overflow-hidden">
+          {/* Browser Chrome Toolbar */}
+          <div className="bg-slate-900 border-b border-slate-800 p-2 space-y-1.5 shrink-0 select-none">
+            {/* Tab Bar Strip */}
+            <div className="flex items-center gap-1 overflow-x-auto">
               {tabs.map((tab) => (
                 <div
                   key={tab.page_id}
                   onClick={() => handleSwitchTab(tab.page_id)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-t-lg text-xs font-medium cursor-pointer transition-all ${
+                  className={`flex items-center gap-2 px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-all ${
                     activeTabId === tab.page_id
-                      ? "bg-slate-900 text-white border-t-2 border-brand-500"
-                      : "bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-750"
+                      ? "bg-slate-950 text-white border border-slate-750 shadow-sm"
+                      : "bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-850"
                   }`}
                 >
-                  <Globe className="w-3 h-3 text-slate-400" />
-                  <span className="truncate max-w-[140px]">
-                    {tab.title || `Tab #${tab.page_id + 1}`}
+                  <Globe className="w-3 h-3 text-brand-400" />
+                  <span className="truncate max-w-[140px] text-[11px]">
+                    {tab.title || "New Tab"}
                   </span>
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    #{tab.page_id}
-                  </span>
+                  {tabs.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={(e) => handleCloseTab(tab.page_id, e)}
+                      className="text-slate-500 hover:text-slate-200"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  )}
                 </div>
               ))}
+              <button
+                type="button"
+                onClick={handleNewTab}
+                className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                title="Open New Tab"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
             </div>
 
-            {/* Browser Chrome: Navigation Controls & URL Bar */}
-            <div className="flex items-center gap-2 px-3 py-2 bg-slate-900 border-b border-slate-800 text-slate-300">
-              <button
-                type="button"
-                onClick={handleGoBack}
-                disabled={!isActive}
-                className="p-1 rounded-lg hover:bg-slate-800 disabled:opacity-40 transition-colors"
-                title="Go Back"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={handleGoForward}
-                disabled={!isActive}
-                className="p-1 rounded-lg hover:bg-slate-800 disabled:opacity-40 transition-colors"
-                title="Go Forward"
-              >
-                <ArrowRight className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={handleReload}
-                disabled={!isActive}
-                className="p-1 rounded-lg hover:bg-slate-800 disabled:opacity-40 transition-colors"
-                title="Reload"
-              >
-                <RotateCcw className="w-4 h-4" />
-              </button>
+            {/* Navigation & Address Bar */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 text-slate-400">
+                <button
+                  type="button"
+                  onClick={handleGoBack}
+                  disabled={!isActive}
+                  className="p-1 rounded hover:bg-slate-800 hover:text-white disabled:opacity-40"
+                  title="Back"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleGoForward}
+                  disabled={!isActive}
+                  className="p-1 rounded hover:bg-slate-800 hover:text-white disabled:opacity-40"
+                  title="Forward"
+                >
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRefreshPage}
+                  disabled={!isActive}
+                  className="p-1 rounded hover:bg-slate-800 hover:text-white disabled:opacity-40"
+                  title="Reload"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+              </div>
 
-              <form onSubmit={handleNavigateSubmit} className="flex-1 min-w-0">
-                <div className="relative flex items-center">
-                  <ShieldCheck className="absolute left-2.5 w-3.5 h-3.5 text-emerald-400" />
-                  <input
-                    type="text"
-                    value={chromeUrl}
-                    onChange={(e) => setChromeUrl(e.target.value)}
-                    disabled={!isActive}
-                    placeholder="Enter URL and press Enter..."
-                    className="w-full pl-8 pr-3 py-1 text-xs font-mono rounded-lg bg-slate-950 text-slate-200 border border-slate-800 focus:outline-none focus:border-brand-500 disabled:opacity-50"
-                  />
-                </div>
+              {/* URL Address Input */}
+              <form onSubmit={handleNavigateSubmit} className="flex-1 relative">
+                <Lock className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-emerald-400" />
+                <input
+                  type="text"
+                  value={chromeUrl}
+                  onChange={(e) => setChromeUrl(e.target.value)}
+                  placeholder="Enter target URL (e.g. https://airbnb.com or http://localhost:3000)..."
+                  className="w-full pl-8 pr-16 py-1.5 text-xs font-mono rounded-lg bg-slate-950 text-slate-200 border border-slate-800 focus:outline-none focus:border-brand-500 transition-colors"
+                />
+                <button
+                  type="submit"
+                  disabled={!isActive}
+                  className="absolute right-1 top-1 bottom-1 px-2.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-slate-300 disabled:opacity-40"
+                >
+                  Go
+                </button>
               </form>
 
-              <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400 shrink-0">
+              {/* Resolution & Stream Status */}
+              <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 shrink-0">
                 <span>
-                  {viewportDims.width}×{viewportDims.height}
+                  {viewportDims.width}&times;{viewportDims.height}
                 </span>
                 <span
                   className={`w-2 h-2 rounded-full ${
                     streamConnected ? "bg-emerald-500 animate-pulse" : "bg-slate-600"
                   }`}
-                  title={streamConnected ? "Live Screencast Stream Connected" : "Stream Idle"}
-                ></span>
+                  title={streamConnected ? "Live CDP Screencast Connected" : "Stream Idle"}
+                />
               </div>
             </div>
+          </div>
 
-            {/* Viewport Canvas Area with Input Forwarding */}
-            <div
-              ref={viewportContainerRef}
-              tabIndex={0}
-              onKeyDown={handleKeyDown}
-              onKeyUp={handleKeyUp}
-              onPaste={handlePaste}
-              className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden outline-none cursor-crosshair select-none"
-            >
-              {/* Live Screencast Canvas */}
-              <canvas
-                ref={canvasRef}
-                onMouseMove={handleMouseMove}
-                onMouseDown={handleMouseDown}
-                onMouseUp={handleMouseUp}
-                onClick={handleClick}
-                onDoubleClick={handleDoubleClick}
-                onWheel={handleWheel}
-                onContextMenu={handleContextMenu}
-                className={`max-w-full max-h-full object-contain ${
-                  isActive ? "block" : "hidden"
-                }`}
-              />
+          {/* Live Screencast Viewport Container */}
+          <div
+            ref={viewportContainerRef}
+            tabIndex={0}
+            onKeyDown={handleKeyDown}
+            onKeyUp={handleKeyUp}
+            onPaste={handlePaste}
+            className="flex-1 relative bg-black flex items-center justify-center overflow-hidden outline-none select-none cursor-crosshair"
+          >
+            {/* Live Screencast Canvas */}
+            <canvas
+              ref={canvasRef}
+              onMouseMove={handleMouseMove}
+              onMouseDown={handleMouseDown}
+              onMouseUp={handleMouseUp}
+              onClick={handleClick}
+              onDoubleClick={handleDoubleClick}
+              onWheel={handleWheel}
+              onContextMenu={handleContextMenu}
+              className={`max-w-full max-h-full object-contain ${
+                isActive ? "block" : "hidden"
+              }`}
+            />
 
-              {/* Inactive or Loading Placeholder */}
-              {!isActive && (
-                <div className="text-center p-8 space-y-3">
-                  <div className="w-12 h-12 rounded-2xl bg-slate-800 flex items-center justify-center mx-auto text-rose-500 shadow-inner">
-                    <Video className="w-6 h-6" />
-                  </div>
-                  <h3 className="text-sm font-semibold text-slate-200">
-                    Embedded Browser Viewport
-                  </h3>
-                  <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
-                    Click <strong>Start Recording</strong> above to launch the headless
-                    browser session. It will stream live into this canvas with zero pop-up
-                    windows.
-                  </p>
+            {/* Idle State Prompt */}
+            {!isActive && (
+              <div className="text-center p-8 space-y-3 z-10">
+                <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-brand-400 shadow-inner">
+                  <Video className="w-6 h-6" />
                 </div>
-              )}
-
-              {isActive && !streamConnected && (
-                <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center">
-                  <div className="flex items-center gap-3 text-xs text-slate-300">
-                    <Loader2 className="w-5 h-5 animate-spin text-brand-500" />
-                    <span>Connecting live screencast stream...</span>
-                  </div>
-                </div>
-              )}
-
-              {/* JS Dialog Modal Overlay (alert, confirm, prompt) */}
-              {activeDialog && (
-                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-40">
-                  <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 max-w-md w-full shadow-2xl space-y-4 animate-in zoom-in-95">
-                    <div className="flex items-center gap-2.5 text-amber-400">
-                      <AlertCircle className="w-5 h-5 shrink-0" />
-                      <h4 className="text-sm font-bold text-white capitalize">
-                        JavaScript {activeDialog.dialog_type || "Dialog"}
-                      </h4>
-                    </div>
-                    <p className="text-xs text-slate-300 leading-relaxed">
-                      {activeDialog.message}
-                    </p>
-                    {activeDialog.dialog_type === "prompt" && (
-                      <input
-                        type="text"
-                        value={dialogPromptValue}
-                        onChange={(e) => setDialogPromptValue(e.target.value)}
-                        placeholder="Enter value..."
-                        className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-950 border border-slate-700 text-white focus:outline-none focus:ring-1 focus:ring-brand-500"
-                        autoFocus
-                      />
-                    )}
-                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
-                      {activeDialog.dialog_type !== "alert" && (
-                        <button
-                          type="button"
-                          onClick={() => handleDialogResponse(false)}
-                          className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleDialogResponse(true)}
-                        className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-brand-600 hover:bg-brand-500 text-white transition-colors"
-                      >
-                        OK
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* File Chooser Prompt Overlay */}
-              {activeFileChooser && (
-                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-40">
-                  <form
-                    onSubmit={handleFileChooserSubmit}
-                    className="bg-slate-900 border border-slate-700 rounded-2xl p-5 max-w-md w-full shadow-2xl space-y-4 animate-in zoom-in-95"
+                <h3 className="text-sm font-bold text-slate-200">
+                  Local Embedded Browser Viewport
+                </h3>
+                <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+                  Enter your target URL and click <strong>Launch Studio</strong> to start an
+                  embedded Chromium instance streamed with sub-millisecond local latency.
+                </p>
+                <div className="pt-2 flex items-center justify-center gap-2">
+                  <input
+                    type="text"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="https://example.com"
+                    className="px-3 py-1.5 text-xs rounded-xl bg-slate-900 border border-slate-700 text-white w-64 font-mono focus:outline-none focus:border-brand-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleStart}
+                    disabled={loading}
+                    className="px-4 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all shadow-md shadow-brand-600/25"
                   >
-                    <div className="flex items-center gap-2.5 text-blue-400">
-                      <FileUp className="w-5 h-5 shrink-0" />
-                      <h4 className="text-sm font-bold text-white">
-                        File Upload Request
-                      </h4>
-                    </div>
-                    <p className="text-xs text-slate-300">
-                      The application requested a file upload. Specify the path of the file
-                      on disk to supply:
-                    </p>
+                    Start Studio
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Connecting Spinner */}
+            {isActive && !streamConnected && (
+              <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-20">
+                <div className="flex items-center gap-3 text-xs text-slate-300">
+                  <Loader2 className="w-5 h-5 animate-spin text-brand-500" />
+                  <span>Connecting to local CDP screencast stream...</span>
+                </div>
+              </div>
+            )}
+
+            {/* JS Dialog Modal Overlay */}
+            {activeDialog && (
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-40">
+                <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 max-w-md w-full shadow-2xl space-y-4">
+                  <div className="flex items-center gap-2.5 text-amber-400">
+                    <AlertCircle className="w-5 h-5 shrink-0" />
+                    <h4 className="text-sm font-bold text-white capitalize">
+                      JavaScript {activeDialog.dialog_type || "Dialog"}
+                    </h4>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    {activeDialog.message}
+                  </p>
+                  {activeDialog.dialog_type === "prompt" && (
                     <input
                       type="text"
-                      value={fileUploadPath}
-                      onChange={(e) => setFileUploadPath(e.target.value)}
-                      placeholder="/absolute/path/to/file.png"
-                      className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-950 border border-slate-700 text-white focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
+                      value={dialogPromptValue}
+                      onChange={(e) => setDialogPromptValue(e.target.value)}
+                      placeholder="Enter value..."
+                      className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-950 border border-slate-700 text-white focus:outline-none focus:ring-1 focus:ring-brand-500"
                       autoFocus
                     />
-                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                  )}
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                    {activeDialog.dialog_type !== "alert" && (
                       <button
                         type="button"
-                        onClick={() => setActiveFileChooser(null)}
-                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
+                        onClick={() => handleDialogResponse(false)}
+                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700"
                       >
                         Cancel
                       </button>
-                      <button
-                        type="submit"
-                        className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors"
-                      >
-                        Upload File
-                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleDialogResponse(true)}
+                      className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-brand-600 hover:bg-brand-500 text-white"
+                    >
+                      OK
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* File Chooser Prompt Overlay */}
+            {activeFileChooser && (
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-40">
+                <form
+                  onSubmit={handleFileChooserSubmit}
+                  className="bg-slate-900 border border-slate-700 rounded-2xl p-5 max-w-md w-full shadow-2xl space-y-4"
+                >
+                  <div className="flex items-center gap-2.5 text-blue-400">
+                    <FileUp className="w-5 h-5 shrink-0" />
+                    <h4 className="text-sm font-bold text-white">File Upload Request</h4>
+                  </div>
+                  <p className="text-xs text-slate-300">
+                    Specify the absolute path of the local file to provide:
+                  </p>
+                  <input
+                    type="text"
+                    value={fileUploadPath}
+                    onChange={(e) => setFileUploadPath(e.target.value)}
+                    placeholder="/path/to/local/sample.png"
+                    className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-950 border border-slate-700 text-white font-mono"
+                    autoFocus
+                  />
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setActiveFileChooser(null)}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-slate-300"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white"
+                    >
+                      Upload File
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>
+
+          {/* Bottom Diagnostics Drawer (KaneAI Network / Console / Telemetry) */}
+          <div className="h-44 bg-slate-900 border-t border-slate-800 flex flex-col shrink-0">
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-800 bg-slate-925">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveBottomTab("network")}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
+                    activeBottomTab === "network"
+                      ? "bg-slate-800 text-white"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  Network HAR ({networkRequests.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveBottomTab("console")}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
+                    activeBottomTab === "console"
+                      ? "bg-slate-800 text-white"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  Console ({consoleLogs.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveBottomTab("telemetry")}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
+                    activeBottomTab === "telemetry"
+                      ? "bg-slate-800 text-white"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  Local Performance
+                </button>
+              </div>
+              <span className="text-[10px] font-mono text-slate-500">
+                Frames: {frameCountRef.current} • Latency: {latencyMs}ms
+              </span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2 font-mono text-[11px]">
+              {activeBottomTab === "network" && (
+                <div className="space-y-1">
+                  {networkRequests.length === 0 ? (
+                    <div className="text-slate-500 text-center py-6">
+                      No network requests captured yet.
                     </div>
-                  </form>
+                  ) : (
+                    networkRequests.slice(-25).map((req, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between px-2 py-0.5 rounded bg-slate-950/60 border border-slate-850"
+                      >
+                        <div className="flex items-center gap-2 truncate">
+                          <span
+                            className={`px-1 text-[9px] font-bold rounded ${
+                              req.status < 400
+                                ? "bg-emerald-950 text-emerald-400"
+                                : "bg-rose-950 text-rose-400"
+                            }`}
+                          >
+                            {req.status || 200}
+                          </span>
+                          <span className="text-slate-400 font-bold">
+                            {req.method || "GET"}
+                          </span>
+                          <span className="text-slate-300 truncate">{req.url}</span>
+                        </div>
+                        <span className="text-slate-500 shrink-0">
+                          {req.duration ? `${Math.round(req.duration)}ms` : "cached"}
+                        </span>
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
 
-              {/* Download Notification Banner */}
-              {downloadNotice && (
-                <div className="absolute bottom-3 right-3 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 shadow-xl flex items-center gap-3 text-xs text-slate-200 z-30 animate-in slide-in-from-bottom-2">
-                  <Download className="w-4 h-4 text-emerald-400 animate-bounce" />
-                  <div>
-                    <span className="font-semibold block">{downloadNotice.filename}</span>
-                    <span className="text-[10px] text-slate-400">
-                      {downloadNotice.status === "downloading"
-                        ? "Downloading..."
-                        : "Download complete and saved to disk"}
+              {activeBottomTab === "console" && (
+                <div className="space-y-1">
+                  {consoleLogs.length === 0 ? (
+                    <div className="text-slate-500 text-center py-6">
+                      No console messages emitted.
+                    </div>
+                  ) : (
+                    consoleLogs.slice(-25).map((log, i) => (
+                      <div
+                        key={i}
+                        className={`px-2 py-0.5 rounded bg-slate-950/60 border border-slate-850 flex items-start gap-2 ${
+                          log.type === "error" ? "text-rose-400" : "text-slate-300"
+                        }`}
+                      >
+                        <span className="text-slate-500">[{log.type || "log"}]</span>
+                        <span className="break-all">{log.text}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {activeBottomTab === "telemetry" && (
+                <div className="grid grid-cols-4 gap-4 p-3 text-slate-300">
+                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+                    <span className="text-[10px] text-slate-500 uppercase block">
+                      Local CDP Frames
+                    </span>
+                    <span className="text-lg font-bold text-white">
+                      {frameCountRef.current}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+                    <span className="text-[10px] text-slate-500 uppercase block">
+                      Network Round-Trip
+                    </span>
+                    <span className="text-lg font-bold text-emerald-400">
+                      {latencyMs}ms (Direct Socket)
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+                    <span className="text-[10px] text-slate-500 uppercase block">
+                      Execution Sandbox
+                    </span>
+                    <span className="text-lg font-bold text-sky-400">Air-Gapped</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+                    <span className="text-[10px] text-slate-500 uppercase block">
+                      Storage
+                    </span>
+                    <span className="text-lg font-bold text-indigo-400">
+                      ~/.tracecase (SQLite)
                     </span>
                   </div>
                 </div>
@@ -1073,222 +1805,109 @@ export function Recorder() {
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Right Column (4 cols): Live Step Timeline & Diagnostics */}
-        <div className="xl:col-span-4 space-y-4">
-          <div className="p-4 rounded-2xl border border-slate-200 dark:border-surface-borderDark bg-white dark:bg-surface-cardDark shadow-sm flex flex-col h-[640px]">
-            {/* Tab Navigation */}
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-surface-borderDark pb-2.5 mb-3">
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setActiveDiagTab("steps")}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all ${
-                    activeDiagTab === "steps"
-                      ? "bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400"
-                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-                  }`}
+      {/* ──────────────────────────────────────────────────────────────────────────
+          LOCAL VARIABLES SLIDE-OVER DRAWER
+          ────────────────────────────────────────────────────────────────────────── */}
+      {isVariablesOpen && (
+        <div className="fixed inset-y-0 right-0 w-96 bg-slate-900 border-l border-slate-800 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-200">
+          <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded bg-brand-500/20 text-brand-400 font-mono font-bold text-xs flex items-center justify-center">
+                (x)
+              </span>
+              <h3 className="text-sm font-bold text-white">Local Variables Vault</h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsVariablesOpen(false)}
+              className="text-slate-400 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="p-4 flex-1 overflow-y-auto space-y-3">
+            <p className="text-xs text-slate-400">
+              Reference these key-value pairs anywhere in steps using{" "}
+              <code className="text-brand-300 font-mono">{"{{variable_name}}"}</code>.
+              Stored exclusively on this machine.
+            </p>
+
+            <div className="space-y-2">
+              {localVariables.map((v, i) => (
+                <div
+                  key={i}
+                  className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs"
                 >
-                  Steps ({liveSteps.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveDiagTab("network")}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all ${
-                    activeDiagTab === "network"
-                      ? "bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400"
-                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-                  }`}
-                >
-                  Network
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveDiagTab("console")}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all ${
-                    activeDiagTab === "console"
-                      ? "bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400"
-                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-                  }`}
-                >
-                  Console
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveDiagTab("errors")}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all ${
-                    activeDiagTab === "errors"
-                      ? "bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400"
-                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-                  }`}
-                >
-                  Errors
-                </button>
-              </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-mono font-bold text-indigo-300 truncate">
+                      {`{{${v.key}}}`}
+                    </span>
+                    <span className="text-slate-400 text-[11px] font-mono truncate">
+                      {v.isSecret ? "••••••••••••" : v.value}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`{{${v.key}}}`);
+                      showToast(`Copied {{${v.key}}} to clipboard`, "info");
+                    }}
+                    className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800"
+                    title="Copy token"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
             </div>
 
-            {/* Tab 1: Live Steps Timeline */}
-            {activeDiagTab === "steps" && (
-              <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-                {liveSteps.length === 0 ? (
-                  <div className="text-center py-16 px-4 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
-                    <Activity className="w-8 h-8 text-slate-400 mx-auto mb-2 opacity-50" />
-                    <p className="text-xs font-medium text-slate-600 dark:text-slate-400">
-                      {isActive
-                        ? "Interact with the embedded browser to record steps."
-                        : "Start a session to stream user actions in real-time."}
-                    </p>
-                  </div>
-                ) : (
-                  liveSteps.map((step, idx) => (
-                    <div
-                      key={step.number || idx}
-                      className="p-3 rounded-xl border border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/40 flex items-start gap-3 hover:border-slate-200 transition-all text-xs"
-                    >
-                      <span className="w-5 h-5 rounded-full bg-brand-500/10 text-brand-600 dark:text-brand-400 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">
-                        {step.number || idx + 1}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="px-1.5 py-0.2 text-[9px] font-bold rounded uppercase bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                            {step.action_type || "action"}
-                          </span>
-                          <span className="font-medium text-slate-900 dark:text-slate-100 truncate">
-                            {step.description_short || step.action_type}
-                          </span>
-                        </div>
-                        {(step.element?.selector || step.selector) && (
-                          <p className="text-[10px] font-mono text-slate-400 truncate mt-1">
-                            {step.element?.selector || step.selector}
-                          </p>
-                        )}
-                        {step.input_value && (
-                          <p className="text-[10px] text-slate-600 dark:text-slate-300 mt-0.5">
-                            Value:{" "}
-                            <span className="font-mono bg-white dark:bg-slate-800 px-1 py-0.5 rounded border border-slate-200 dark:border-slate-700">
-                              {step.input_value}
-                            </span>
-                          </p>
-                        )}
-                      </div>
-                      {step.screenshot_path && (
-                        <div className="shrink-0 w-10 h-7 rounded border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-800">
-                          <img
-                            src={`/api/testcases/screenshot?path=${encodeURIComponent(
-                              step.screenshot_path
-                            )}`}
-                            alt="thumb"
-                            className="w-full h-full object-cover"
-                            onError={(e) => (e.target.style.display = "none")}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  ))
-                )}
+            {/* Add New Variable Form */}
+            <form
+              onSubmit={handleAddVariable}
+              className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5 mt-4"
+            >
+              <span className="text-xs font-bold text-white block">
+                + Create Local Variable
+              </span>
+              <input
+                type="text"
+                placeholder="Variable Key (e.g. totp_token)"
+                value={newVarKey}
+                onChange={(e) => setNewVarKey(e.target.value)}
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-slate-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-brand-500"
+              />
+              <input
+                type="text"
+                placeholder="Variable Value"
+                value={newVarVal}
+                onChange={(e) => setNewVarVal(e.target.value)}
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-slate-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-brand-500"
+              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="varSecret"
+                  checked={newVarSecret}
+                  onChange={(e) => setNewVarSecret(e.target.checked)}
+                  className="rounded bg-slate-900 border-slate-700 text-brand-600 focus:ring-0"
+                />
+                <label htmlFor="varSecret" className="text-xs text-slate-300">
+                  Mask as secret (password / API key)
+                </label>
               </div>
-            )}
-
-            {/* Tab 2: Network Inspector */}
-            {activeDiagTab === "network" && (
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1 font-mono text-[11px]">
-                {networkRequests.length === 0 ? (
-                  <div className="text-center py-16 text-slate-400 text-xs italic">
-                    No network requests captured for this session yet.
-                  </div>
-                ) : (
-                  networkRequests.map((req, idx) => (
-                    <div
-                      key={idx}
-                      className="p-2.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 flex items-center justify-between gap-2"
-                    >
-                      <div className="flex items-center gap-2 truncate">
-                        <span className="font-bold text-[10px] uppercase text-brand-500">
-                          {req.method}
-                        </span>
-                        <span className="truncate text-slate-700 dark:text-slate-300">
-                          {req.url}
-                        </span>
-                      </div>
-                      <span
-                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                          req.status >= 400
-                            ? "bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400"
-                            : "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400"
-                        }`}
-                      >
-                        {req.status || "---"}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-
-            {/* Tab 3: Console Logs */}
-            {activeDiagTab === "console" && (
-              <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 font-mono text-[11px]">
-                {consoleLogs.length === 0 ? (
-                  <div className="text-center py-16 text-slate-400 text-xs italic">
-                    No console output captured yet.
-                  </div>
-                ) : (
-                  consoleLogs.map((log, idx) => (
-                    <div
-                      key={idx}
-                      className={`p-2 rounded-lg border text-xs leading-relaxed ${
-                        log.level === "error"
-                          ? "bg-rose-50/50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/50 text-rose-600 dark:text-rose-400"
-                          : log.level === "warn"
-                          ? "bg-amber-50/50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/50 text-amber-600 dark:text-amber-400"
-                          : "bg-slate-50 dark:bg-slate-900/40 border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300"
-                      }`}
-                    >
-                      <span className="font-bold uppercase text-[9px] mr-1.5 opacity-75">
-                        [{log.level}]
-                      </span>
-                      <span>{log.message}</span>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-
-            {/* Tab 4: Page Errors */}
-            {activeDiagTab === "errors" && (
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1 font-mono text-xs">
-                {pageErrors.length === 0 ? (
-                  <div className="text-center py-16 text-slate-400 text-xs italic">
-                    Zero uncaught page errors detected.
-                  </div>
-                ) : (
-                  pageErrors.map((err, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 space-y-1"
-                    >
-                      <span className="font-bold block text-[11px]">Uncaught Error:</span>
-                      <p className="leading-relaxed">{err.message}</p>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-
-            {/* Bottom Target Link if Completed */}
-            {status.status === "completed" && status.testcase_id && (
               <button
-                type="button"
-                onClick={() => navigate(`/testcases/${status.testcase_id}`)}
-                className="mt-3 flex items-center justify-center gap-2 w-full py-2.5 text-xs font-bold rounded-xl bg-brand-600 hover:bg-brand-500 text-white shadow-md shadow-brand-500/20 transition-all"
+                type="submit"
+                className="w-full py-1.5 text-xs font-bold rounded-lg bg-brand-600 hover:bg-brand-500 text-white transition-colors"
               >
-                <span>View Recorded Test Case</span>
-                <ArrowRight className="w-4 h-4" />
+                Save Variable to Local Vault
               </button>
-            )}
+            </form>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -39,7 +39,7 @@ const navSections = [
     items: [
       { name: 'Test Cases', to: '/testcases', icon: FileCode2 },
       { name: 'Test Suites', to: '/suites', icon: Layers },
-      { name: 'Browser Recorder', to: '/recorder', icon: Video, highlight: true },
+      { name: 'Local Studio', to: '/recorder', icon: Video, highlight: true, badge: 'Studio' },
       { name: 'Test Executions', to: '/executions', icon: PlayCircle },
       { name: 'Execution History', to: '/history', icon: History },
       { name: 'Reports', to: '/reports', icon: FileSpreadsheet },
