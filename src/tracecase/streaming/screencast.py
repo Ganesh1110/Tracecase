@@ -133,14 +133,26 @@ class CDPScreencastManager:
             self._is_active = True
             self._polling_task = asyncio.create_task(self._poll_screenshots())
             logger.info("Screenshot polling screencast started for non-CDP browser (WebKit/Firefox)")
+            # Wait briefly for initial viewport frame to be produced
+            for _ in range(15):
+                if self._latest_frame is not None:
+                    break
+                await asyncio.sleep(0.04)
 
     def request_immediate_frame(self) -> None:
-        """Trigger an immediate screencast frame capture after user input dispatch."""
-        if hasattr(self, "_immediate_frame_event") and self._immediate_frame_event:
-            self._immediate_frame_event.set()
+        """Trigger an immediate screencast frame capture after user input dispatch (throttled)."""
+        try:
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+        except RuntimeError:
+            now = 0
+        if now - getattr(self, "_last_req_frame_time", 0) > 0.15:
+            self._last_req_frame_time = now
+            if hasattr(self, "_immediate_frame_event") and self._immediate_frame_event:
+                self._immediate_frame_event.set()
 
     async def _poll_screenshots(self) -> None:
-        """Poll screenshots for non-Chromium browsers (WebKit, Firefox) at ~10-15 fps."""
+        """Poll screenshots for non-Chromium browsers (WebKit, Firefox) smoothly without overwhelming the pipe."""
         import base64
         self._immediate_frame_event = asyncio.Event()
 
@@ -148,7 +160,7 @@ class CDPScreencastManager:
             try:
                 if self.page.is_closed():
                     break
-                raw_bytes = await self.page.screenshot(type="jpeg", quality=self.quality)
+                raw_bytes = await self.page.screenshot(type="jpeg", quality=60)
                 b64 = base64.b64encode(raw_bytes).decode("ascii")
                 self._frame_index += 1
                 now = datetime.now()
@@ -176,16 +188,17 @@ class CDPScreencastManager:
                     except Exception as listener_exc:
                         logger.warning("Error in screencast frame listener: %s", listener_exc)
 
-                # Wait for up to 90ms OR trigger immediately when an input action occurs
+                # Wait for up to 350ms (idle ~3fps) OR trigger on user input settle
                 try:
-                    await asyncio.wait_for(self._immediate_frame_event.wait(), timeout=0.09)
+                    await asyncio.wait_for(self._immediate_frame_event.wait(), timeout=0.35)
                     self._immediate_frame_event.clear()
+                    await asyncio.sleep(0.05)
                 except asyncio.TimeoutError:
                     pass
             except Exception:
                 if not self._is_active or self.page.is_closed():
                     break
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.2)
 
     async def _handle_frame(self, event: dict[str, Any]) -> None:
         """Process incoming CDP frame, dispatch to listeners, and send acknowledgment."""

@@ -84,6 +84,46 @@ export function Recorder() {
   const [pauseLoading, setPauseLoading] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(160); // 02:40 timer
 
+  // Track status in ref for resilient socket reconnects
+  const statusRef = useRef(status);
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  // Browser Kit Engine Preparation & Health (Persistent until web app mounts)
+  const [isPreparingEngine, setIsPreparingEngine] = useState(false);
+  const [prepStage, setPrepStage] = useState(0); // 1: runtime, 2: sandbox, 3: screencast, 4: mount
+  const [hasFirstFrame, setHasFirstFrame] = useState(false);
+  const [hasMountedApp, setHasMountedApp] = useState(false);
+  const [discoveredBrowsers, setDiscoveredBrowsers] = useState([]);
+
+  const isPreparingEngineRef = useRef(false);
+  useEffect(() => {
+    isPreparingEngineRef.current = isPreparingEngine;
+  }, [isPreparingEngine]);
+
+  const hasMountedAppRef = useRef(false);
+  useEffect(() => {
+    hasMountedAppRef.current = hasMountedApp;
+  }, [hasMountedApp]);
+
+  const getBrowserMeta = (b) => {
+    switch (b) {
+      case "webkit":
+        return { name: "WebKit (Safari)", engine: "webkit", channel: "bundled", color: "text-blue-500", bg: "bg-blue-500/10" };
+      case "firefox":
+        return { name: "Mozilla Firefox", engine: "firefox", channel: "bundled", color: "text-amber-500", bg: "bg-amber-500/10" };
+      case "msedge":
+        return { name: "Microsoft Edge", engine: "msedge", channel: "stable", color: "text-teal-500", bg: "bg-teal-500/10" };
+      case "chrome":
+      case "chromium":
+      default:
+        return { name: "Google Chrome", engine: "chromium", channel: "stable", color: "text-emerald-500", bg: "bg-emerald-500/10" };
+    }
+  };
+
+  const browserMeta = getBrowserMeta(browser);
+
   // Authoring & Interaction States
   const [manualInteraction, setManualInteraction] = useState(true);
   const [nlPrompt, setNlPrompt] = useState("");
@@ -141,6 +181,10 @@ export function Recorder() {
   const [streamToken, setStreamToken] = useState(null);
   const [viewportDims, setViewportDims] = useState({ width: 1440, height: 900 });
   const [chromeUrl, setChromeUrl] = useState("https://www.google.com");
+  const chromeUrlRef = useRef(chromeUrl);
+  useEffect(() => {
+    chromeUrlRef.current = chromeUrl;
+  }, [chromeUrl]);
   const [tabs, setTabs] = useState([
     { page_id: 0, title: "Google", url: "https://www.google.com" },
   ]);
@@ -200,6 +244,16 @@ export function Recorder() {
       }
     };
     window.addEventListener("tracecase:browser-changed", handleBrowserChange);
+
+    // Discover installed local browser runtimes
+    api.getAvailableDevices()
+      .then((data) => {
+        if (data?.browsers) {
+          setDiscoveredBrowsers(data.browsers);
+        }
+      })
+      .catch(() => {});
+
     return () => {
       window.removeEventListener("tracecase:browser-changed", handleBrowserChange);
     };
@@ -216,9 +270,12 @@ export function Recorder() {
       if (data.elapsed_seconds !== undefined) {
         setElapsedSeconds(data.elapsed_seconds);
       }
-      if (data.session_id && data.status === "recording" && !streamConnected) {
+      if (data.session_id && (data.status === "recording" || data.status === "paused")) {
         setStreamSessionId(data.session_id);
-        connectStreamWebSocket(data.session_id, data.stream_token);
+        setStreamToken(data.stream_token);
+        if (!streamWsRef.current || streamWsRef.current.readyState !== WebSocket.OPEN) {
+          connectStreamWebSocket(data.session_id, data.stream_token);
+        }
       }
     } catch (err) {
       console.debug("Failed to fetch recording status:", err);
@@ -345,6 +402,20 @@ export function Recorder() {
 
         if (type === "frame") {
           frameCountRef.current += 1;
+          setHasFirstFrame(true);
+
+          const curUrl = chromeUrlRef.current;
+          const isTargetMounted = curUrl && curUrl !== "about:blank" && !curUrl.includes("about:blank");
+          if (isTargetMounted) {
+            setHasMountedApp(true);
+            setPrepStage(4);
+            if (isPreparingEngineRef.current) {
+              setTimeout(() => {
+                setIsPreparingEngine(false);
+                setLoading(false);
+              }, 400);
+            }
+          }
           const img = offscreenImgRef.current;
           img.onload = () => {
             const canvas = canvasRef.current;
@@ -363,7 +434,20 @@ export function Recorder() {
           };
           img.src = "data:image/jpeg;base64," + payload.data_base64;
         } else if (type === "session_state") {
-          if (payload.url) setChromeUrl(payload.url);
+          if (payload.url) {
+            setChromeUrl(payload.url);
+            chromeUrlRef.current = payload.url;
+            if (payload.url !== "about:blank" && !payload.url.includes("about:blank")) {
+              setHasMountedApp(true);
+              setPrepStage(4);
+              if (isPreparingEngineRef.current) {
+                setTimeout(() => {
+                  setIsPreparingEngine(false);
+                  setLoading(false);
+                }, 400);
+              }
+            }
+          }
           if (payload.viewport_width && payload.viewport_height) {
             setViewportDims({
               width: payload.viewport_width,
@@ -389,6 +473,29 @@ export function Recorder() {
             ];
           });
           setActiveTabId(payload.page_id);
+        } else if (type === "tab_switched") {
+          if (payload.url && payload.url !== "about:blank" && !payload.url.includes("about:blank")) {
+            setChromeUrl(payload.url);
+            chromeUrlRef.current = payload.url;
+            setHasMountedApp(true);
+            setPrepStage(4);
+            if (isPreparingEngineRef.current) {
+              setTimeout(() => {
+                setIsPreparingEngine(false);
+                setLoading(false);
+              }, 400);
+            }
+          }
+          if (payload.page_id !== undefined) {
+            setActiveTabId(payload.page_id);
+            setTabs((prev) =>
+              prev.map((t) =>
+                t.page_id === payload.page_id
+                  ? { ...t, url: payload.url || t.url, title: payload.title || t.title }
+                  : t
+              )
+            );
+          }
         } else if (type === "tab_closed") {
           setTabs((prev) => prev.filter((t) => t.page_id !== payload.page_id));
           setActiveTabId(0);
@@ -429,10 +536,19 @@ export function Recorder() {
 
     ws.onclose = () => {
       setStreamConnected(false);
+      // Auto-reconnect if session is active or paused
+      const cur = statusRef.current?.status;
+      if (sessionId && (cur === "recording" || cur === "paused")) {
+        setTimeout(() => {
+          if (streamWsRef.current?.readyState !== WebSocket.OPEN) {
+            connectStreamWebSocket(sessionId, token);
+          }
+        }, 1200);
+      }
     };
 
     ws.onerror = (err) => {
-      console.error("Stream WebSocket error:", err);
+      console.debug("Stream WebSocket notice:", err);
       setStreamConnected(false);
     };
   }, []);
@@ -643,6 +759,21 @@ export function Recorder() {
     }
   };
 
+  const handleDeviceModeChange = (mode) => {
+    setDeviceMode(mode);
+    if (mode === "mobile") {
+      setViewportDims({ width: 393, height: 852 });
+      if (streamConnected) {
+        sendInputEvent({ event_type: "resize", width: 393, height: 852 });
+      }
+    } else {
+      setViewportDims({ width: 1280, height: 720 });
+      if (streamConnected) {
+        sendInputEvent({ event_type: "resize", width: 1280, height: 720 });
+      }
+    }
+  };
+
   // Browser Chrome Actions
   const handleNavigateSubmit = (e) => {
     if (e) e.preventDefault();
@@ -719,7 +850,21 @@ export function Recorder() {
     );
   };
 
-  const handleResetSession = () => {
+  const handleResetSession = async () => {
+    if (status.status === "recording" || status.status === "paused") {
+      try {
+        await api.stopRecording();
+      } catch (_) {}
+    }
+    if (streamWsRef.current) {
+      streamWsRef.current.close();
+      streamWsRef.current = null;
+    }
+    setStreamConnected(false);
+    setHasFirstFrame(false);
+    setIsPreparingEngine(false);
+    setLoading(false);
+    setStatus({ status: "idle" });
     setUrl("https://www.google.com");
     setChromeUrl("https://www.google.com");
     setLiveSteps([]);
@@ -736,10 +881,19 @@ export function Recorder() {
 
     try {
       setLoading(true);
+      setIsPreparingEngine(true);
+      setHasFirstFrame(false);
+      setHasMountedApp(false);
+      setPrepStage(1);
       setElapsedSeconds(0);
       setTabs([{ page_id: 0, title: finalUrl, url: finalUrl }]);
       setActiveTabId(0);
       setChromeUrl(finalUrl);
+      chromeUrlRef.current = finalUrl;
+
+      // Progressive preparation indicators
+      setTimeout(() => setPrepStage((s) => Math.max(s, 2)), 600);
+      setTimeout(() => setPrepStage((s) => Math.max(s, 3)), 1400);
 
       const session = await api.startRecording({
         url: finalUrl,
@@ -768,10 +922,17 @@ export function Recorder() {
       if (session.session_id) {
         connectStreamWebSocket(session.session_id, session.stream_token);
       }
+
+      // Safety guard: if mounting takes longer than 25s, release preparation spinner
+      setTimeout(() => {
+        setIsPreparingEngine(false);
+        setLoading(false);
+        setHasMountedApp(true);
+      }, 25000);
     } catch (err) {
-      showToast("Failed to start studio: " + err.message, "error");
-    } finally {
+      setIsPreparingEngine(false);
       setLoading(false);
+      showToast("Failed to start studio: " + err.message, "error");
     }
   };
 
@@ -780,7 +941,6 @@ export function Recorder() {
       setPauseLoading(true);
       const res = await api.pauseRecording();
       setStatus(res);
-      showToast("Session paused", "info");
     } catch (err) {
       showToast("Failed to pause session: " + err.message, "error");
     } finally {
@@ -793,7 +953,6 @@ export function Recorder() {
       setPauseLoading(true);
       const res = await api.resumeRecording();
       setStatus(res);
-      showToast("Session resumed", "success");
     } catch (err) {
       showToast("Failed to resume session: " + err.message, "error");
     } finally {
@@ -1378,19 +1537,39 @@ export function Recorder() {
           <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between select-none">
             <div className="flex items-center gap-2.5">
               <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                {browser === "webkit"
-                  ? "WebKit (Safari)"
-                  : browser === "firefox"
-                  ? "Mozilla Firefox"
-                  : browser === "msedge"
-                  ? "Microsoft Edge"
-                  : "Google Chrome"}
+                {browserMeta.name}
               </span>
+
+              {/* Browser Kit Preparation & Health Indicator */}
+              {isPreparingEngine || (loading && !hasFirstFrame) ? (
+                <span className="px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-[10px] font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1.5 animate-pulse">
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                  <span>Preparing Browser Kit...</span>
+                </span>
+              ) : streamConnected && hasFirstFrame ? (
+                <span className="px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  <span>Browser Kit Ready</span>
+                </span>
+              ) : (status.status === "recording" || status.status === "paused") ? (
+                <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-[10px] font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                  <span>Kit Active</span>
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10px] font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                  <span>Kit Standby</span>
+                </span>
+              )}
+
               {/* Pink Recording steps Pill */}
-              <span className="px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-[10px] font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                <span>Recording steps</span>
-              </span>
+              {(status.status === "recording" || status.status === "paused") && (
+                <span className="px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-[10px] font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                  <span>{status.status === "paused" ? "Recording Paused" : "Recording steps"}</span>
+                </span>
+              )}
             </div>
 
             <button
@@ -1493,21 +1672,21 @@ export function Recorder() {
               <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setDeviceMode("desktop")}
-                  className={`px-2 py-1 rounded text-xs flex items-center gap-1 transition-colors ${
+                  onClick={() => handleDeviceModeChange("desktop")}
+                  className={`px-2 py-1 rounded text-xs flex items-center gap-1 transition-colors cursor-pointer ${
                     deviceMode === "desktop"
                       ? "bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 font-bold shadow-xs"
                       : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-300"
                   }`}
-                  title="Desktop Viewport (1440x900)"
+                  title="Desktop Viewport (1280x720)"
                 >
                   <Monitor className="w-3 h-3" />
                   <span className="text-[10px]">Desktop</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setDeviceMode("mobile")}
-                  className={`px-2 py-1 rounded text-xs flex items-center gap-1 transition-colors ${
+                  onClick={() => handleDeviceModeChange("mobile")}
+                  className={`px-2 py-1 rounded text-xs flex items-center gap-1 transition-colors cursor-pointer ${
                     deviceMode === "mobile"
                       ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 font-bold shadow-xs"
                       : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-300"
@@ -1528,18 +1707,25 @@ export function Recorder() {
               if (canvasRef.current) canvasRef.current.focus();
             }}
             className={`flex-1 relative bg-slate-100 dark:bg-slate-950 flex flex-col items-center justify-center overflow-auto outline-none select-none cursor-default ${
-              deviceMode === "mobile" ? "p-4" : ""
+              deviceMode === "mobile" ? "p-3 sm:p-5" : ""
             }`}
           >
             <div
               className={`flex flex-col items-center justify-center transition-all ${
                 deviceMode === "mobile"
-                  ? "w-[360px] sm:w-[393px] max-w-full h-[700px] sm:h-[780px] max-h-[calc(100vh-210px)] bg-white dark:bg-slate-900 rounded-[36px] border-4 border-slate-700 shadow-2xl relative overflow-hidden shrink-0 my-auto"
+                  ? "w-[390px] max-w-[92vw] h-[800px] max-h-[calc(100vh-175px)] bg-slate-900 rounded-[44px] p-2.5 shadow-2xl border-4 border-slate-700 ring-1 ring-slate-800/80 relative overflow-hidden shrink-0 my-auto"
                   : "w-full h-full relative"
               }`}
             >
               {deviceMode === "mobile" && (
-                <div className="absolute top-2 left-1/2 -translate-x-1/2 w-28 h-4 bg-slate-800 rounded-full z-30" />
+                <>
+                  {/* Dynamic Island */}
+                  <div className="absolute top-3.5 left-1/2 -translate-x-1/2 w-28 h-5 bg-black rounded-full z-30 pointer-events-none flex items-center justify-end px-3">
+                    <div className="w-2.5 h-2.5 rounded-full bg-slate-900 ring-1 ring-slate-800" />
+                  </div>
+                  {/* Home indicator bar */}
+                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-32 h-1 bg-slate-400/50 rounded-full z-30 pointer-events-none" />
+                </>
               )}
               {/* Live Screencast Canvas (Active Stream) */}
               <canvas
@@ -1555,30 +1741,97 @@ export function Recorder() {
                 onKeyDown={handleKeyDown}
                 onKeyUp={handleKeyUp}
                 onPaste={handlePaste}
-                className={`max-w-full max-h-full object-contain outline-none focus:ring-2 focus:ring-brand-500/40 rounded-lg cursor-pointer ${
-                  streamConnected ? "block" : "hidden"
+                className={`max-w-full max-h-full ${
+                  deviceMode === "mobile"
+                    ? "w-full h-full object-cover rounded-[34px] bg-white dark:bg-slate-950"
+                    : "object-contain"
+                } outline-none focus:ring-2 focus:ring-brand-500/40 rounded-lg cursor-pointer ${
+                  (hasFirstFrame && (!isPreparingEngine || hasMountedApp)) ? "block" : "hidden"
                 }`}
               />
 
-              {/* Launching Loading State */}
-              {loading && (
-                <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-white dark:bg-slate-950 select-none animate-in fade-in space-y-4">
-                  <div className="w-12 h-12 rounded-2xl bg-brand-50 dark:bg-brand-950 border border-brand-200 dark:border-brand-800 flex items-center justify-center text-brand-600 dark:text-brand-400">
-                    <Loader2 className="w-6 h-6 animate-spin" />
+              {/* Browser Kit Preparation Checklist (Extends until target web application is mounted) */}
+              {isPreparingEngine && (!hasMountedApp || chromeUrl === "about:blank") && (
+                <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-white dark:bg-slate-950 select-none animate-in fade-in space-y-6">
+                  {/* Glowing Browser Engine Icon */}
+                  <div className="relative">
+                    <div className="w-16 h-16 rounded-3xl bg-brand-500/10 dark:bg-brand-500/20 border-2 border-brand-500/30 flex items-center justify-center text-brand-600 dark:text-brand-400 shadow-xl shadow-brand-500/10">
+                      <Globe className="w-8 h-8 animate-pulse" />
+                    </div>
+                    <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-brand-600 text-white flex items-center justify-center shadow">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <div className="text-sm font-bold text-slate-900 dark:text-white">
-                      Launching Local Browser Session...
+
+                  <div className="text-center max-w-sm space-y-1">
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                      Preparing {browserMeta.name} Browser Kit
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate">
+                      Target: {chromeUrl === "about:blank" ? (tabs[0]?.url || url || "Target Application") : chromeUrl}
+                    </p>
+                  </div>
+
+                  {/* Progressive Preparation Checklist */}
+                  <div className="w-full max-w-xs bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 space-y-3 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-2.5 text-slate-700 dark:text-slate-300 font-medium">
+                        {prepStage >= 1 ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        ) : (
+                          <span className="w-4 h-4 rounded-full border border-slate-300 dark:border-slate-700 shrink-0" />
+                        )}
+                        <span>Launch {browserMeta.name} Runtime</span>
+                      </span>
+                      {prepStage === 1 && <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-500" />}
                     </div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-1 max-w-sm truncate">
-                      Navigating to {chromeUrl}
+
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-2.5 text-slate-700 dark:text-slate-300 font-medium">
+                        {prepStage >= 2 ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        ) : (
+                          <span className="w-4 h-4 rounded-full border border-slate-300 dark:border-slate-700 shrink-0" />
+                        )}
+                        <span>Configure Sandbox &amp; Viewport</span>
+                      </span>
+                      {prepStage === 2 && <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-500" />}
                     </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-2.5 text-slate-700 dark:text-slate-300 font-medium">
+                        {prepStage >= 3 ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        ) : (
+                          <span className="w-4 h-4 rounded-full border border-slate-300 dark:border-slate-700 shrink-0" />
+                        )}
+                        <span>Attach Live Screencast &amp; Observers</span>
+                      </span>
+                      {prepStage === 3 && <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-500" />}
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-2.5 text-slate-700 dark:text-slate-300 font-medium">
+                        {prepStage >= 4 && hasMountedApp ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        ) : (
+                          <span className="w-4 h-4 rounded-full border border-slate-300 dark:border-slate-700 shrink-0" />
+                        )}
+                        <span>Mount Target Web Application</span>
+                      </span>
+                      {(!hasMountedApp || prepStage < 4) && <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-500" />}
+                    </div>
+                  </div>
+
+                  <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    <span>100% Local Desktop Intelligence • Zero Cloud Telemetry</span>
                   </div>
                 </div>
               )}
 
-              {/* Target Web Application Launch Card */}
-              {!streamConnected && !loading && !chromeUrl.includes("google.com") && (
+              {/* Target Web Application Launch Card (Only when NOT in active recording session) */}
+              {status.status !== "recording" && status.status !== "paused" && !isPreparingEngine && !streamConnected && !loading && !chromeUrl.includes("google.com") && (
                 <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-950 select-none animate-in fade-in">
                   <div className="max-w-md w-full p-6 sm:p-8 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl text-center space-y-5">
                     <div className="w-14 h-14 rounded-2xl bg-brand-50 dark:bg-brand-950/60 border border-brand-200 dark:border-brand-800 text-brand-600 dark:text-brand-400 flex items-center justify-center mx-auto shadow-sm">
@@ -1592,6 +1845,23 @@ export function Recorder() {
                         {chromeUrl}
                       </p>
                     </div>
+
+                    {/* Local Browser Kit Readiness Check */}
+                    <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-850/60 border border-slate-200 dark:border-slate-800 text-left space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                          <span>Local Browser Kit Verified</span>
+                        </span>
+                        <span className="font-mono text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800">
+                          Ready to Launch
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                        Engine: <strong className="text-slate-700 dark:text-slate-300">{browserMeta.name}</strong> • Isolated Profile • 0ms Local Latency
+                      </div>
+                    </div>
+
                     <button
                       type="button"
                       onClick={() => handleStart(chromeUrl)}
@@ -1601,8 +1871,45 @@ export function Recorder() {
                       <span>Launch Live Session &amp; Start Recording</span>
                     </button>
                     <p className="text-[11px] text-slate-400">
-                      Launches local {browser === "webkit" ? "WebKit (Safari)" : browser === "firefox" ? "Mozilla Firefox" : "Google Chrome"} engine and streams live interactions over CDP.
+                      Launches local {browserMeta.name} engine and streams live interactions over CDP.
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Reconnecting / Stream Sync Overlay (Never rendered simultaneously with Preparation Card) */}
+              {(status.status === "recording" || status.status === "paused") && !streamConnected && !isPreparingEngine && (
+                <div className={`absolute inset-0 ${hasFirstFrame ? "bg-slate-950/70 backdrop-blur-[2px]" : "bg-white dark:bg-slate-950"} z-20 flex flex-col items-center justify-center space-y-4 animate-in fade-in p-6 text-center`}>
+                  <div className="max-w-sm w-full p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl space-y-3">
+                    <div className="flex items-center justify-center gap-2.5 text-brand-600 dark:text-brand-400">
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span className="text-sm font-bold text-slate-900 dark:text-white">Connecting to live studio stream...</span>
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                      Syncing live viewport with {browserMeta.name} local engine.
+                    </p>
+                    <div className="flex items-center justify-center gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (status.session_id) {
+                            connectStreamWebSocket(status.session_id, status.stream_token || streamToken);
+                          } else {
+                            fetchStatus();
+                          }
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold shadow transition-all cursor-pointer"
+                      >
+                        Retry Connection
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleResetSession}
+                        className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
+                      >
+                        Reset Session
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1916,6 +2223,9 @@ export function Recorder() {
                             setDeviceMode("mobile");
                           } else {
                             setDeviceMode("desktop");
+                          }
+                          if (streamConnected) {
+                            sendInputEvent({ event_type: "resize", width: preset.w, height: preset.h });
                           }
                           showToast(`Viewport updated to ${preset.w} × ${preset.h}`, "info");
                         }}

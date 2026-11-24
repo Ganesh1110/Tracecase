@@ -3296,8 +3296,31 @@ async def record_stream_websocket(
         )
         if session.latest_frame:
             await frame_sender(session.latest_frame)
-    except Exception:
-        pass
+        else:
+            # If no cached frame is available yet, take an immediate screenshot so client renders instantly
+            page = getattr(session, "active_page", None) or getattr(session, "page", None)
+            if page and not page.is_closed():
+                try:
+                    import base64
+                    from datetime import datetime
+                    raw_bytes = await page.screenshot(type="jpeg", quality=65)
+                    b64 = base64.b64encode(raw_bytes).decode("ascii")
+                    vp = getattr(session, "viewport", (1280, 720))
+                    init_frame = ScreencastFrame(
+                        frame_index=1,
+                        data_base64=b64,
+                        metadata={"deviceWidth": vp[0], "deviceHeight": vp[1], "pageScaleFactor": 1},
+                        timestamp=datetime.now(),
+                        byte_size=len(raw_bytes),
+                    )
+                    sc = getattr(session, "screencast", None)
+                    if sc:
+                        sc._latest_frame = init_frame
+                    await frame_sender(init_frame)
+                except Exception as shot_err:
+                    logger.debug("Initial live screenshot dispatch notice: %s", shot_err)
+    except Exception as init_err:
+        logger.debug("Initial session info dispatch notice: %s", init_err)
 
     try:
         while True:

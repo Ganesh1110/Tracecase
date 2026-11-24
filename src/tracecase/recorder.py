@@ -334,6 +334,20 @@ class Recorder:
             if page_title:
                 console.print(f"[green]✓[/green] Page loaded: {page_title}")
 
+            nav_url = page.url
+            if nav_url and nav_url not in ("about:blank", ""):
+                await self.broadcast_stream_message({
+                    "type": "tab_switched",
+                    "payload": {
+                        "page_id": 0,
+                        "url": nav_url,
+                        "title": page_title or "Tab 1",
+                    },
+                })
+                sc = self._screencasts.get(0)
+                if sc and hasattr(sc, "request_immediate_frame"):
+                    sc.request_immediate_frame()
+
             console.print("\n[bold]Ready to record![/bold]")
             if not self.embedded:
                 console.print("[dim]Click '▶ Start' in the browser to begin recording.[/dim]")
@@ -528,9 +542,10 @@ class Recorder:
             return
         bw, bh = self.viewport
         await dispatch_input_event(page=self.active_page, event=event, browser_viewport=(bw, bh))
-        sc = self._screencasts.get(self.active_page_id)
-        if sc and hasattr(sc, "request_immediate_frame"):
-            sc.request_immediate_frame()
+        if event.event_type != InputEventType.MOUSE_MOVE:
+            sc = self._screencasts.get(self.active_page_id)
+            if sc and hasattr(sc, "request_immediate_frame"):
+                sc.request_immediate_frame()
 
     async def resize_viewport(self, width: int, height: int) -> None:
         """Adjust viewport geometry across active page and screencast managers."""
