@@ -235,9 +235,9 @@ class Recorder:
         # Prepare output directory
         self._prepare_output_dir()
 
-        # Optimize browser flags for screencasting in embedded mode
+        # Optimize browser flags for screencasting in embedded mode (Chromium only)
         launch_args = None
-        if self.embedded:
+        if self.embedded and self.browser_type in ("chromium", "chrome", "msedge"):
             launch_args = [
                 "--disable-background-timer-throttling",
                 "--disable-backgrounding-occluded-windows",
@@ -316,18 +316,23 @@ class Recorder:
                 "page", lambda new_page: asyncio.create_task(self._on_new_page(new_page))
             )
 
-            # Navigate to start URL
-            await self._browser_manager.navigate(self.start_url)
-            console.print(f"[green]✓[/green] Navigated to {self.start_url}")
-
-            page_title = await page.title()
-            if page_title:
-                console.print(f"[green]✓[/green] Page loaded: {page_title}")
-
             if self.auto_start:
                 await self.start_recording()
 
             self.ready_event.set()
+
+            # Navigate to start URL without timeout aborts
+            try:
+                await self._browser_manager.navigate(self.start_url, wait_until="commit", timeout=0)
+                console.print(f"[green]✓[/green] Navigated to {self.start_url}")
+            except Exception as nav_err:
+                console.print(f"[yellow]![/yellow] Initial navigation notice for {self.start_url}: {nav_err}")
+
+            page_title = ""
+            with contextlib.suppress(Exception):
+                page_title = await page.title()
+            if page_title:
+                console.print(f"[green]✓[/green] Page loaded: {page_title}")
 
             console.print("\n[bold]Ready to record![/bold]")
             if not self.embedded:
@@ -352,8 +357,8 @@ class Recorder:
 
     def _setup_page_listeners(self, page: Page) -> None:
         """Set up page lifecycle, console, and network listeners."""
-        page.on("load", self._on_page_load)
-        page.on("domcontentloaded", self._on_dom_ready)
+        page.on("load", lambda p: asyncio.create_task(self._on_page_load(p)))
+        page.on("domcontentloaded", lambda p: asyncio.create_task(self._on_dom_ready(p)))
         page.on("console", self._on_console_message)
         page.on("pageerror", self._on_page_error)
         page.on("request", self._on_request)
@@ -523,6 +528,9 @@ class Recorder:
             return
         bw, bh = self.viewport
         await dispatch_input_event(page=self.active_page, event=event, browser_viewport=(bw, bh))
+        sc = self._screencasts.get(self.active_page_id)
+        if sc and hasattr(sc, "request_immediate_frame"):
+            sc.request_immediate_frame()
 
     async def resize_viewport(self, width: int, height: int) -> None:
         """Adjust viewport geometry across active page and screencast managers."""
@@ -536,26 +544,29 @@ class Recorder:
             sc.max_height = h
 
     async def navigate_to(self, target_url: str) -> None:
-        """Navigate active page to URL."""
+        """Navigate active page to URL without timing out."""
         url = target_url.strip()
         if not url.startswith("http://") and not url.startswith("https://") and not url.startswith("data:") and not url.startswith("about:"):
             url = f"https://{url}"
-        await self.active_page.goto(url, wait_until="domcontentloaded")
+        try:
+            await self.active_page.goto(url, wait_until="commit", timeout=0)
+        except Exception as exc:
+            logger.warning("Navigation notice for %s: %s", url, exc)
 
     async def go_back(self) -> None:
         """Navigate back in active page history."""
         with contextlib.suppress(Exception):
-            await self.active_page.go_back(wait_until="domcontentloaded")
+            await self.active_page.go_back(wait_until="commit", timeout=0)
 
     async def go_forward(self) -> None:
         """Navigate forward in active page history."""
         with contextlib.suppress(Exception):
-            await self.active_page.go_forward(wait_until="domcontentloaded")
+            await self.active_page.go_forward(wait_until="commit", timeout=0)
 
     async def reload_page(self) -> None:
         """Reload active page."""
         with contextlib.suppress(Exception):
-            await self.active_page.reload(wait_until="domcontentloaded")
+            await self.active_page.reload(wait_until="commit", timeout=0)
 
     async def handle_dialog_response(
         self, dialog_id: str, accept: bool, prompt_text: str | None = None
@@ -786,23 +797,42 @@ class Recorder:
 
     async def _on_page_load(self, _: Any) -> None:
         """Handle page load event."""
-        if self._browser_manager and self._browser_manager._page:
-            try:
-                if self.embedded:
-                    # Clean browser view: ensure in-page control panel is removed
-                    await self._browser_manager._page.evaluate(
+        page = self.active_page
+        if not page or page.is_closed():
+            return
+        try:
+            if self.embedded:
+                # Clean browser view: ensure in-page control panel is removed
+                with contextlib.suppress(Exception):
+                    await page.evaluate(
                         "() => { const p = document.getElementById('__tracecase_panel__'); if (p) p.remove(); }"
                     )
-                else:
-                    await self._browser_manager._page.evaluate(CONTROL_PANEL_JS)
+            else:
+                with contextlib.suppress(Exception):
+                    await page.evaluate(CONTROL_PANEL_JS)
                     await update_panel_ui(
-                        self._browser_manager._page,
+                        page,
                         self.is_recording,
                         len(self.steps),
                     )
-                await self._browser_manager._page.evaluate(EVENT_LISTENER_JS)
-            except Exception:
-                pass
+            with contextlib.suppress(Exception):
+                await page.evaluate(EVENT_LISTENER_JS)
+
+            current_url = page.url
+            if current_url and current_url not in ("about:blank", ""):
+                page_title = ""
+                with contextlib.suppress(Exception):
+                    page_title = await page.title()
+                await self.broadcast_stream_message({
+                    "type": "tab_switched",
+                    "payload": {
+                        "page_id": self.active_page_id,
+                        "url": current_url,
+                        "title": page_title or f"Tab {self.active_page_id + 1}",
+                    },
+                })
+        except Exception:
+            pass
 
     async def _on_dom_ready(self, _: Any) -> None:
         """Handle DOM content loaded event."""

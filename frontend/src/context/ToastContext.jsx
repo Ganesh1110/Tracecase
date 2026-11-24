@@ -8,15 +8,27 @@ const ToastContext = createContext({
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
 
-  const showToast = useCallback((message, type = 'info', duration = 4000) => {
-    const id = Date.now() + Math.random().toString(36).substring(2, 6);
-    setToasts((prev) => [...prev, { id, message, type }]);
+  const showToast = useCallback((message, type = 'info', duration = 3500) => {
+    if (!message) return;
+    const cleanMsg = String(message).trim();
 
-    if (duration > 0) {
-      setTimeout(() => {
-        setToasts((prev) => prev.filter((t) => t.id !== id));
-      }, duration);
-    }
+    setToasts((prev) => {
+      // Deduplicate: Don't show identical message if already active
+      const isDuplicate = prev.some(
+        (t) => t.message.toLowerCase() === cleanMsg.toLowerCase()
+      );
+      if (isDuplicate) return prev;
+
+      const id = Date.now() + Math.random().toString(36).substring(2, 6);
+      if (duration > 0) {
+        setTimeout(() => {
+          setToasts((current) => current.filter((t) => t.id !== id));
+        }, duration);
+      }
+      // Keep maximum 3 toasts visible at once
+      const updated = [...prev, { id, message: cleanMsg, type }];
+      return updated.slice(-3);
+    });
   }, []);
 
   const removeToast = (id) => {

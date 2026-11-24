@@ -438,13 +438,14 @@ export function TestCases() {
           {/* Right Column: Test Cases Data Table (9 cols) */}
           <div className="col-span-12 lg:col-span-9 space-y-3">
             {/* Action Bar (Review Duplicates, Generate with AI, Add Test Case) */}
-            <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm">
+            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm">
               {/* Left Filters */}
-              <div className="flex items-center gap-2 flex-1 min-w-[280px]">
-                <div className="relative flex-1">
+              <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+                <div className="relative flex-1 min-w-[200px]">
                   <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
+                    aria-label="Search test cases by ID or title"
                     placeholder="Search by Test Case ID or Title..."
                     value={caseSearch}
                     onChange={(e) => setCaseSearch(e.target.value)}
@@ -455,6 +456,7 @@ export function TestCases() {
                 {/* Status Dropdown */}
                 <select
                   value={statusFilter}
+                  aria-label="Filter test cases by status"
                   onChange={(e) => setStatusFilter(e.target.value)}
                   className="px-2.5 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 font-medium"
                 >
@@ -467,6 +469,7 @@ export function TestCases() {
                 {/* Sort Dropdown */}
                 <select
                   value={sortBy}
+                  aria-label="Sort test cases"
                   onChange={(e) => setSortBy(e.target.value)}
                   className="px-2.5 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 font-medium"
                 >
@@ -477,10 +480,11 @@ export function TestCases() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => showToast('AI Duplicate check passed: 0 duplicate flows detected.', 'info')}
+                  aria-label="Review duplicate test flows"
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
@@ -490,6 +494,7 @@ export function TestCases() {
                 <button
                   type="button"
                   onClick={() => setIsAiModalOpen(true)}
+                  aria-label="Generate test with AI"
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900 transition-colors"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
@@ -499,6 +504,7 @@ export function TestCases() {
                 <button
                   type="button"
                   onClick={() => navigate('/recorder')}
+                  aria-label="Add Test Case"
                   className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold bg-brand-600 hover:bg-brand-500 text-white shadow-sm shadow-brand-600/30 transition-all"
                 >
                   <Plus className="w-3.5 h-3.5" />

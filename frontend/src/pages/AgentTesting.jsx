@@ -239,38 +239,38 @@ export default function AgentTesting() {
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50 dark:bg-slate-950 overflow-hidden">
       {/* Top Header Bar */}
-      <div className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-4 shrink-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-gradient-to-tr from-indigo-500/10 to-brand-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-800/50">
+      <div className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 sm:px-6 py-4 shrink-0">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2.5 rounded-xl bg-gradient-to-tr from-indigo-500/10 to-brand-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-800/50 shrink-0">
               <Bot className="w-6 h-6" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-                  AI Agent Assurance & Testing
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 truncate">
+                  AI Agent Assurance &amp; Testing
                 </h1>
-                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
                   KaneAI Architecture
                 </span>
-                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">
+                <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">
                   <ShieldCheck className="w-3 h-3" />
                   100% Local Guardrails
                 </span>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
                 Evaluate pre-production local LLMs, Ollama endpoints, tool-calling bots, and multi-turn conversational agents.
               </p>
             </div>
           </div>
 
           {/* Action Buttons */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 shrink-0">
             {/* Target Selector */}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 text-xs">
-              <Cpu className="w-3.5 h-3.5 text-indigo-500" />
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 text-xs">
+              <Cpu className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
               <span className="text-slate-500 dark:text-slate-400">Target:</span>
-              <span className="font-semibold text-slate-800 dark:text-slate-200">
+              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[140px]">
                 {selectedSuite?.target_type?.toUpperCase() || 'OLLAMA'} (
                 {selectedSuite?.model_name || 'llama3'})
               </span>
@@ -278,16 +278,18 @@ export default function AgentTesting() {
 
             <button
               onClick={() => setShowCaseModal(true)}
+              aria-label="Add Test Scenario"
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Add Test Case</span>
+              <span>Add Scenario</span>
             </button>
 
             <button
               onClick={handleRunEvaluation}
               disabled={evaluating}
-              className="flex items-center gap-2 px-4 py-1.5 text-xs font-bold rounded-lg bg-gradient-to-r from-indigo-600 to-brand-600 hover:from-indigo-500 hover:to-brand-500 text-white shadow-sm shadow-indigo-500/25 transition-all disabled:opacity-50"
+              aria-label="Run Suite Benchmark"
+              className="flex items-center gap-2 px-3.5 sm:px-4 py-1.5 text-xs font-bold rounded-lg bg-gradient-to-r from-indigo-600 to-brand-600 hover:from-indigo-500 hover:to-brand-500 text-white shadow-sm shadow-indigo-500/25 transition-all disabled:opacity-50"
             >
               {evaluating ? (
                 <>
@@ -297,7 +299,7 @@ export default function AgentTesting() {
               ) : (
                 <>
                   <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>Run Suite Benchmark</span>
+                  <span>Run Benchmark</span>
                 </>
               )}
             </button>
@@ -305,10 +307,10 @@ export default function AgentTesting() {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex items-center gap-6 mt-4 border-t border-slate-100 dark:border-slate-800/80 pt-3 text-xs font-semibold">
+        <div className="flex items-center gap-4 sm:gap-6 mt-4 border-t border-slate-100 dark:border-slate-800/80 pt-3 text-xs font-semibold overflow-x-auto scrollbar-none">
           <button
             onClick={() => setActiveTab('suites')}
-            className={`pb-1.5 border-b-2 transition-colors flex items-center gap-2 ${
+            className={`pb-1.5 border-b-2 transition-colors flex items-center gap-2 shrink-0 ${
               activeTab === 'suites'
                 ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
@@ -319,7 +321,7 @@ export default function AgentTesting() {
           </button>
           <button
             onClick={() => setActiveTab('runs')}
-            className={`pb-1.5 border-b-2 transition-colors flex items-center gap-2 ${
+            className={`pb-1.5 border-b-2 transition-colors flex items-center gap-2 shrink-0 ${
               activeTab === 'runs'
                 ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
@@ -330,20 +332,20 @@ export default function AgentTesting() {
           </button>
           <button
             onClick={() => setActiveTab('playground')}
-            className={`pb-1.5 border-b-2 transition-colors flex items-center gap-2 ${
+            className={`pb-1.5 border-b-2 transition-colors flex items-center gap-2 shrink-0 ${
               activeTab === 'playground'
                 ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
             }`}
           >
             <Terminal className="w-3.5 h-3.5" />
-            <span>Interactive Prompt & Guardrail Playground</span>
+            <span>Interactive Playground</span>
           </button>
         </div>
       </div>
 
       {/* KPI Metrics Scorecard */}
-      <div className="grid grid-cols-4 gap-4 px-6 py-4 shrink-0">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 px-4 sm:px-6 py-4 shrink-0">
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">

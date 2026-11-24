@@ -1,8 +1,11 @@
 """Browser management for Tracecase."""
 
+import logging
 from typing import Literal
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
+
+logger = logging.getLogger(__name__)
 
 BrowserType = Literal["chromium", "firefox", "webkit", "msedge"]
 
@@ -105,19 +108,25 @@ class BrowserManager:
         self._context = await self._browser.new_context(
             viewport={"width": self.viewport["width"], "height": self.viewport["height"]},
         )
+        self._context.set_default_navigation_timeout(0)
         self._context.set_default_timeout(self.timeout)
         self._page = await self._context.new_page()
 
         return self._page
 
-    async def navigate(self, url: str) -> None:
+    async def navigate(self, url: str, wait_until: str = "commit", timeout: int = 0) -> None:
         """
         Navigate to a URL.
 
         Args:
             url: URL to navigate to
+            wait_until: Navigation wait condition ('commit', 'domcontentloaded', 'load')
+            timeout: Maximum operation timeout in milliseconds (0 to disable)
         """
-        await self.page.goto(url, wait_until="domcontentloaded")
+        try:
+            await self.page.goto(url, wait_until=wait_until, timeout=timeout)
+        except Exception as exc:
+            logger.warning("Navigation notice for %s: %s", url, exc)
 
     async def close(self) -> None:
         """Close browser and cleanup resources."""

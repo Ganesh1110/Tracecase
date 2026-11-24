@@ -67,7 +67,13 @@ export function Recorder() {
   const [url, setUrl] = useState("https://www.google.com");
   const [testcaseName, setTestcaseName] = useState("Google Search Flow");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [browser, setBrowser] = useState("chromium");
+  const [browser, setBrowser] = useState(() => {
+    try {
+      return localStorage.getItem("tracecase_default_browser") || "chromium";
+    } catch {
+      return "chromium";
+    }
+  });
   const [headless, setHeadless] = useState(true);
   const [status, setStatus] = useState({ status: "idle" });
 
@@ -85,6 +91,11 @@ export function Recorder() {
   const [isVariablesOpen, setIsVariablesOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isEnvOpen, setIsEnvOpen] = useState(false);
+  const [targetEnvironment, setTargetEnvironment] = useState("global");
+  const [stepTimeoutMs, setStepTimeoutMs] = useState(0);
+  const [enableSelfHealing, setEnableSelfHealing] = useState(true);
+  const [captureNetwork, setCaptureNetwork] = useState(true);
+  const [captureConsole, setCaptureConsole] = useState(true);
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [skipSampleExecution, setSkipSampleExecution] = useState(false);
   const [savingTestcase, setSavingTestcase] = useState(false);
@@ -173,6 +184,27 @@ export function Recorder() {
     }
   }, [currentProject]);
 
+  useEffect(() => {
+    api.getSettings()
+      .then((settings) => {
+        if (settings?.default_browser) {
+          setBrowser(settings.default_browser);
+          localStorage.setItem("tracecase_default_browser", settings.default_browser);
+        }
+      })
+      .catch(() => {});
+
+    const handleBrowserChange = (e) => {
+      if (e?.detail) {
+        setBrowser(e.detail);
+      }
+    };
+    window.addEventListener("tracecase:browser-changed", handleBrowserChange);
+    return () => {
+      window.removeEventListener("tracecase:browser-changed", handleBrowserChange);
+    };
+  }, []);
+
   const fetchStatus = async () => {
     try {
       const data = await api.getRecordingStatus();
@@ -249,8 +281,14 @@ export function Recorder() {
     });
 
     const unsubError = subscribe("recording_error", (payload) => {
-      setStatus((prev) => ({ ...prev, status: "error", error: payload?.error }));
-      showToast("Recording error: " + (payload?.error || "Unknown error"), "error");
+      const err = payload?.data?.error || payload?.error || "Browser session could not be started";
+      // Ignore non-fatal navigation timeout notices so user workflow is uninterrupted
+      if (typeof err === "string" && (err.includes("Timeout") || err.includes("waiting until"))) {
+        console.warn("Studio non-fatal navigation notice:", err);
+        return;
+      }
+      setStatus((prev) => ({ ...prev, status: "error", error: err }));
+      showToast("Recording error: " + err, "error");
     });
 
     return () => {
@@ -444,7 +482,7 @@ export function Recorder() {
 
   const handleMouseMove = (e) => {
     const now = performance.now();
-    if (now - lastMouseMoveRef.current < 25) return;
+    if (now - lastMouseMoveRef.current < 100) return;
     lastMouseMoveRef.current = now;
 
     const coords = getCoordinates(e);
@@ -458,32 +496,19 @@ export function Recorder() {
   };
 
   const handleMouseDown = (e) => {
-    const coords = getCoordinates(e);
-    if (!coords) return;
-    const buttonMap = { 0: "left", 1: "middle", 2: "right" };
-    sendInputEvent({
-      event_type: "mouse_down",
-      x: coords.x,
-      y: coords.y,
-      button: buttonMap[e.button] || "left",
-      client_viewport: coords.client_viewport,
-    });
+    if (canvasRef.current) {
+      canvasRef.current.focus();
+    }
   };
 
   const handleMouseUp = (e) => {
-    const coords = getCoordinates(e);
-    if (!coords) return;
-    const buttonMap = { 0: "left", 1: "middle", 2: "right" };
-    sendInputEvent({
-      event_type: "mouse_up",
-      x: coords.x,
-      y: coords.y,
-      button: buttonMap[e.button] || "left",
-      client_viewport: coords.client_viewport,
-    });
+    // Click event handles single clicks cleanly without race conditions
   };
 
   const handleClick = (e) => {
+    if (canvasRef.current) {
+      canvasRef.current.focus();
+    }
     const coords = getCoordinates(e);
     if (!coords) return;
     const buttonMap = { 0: "left", 1: "middle", 2: "right" };
@@ -500,6 +525,9 @@ export function Recorder() {
   };
 
   const handleDoubleClick = (e) => {
+    if (canvasRef.current) {
+      canvasRef.current.focus();
+    }
     const coords = getCoordinates(e);
     if (!coords) return;
     const buttonMap = { 0: "left", 1: "middle", 2: "right" };
@@ -528,6 +556,9 @@ export function Recorder() {
 
   const handleContextMenu = (e) => {
     e.preventDefault();
+    if (canvasRef.current) {
+      canvasRef.current.focus();
+    }
     const coords = getCoordinates(e);
     if (!coords) return;
     sendInputEvent({
@@ -542,46 +573,66 @@ export function Recorder() {
 
   const handleKeyDown = (e) => {
     if (!streamConnected || !manualInteraction) return;
+    e.stopPropagation();
+
+    // Special navigation / editing keys
     const specialKeys = [
       "Enter",
       "Escape",
       "Tab",
       "Backspace",
+      "Delete",
       "ArrowUp",
       "ArrowDown",
       "ArrowLeft",
       "ArrowRight",
     ];
+
     if (specialKeys.includes(e.key)) {
       e.preventDefault();
+      sendInputEvent({
+        event_type: "key_down",
+        key: e.key,
+        code: e.code,
+      });
+      return;
     }
-    const now = performance.now();
-    sendInputEvent({
-      event_type: "key_down",
-      key: e.key,
-      code: e.code,
-      client_ts: now,
-    });
 
+    // Single printable character (typing)
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
       sendInputEvent({
         event_type: "type",
         text: e.key,
+      });
+      return;
+    }
+
+    // Modifier keys (Shift, Ctrl, Alt, Meta)
+    if (["Shift", "Control", "Alt", "Meta"].includes(e.key)) {
+      sendInputEvent({
+        event_type: "key_down",
+        key: e.key,
+        code: e.code,
       });
     }
   };
 
   const handleKeyUp = (e) => {
     if (!streamConnected || !manualInteraction) return;
-    sendInputEvent({
-      event_type: "key_up",
-      key: e.key,
-      code: e.code,
-    });
+    e.stopPropagation();
+    if (["Shift", "Control", "Alt", "Meta"].includes(e.key)) {
+      sendInputEvent({
+        event_type: "key_up",
+        key: e.key,
+        code: e.code,
+      });
+    }
   };
 
   const handlePaste = (e) => {
     if (!streamConnected || !manualInteraction) return;
+    e.stopPropagation();
     e.preventDefault();
     const text = e.clipboardData.getData("text");
     if (text) {
@@ -594,9 +645,16 @@ export function Recorder() {
 
   // Browser Chrome Actions
   const handleNavigateSubmit = (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!chromeUrl.trim()) return;
     const targetUrl = chromeUrl.startsWith("http") ? chromeUrl.trim() : `https://${chromeUrl.trim()}`;
+
+    // If session is not running, launch it!
+    if (status.status !== "recording" && status.status !== "paused") {
+      handleStart(targetUrl);
+      return;
+    }
+
     sendInputEvent({
       event_type: "navigate",
       url: targetUrl,
@@ -612,6 +670,8 @@ export function Recorder() {
       },
     ]);
     setPassedCount((prev) => prev + 1);
+    setTabs([{ page_id: 0, title: targetUrl, url: targetUrl }]);
+    showToast(`Navigated to ${targetUrl}`, "success");
   };
 
   const handleRefreshPage = () => {
@@ -671,12 +731,13 @@ export function Recorder() {
 
   // Launch Session Lifecycle
   const handleStart = async (targetUrl = url) => {
-    const finalUrl = (targetUrl && targetUrl.trim()) || "https://www.google.com";
+    const rawUrl = (targetUrl && targetUrl.trim()) || chromeUrl || "https://www.google.com";
+    const finalUrl = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
 
     try {
       setLoading(true);
       setElapsedSeconds(0);
-      setTabs([{ page_id: 0, title: "Google", url: finalUrl }]);
+      setTabs([{ page_id: 0, title: finalUrl, url: finalUrl }]);
       setActiveTabId(0);
       setChromeUrl(finalUrl);
 
@@ -685,13 +746,24 @@ export function Recorder() {
         name: testcaseName.trim() || undefined,
         browser,
         headless: true,
-        timeout: 30000,
+        timeout: stepTimeoutMs || 0,
         project_id: selectedProjectId || "default_project",
         embedded: true,
       });
 
       setStatus(session);
       showToast("Local Browser Studio session launched!", "success");
+
+      setLiveSteps([
+        {
+          number: 1,
+          action: "navigate",
+          action_type: "navigate",
+          description: `Open '${finalUrl}'`,
+          url: finalUrl,
+        },
+      ]);
+      setPassedCount(1);
 
       if (session.session_id) {
         connectStreamWebSocket(session.session_id, session.stream_token);
@@ -780,55 +852,48 @@ export function Recorder() {
     if (!googleQuery.trim()) return;
 
     const query = googleQuery.trim();
-    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+    const isUrl =
+      query.startsWith("http://") ||
+      query.startsWith("https://") ||
+      query.includes("opensource-demo") ||
+      query.includes(".com") ||
+      query.includes(".org") ||
+      query.includes(".io") ||
+      query.includes(".net") ||
+      query.includes("localhost");
 
-    // Add recorded steps sequentially
+    const targetUrl = isUrl
+      ? query.startsWith("http")
+        ? query
+        : `https://${query}`
+      : `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+
+    setChromeUrl(targetUrl);
+    setTabs([{ page_id: 0, title: isUrl ? targetUrl : `${query} - Google Search`, url: targetUrl }]);
+    setGoogleQuery("");
+
+    // If session is not running, launch it!
+    if (status.status !== "recording" && status.status !== "paused") {
+      handleStart(targetUrl);
+      return;
+    }
+
+    sendInputEvent({
+      event_type: "navigate",
+      url: targetUrl,
+    });
     setLiveSteps((prev) => [
       ...prev,
       {
         number: prev.length + 1,
         action: "navigate",
         action_type: "navigate",
-        description: `Open 'https://www.google.com'`,
-        url: "https://www.google.com",
-        selector: "window.location",
-      },
-      {
-        number: prev.length + 2,
-        action: "click",
-        action_type: "click",
-        description: `Click on the search input field`,
-        selector: 'input[name="q"], textarea[name="q"]',
-      },
-      {
-        number: prev.length + 3,
-        action: "type",
-        action_type: "type",
-        description: `Type in search input field '${query}'`,
-        input_value: query,
-        selector: 'input[name="q"], textarea[name="q"]',
-      },
-      {
-        number: prev.length + 4,
-        action: "click",
-        action_type: "click",
-        description: `Click on the 'Google Search' button`,
-        selector: 'input[name="btnK"]',
+        description: `Open '${targetUrl}'`,
+        url: targetUrl,
       },
     ]);
-
-    setPassedCount((prev) => prev + 4);
-    setChromeUrl(searchUrl);
-    setTabs([{ page_id: 0, title: `${query} - Google Search`, url: searchUrl }]);
-    setGoogleQuery("");
-
-    // Forward to live browser session if connected
-    sendInputEvent({
-      event_type: "navigate",
-      url: searchUrl,
-    });
-
-    showToast(`Executed search: "${query}"`, "success");
+    setPassedCount((prev) => prev + 1);
+    showToast(`Navigated to ${targetUrl}`, "success");
   };
 
   // Natural Language Prompt Authoring Dispatcher (Bottom input bar)
@@ -930,152 +995,163 @@ export function Recorder() {
       {/* ──────────────────────────────────────────────────────────────────────────
           STUDIO TOP BAR (Matches Screenshots 1, 2, 3)
           ────────────────────────────────────────────────────────────────────────── */}
-      <header className="h-14 px-4 bg-white dark:bg-surface-panelDark border-b border-slate-200 dark:border-surface-borderDark flex items-center justify-between shrink-0 z-30 transition-colors">
+      <header className="h-14 px-4 bg-white dark:bg-surface-panelDark border-b border-slate-200 dark:border-surface-borderDark flex items-center justify-between shrink-0 z-30 transition-colors overflow-x-auto scrollbar-none gap-2">
         {/* Left: Authoring Steps, Timer, Passed/Edited/Warning Counters, Pause */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {/* Brand & Authoring Steps */}
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-brand-600 to-indigo-500 flex items-center justify-center text-white shadow-sm shrink-0">
               <Sparkles className="w-3.5 h-3.5" />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-900 dark:text-white">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
                 Authoring Steps
               </span>
               {/* Timer Pill */}
-              <span className="px-2.5 py-0.5 rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-mono font-medium text-slate-700 dark:text-slate-300">
+              <span className="px-2 sm:px-2.5 py-0.5 rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[10px] sm:text-[11px] font-mono font-medium text-slate-700 dark:text-slate-300">
                 {formatTimer(elapsedSeconds)}
               </span>
             </div>
           </div>
 
-          <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-1" />
+          <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5 sm:mx-1" />
 
           {/* Counter Dots (Passed, Additions/Edits, Warnings) */}
-          <div className="flex items-center gap-3 text-xs font-semibold">
+          <div className="flex items-center gap-2 sm:gap-3 text-xs font-semibold">
             {/* Green: Passed / Total steps */}
-            <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+            <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400" title="Passed Steps">
               <CheckCircle2 className="w-3.5 h-3.5" />
               <span>{passedCount}</span>
             </span>
             {/* Purple: Edits / Dynamic inputs */}
-            <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400">
+            <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400" title="Edited Steps">
               <span className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
               <span>{editedCount}</span>
             </span>
             {/* Yellow: Warnings / Alerts */}
-            <span className="flex items-center gap-1 text-amber-500">
+            <span className="flex items-center gap-1 text-amber-500" title="Warnings">
               <AlertCircle className="w-3.5 h-3.5" />
               <span>{warnCount}</span>
             </span>
           </div>
 
-          <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-1" />
+          <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5 sm:mx-1" />
 
           {/* Replay Button */}
           <button
             type="button"
             onClick={handleRefreshPage}
+            aria-label="Refresh / Replay Page"
             className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
             title="Refresh / Replay"
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
 
-          {/* Pause / Resume Button */}
+          {/* Pause / Resume / Record Button */}
           <button
             type="button"
-            onClick={isRecording ? handlePause : handleResume}
-            disabled={pauseLoading}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border transition-all ${
-              isRecording
+            onClick={
+              status.status === "recording"
+                ? handlePause
+                : status.status === "paused"
+                ? handleResume
+                : () => handleStart(chromeUrl)
+            }
+            disabled={pauseLoading || loading}
+            aria-label={
+              status.status === "recording"
+                ? "Pause Recording"
+                : status.status === "paused"
+                ? "Resume Recording"
+                : "Start Recording"
+            }
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-lg text-xs font-semibold border transition-all ${
+              status.status === "recording"
                 ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700 hover:bg-amber-100"
-                : "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100"
+                : status.status === "paused"
+                ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100"
+                : "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-700 hover:bg-rose-100"
             }`}
           >
-            {isRecording ? (
+            {loading ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : status.status === "recording" ? (
               <>
                 <Pause className="w-3 h-3 fill-current" />
-                <span>Pause</span>
+                <span className="hidden sm:inline">Pause</span>
+              </>
+            ) : status.status === "paused" ? (
+              <>
+                <Play className="w-3 h-3 fill-current" />
+                <span className="hidden sm:inline">Resume</span>
               </>
             ) : (
               <>
                 <Play className="w-3 h-3 fill-current" />
-                <span>Resume</span>
+                <span className="hidden sm:inline">Record</span>
               </>
             )}
           </button>
         </div>
 
         {/* Right: Environment, Advanced Settings, Variables, Save, Exit */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Set Environment */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setIsEnvOpen(!isEnvOpen)}
-              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              <Monitor className="w-3.5 h-3.5 text-slate-500" />
-              <span>Set Environment</span>
-            </button>
-            {isEnvOpen && (
-              <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl p-3 z-50 text-xs space-y-2">
-                <span className="font-bold text-slate-700 dark:text-slate-200 block">
-                  Environment Resolution
-                </span>
-                <button
-                  onClick={() => {
-                    setViewportDims({ width: 1440, height: 900 });
-                    setIsEnvOpen(false);
-                  }}
-                  className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-between"
-                >
-                  <span>Desktop (1440 &times; 900)</span>
-                  {viewportDims.width === 1440 && <Check className="w-3.5 h-3.5 text-brand-500" />}
-                </button>
-                <button
-                  onClick={() => {
-                    setViewportDims({ width: 1280, height: 720 });
-                    setIsEnvOpen(false);
-                  }}
-                  className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-between"
-                >
-                  <span>Laptop (1280 &times; 720)</span>
-                  {viewportDims.width === 1280 && <Check className="w-3.5 h-3.5 text-brand-500" />}
-                </button>
-                <button
-                  onClick={() => {
-                    setViewportDims({ width: 390, height: 844 });
-                    setIsEnvOpen(false);
-                  }}
-                  className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-between"
-                >
-                  <span>Mobile View (390 &times; 844)</span>
-                  {viewportDims.width === 390 && <Check className="w-3.5 h-3.5 text-brand-500" />}
-                </button>
-              </div>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setIsEnvOpen(!isEnvOpen);
+              setIsSettingsOpen(false);
+              setIsVariablesOpen(false);
+            }}
+            aria-label="Set Environment"
+            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              isEnvOpen
+                ? "bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800"
+                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+            }`}
+          >
+            <Monitor className="w-3.5 h-3.5 text-brand-500" />
+            <span className="hidden md:inline">Set Environment</span>
+          </button>
 
           {/* Advanced Settings */}
           <button
             type="button"
-            onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            onClick={() => {
+              setIsSettingsOpen(!isSettingsOpen);
+              setIsEnvOpen(false);
+              setIsVariablesOpen(false);
+            }}
+            aria-label="Advanced Settings"
+            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              isSettingsOpen
+                ? "bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800"
+                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+            }`}
           >
             <Settings className="w-3.5 h-3.5 text-slate-500" />
-            <span>Advanced Settings</span>
+            <span className="hidden lg:inline">Advanced Settings</span>
             <span className="px-1 text-[10px] font-bold rounded bg-slate-200 dark:bg-slate-700">1</span>
           </button>
 
           {/* Variables (x) */}
           <button
             type="button"
-            onClick={() => setIsVariablesOpen(!isVariablesOpen)}
-            className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            onClick={() => {
+              setIsVariablesOpen(!isVariablesOpen);
+              setIsEnvOpen(false);
+              setIsSettingsOpen(false);
+            }}
+            aria-label="Manage Variables"
+            className={`flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              isVariablesOpen
+                ? "bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800"
+                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+            }`}
           >
-            <span className="font-mono font-bold text-[11px]">(x)</span>
+            <span className="font-mono font-bold text-[11px] text-brand-500">(x)</span>
             <span className="hidden sm:inline">Variables</span>
           </button>
 
@@ -1083,7 +1159,8 @@ export function Recorder() {
           <button
             type="button"
             onClick={() => setIsSaveModalOpen(true)}
-            className="px-4 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm shadow-emerald-600/20 transition-all flex items-center gap-1.5 cursor-pointer"
+            aria-label="Save Test Case"
+            className="px-3 sm:px-4 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm shadow-emerald-600/20 transition-all flex items-center gap-1.5 cursor-pointer"
           >
             <Save className="w-3.5 h-3.5" />
             <span>Save</span>
@@ -1093,7 +1170,8 @@ export function Recorder() {
           <button
             type="button"
             onClick={() => navigate("/testcases")}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            aria-label="Exit Studio"
+            className="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
           >
             Exit
           </button>
@@ -1300,7 +1378,13 @@ export function Recorder() {
           <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between select-none">
             <div className="flex items-center gap-2.5">
               <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                Google Chrome
+                {browser === "webkit"
+                  ? "WebKit (Safari)"
+                  : browser === "firefox"
+                  ? "Mozilla Firefox"
+                  : browser === "msedge"
+                  ? "Microsoft Edge"
+                  : "Google Chrome"}
               </span>
               {/* Pink Recording steps Pill */}
               <span className="px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-[10px] font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
@@ -1440,10 +1524,9 @@ export function Recorder() {
           {/* Browser Viewport (Live Stream Canvas or Google View) */}
           <div
             ref={viewportContainerRef}
-            tabIndex={0}
-            onKeyDown={handleKeyDown}
-            onKeyUp={handleKeyUp}
-            onPaste={handlePaste}
+            onClick={() => {
+              if (canvasRef.current) canvasRef.current.focus();
+            }}
             className={`flex-1 relative bg-slate-100 dark:bg-slate-950 flex flex-col items-center justify-center overflow-auto outline-none select-none cursor-default ${
               deviceMode === "mobile" ? "p-4" : ""
             }`}
@@ -1451,7 +1534,7 @@ export function Recorder() {
             <div
               className={`flex flex-col items-center justify-center transition-all ${
                 deviceMode === "mobile"
-                  ? "w-[393px] h-[780px] bg-white dark:bg-slate-900 rounded-[40px] border-4 border-slate-700 shadow-2xl relative overflow-hidden shrink-0"
+                  ? "w-[360px] sm:w-[393px] max-w-full h-[700px] sm:h-[780px] max-h-[calc(100vh-210px)] bg-white dark:bg-slate-900 rounded-[36px] border-4 border-slate-700 shadow-2xl relative overflow-hidden shrink-0 my-auto"
                   : "w-full h-full relative"
               }`}
             >
@@ -1461,6 +1544,7 @@ export function Recorder() {
               {/* Live Screencast Canvas (Active Stream) */}
               <canvas
                 ref={canvasRef}
+                tabIndex={0}
                 onMouseMove={handleMouseMove}
                 onMouseDown={handleMouseDown}
                 onMouseUp={handleMouseUp}
@@ -1468,13 +1552,63 @@ export function Recorder() {
                 onDoubleClick={handleDoubleClick}
                 onWheel={handleWheel}
                 onContextMenu={handleContextMenu}
-                className={`max-w-full max-h-full object-contain ${
+                onKeyDown={handleKeyDown}
+                onKeyUp={handleKeyUp}
+                onPaste={handlePaste}
+                className={`max-w-full max-h-full object-contain outline-none focus:ring-2 focus:ring-brand-500/40 rounded-lg cursor-pointer ${
                   streamConnected ? "block" : "hidden"
                 }`}
               />
 
-              {/* Default Google Homepage View */}
-              {!streamConnected && (
+              {/* Launching Loading State */}
+              {loading && (
+                <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-white dark:bg-slate-950 select-none animate-in fade-in space-y-4">
+                  <div className="w-12 h-12 rounded-2xl bg-brand-50 dark:bg-brand-950 border border-brand-200 dark:border-brand-800 flex items-center justify-center text-brand-600 dark:text-brand-400">
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                  </div>
+                  <div className="text-center">
+                    <div className="text-sm font-bold text-slate-900 dark:text-white">
+                      Launching Local Browser Session...
+                    </div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-1 max-w-sm truncate">
+                      Navigating to {chromeUrl}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Target Web Application Launch Card */}
+              {!streamConnected && !loading && !chromeUrl.includes("google.com") && (
+                <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-950 select-none animate-in fade-in">
+                  <div className="max-w-md w-full p-6 sm:p-8 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl text-center space-y-5">
+                    <div className="w-14 h-14 rounded-2xl bg-brand-50 dark:bg-brand-950/60 border border-brand-200 dark:border-brand-800 text-brand-600 dark:text-brand-400 flex items-center justify-center mx-auto shadow-sm">
+                      <Globe className="w-7 h-7" />
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                        Target Web Application
+                      </h3>
+                      <p className="text-xs text-slate-500 font-mono break-all bg-slate-100 dark:bg-slate-800/80 px-3 py-2 rounded-xl text-slate-700 dark:text-slate-300">
+                        {chromeUrl}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleStart(chromeUrl)}
+                      className="w-full py-3 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-brand-500/20 hover:scale-[1.01] transition-all cursor-pointer"
+                    >
+                      <Play className="w-4 h-4 fill-current" />
+                      <span>Launch Live Session &amp; Start Recording</span>
+                    </button>
+                    <p className="text-[11px] text-slate-400">
+                      Launches local {browser === "webkit" ? "WebKit (Safari)" : browser === "firefox" ? "Mozilla Firefox" : "Google Chrome"} engine and streams live interactions over CDP.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Default Google Homepage View (Only when chromeUrl is Google) */}
+              {!streamConnected && !loading && (chromeUrl.includes("google.com") || !chromeUrl) && (
               <div className="w-full h-full flex flex-col justify-between p-6 bg-white dark:bg-slate-950 select-none animate-in fade-in">
                 {/* Google Top Bar */}
                 <div className="flex items-center justify-end gap-4 text-xs text-slate-600 dark:text-slate-400">
@@ -1694,61 +1828,342 @@ export function Recorder() {
       )}
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          ADVANCED SETTINGS MODAL
+          SET ENVIRONMENT DRAWER (Slides in from the right)
           ────────────────────────────────────────────────────────────────────────── */}
-      {isSettingsOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Settings className="w-4 h-4 text-brand-500" />
-                <span>Advanced Settings</span>
-              </h3>
-              <button onClick={() => setIsSettingsOpen(false)} className="text-slate-400 hover:text-white">
+      {isEnvOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px] animate-in fade-in"
+            onClick={() => setIsEnvOpen(false)}
+          />
+          <div className="fixed inset-y-0 right-0 w-96 max-w-full bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-200">
+            {/* Drawer Header */}
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400 flex items-center justify-center">
+                  <Monitor className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Environment &amp; Viewport</h3>
+                  <p className="text-[10px] text-slate-400">Configure runtime dimensions and target profile</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsEnvOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="space-y-3 text-xs">
+
+            {/* Drawer Body */}
+            <div className="p-4 flex-1 overflow-y-auto space-y-5 text-xs">
+              {/* Target Environment Profile */}
               <div>
-                <label className="block text-slate-500 font-bold mb-1">Browser Engine</label>
-                <select
-                  value={browser}
-                  onChange={(e) => setBrowser(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-white"
-                >
-                  <option value="chromium">Chromium</option>
-                  <option value="firefox">Firefox</option>
-                  <option value="webkit">WebKit (Safari)</option>
-                </select>
+                <label className="block text-slate-500 font-bold mb-1.5 uppercase tracking-wider text-[10px]">
+                  Environment Profile
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: "local", name: "Local Dev", sub: "localhost" },
+                    { id: "staging", name: "Staging", sub: "test env" },
+                    { id: "prod", name: "Production", sub: "live domain" },
+                    { id: "global", name: "Global", sub: "default" },
+                  ].map((env) => (
+                    <button
+                      key={env.id}
+                      type="button"
+                      onClick={() => {
+                        setTargetEnvironment(env.id);
+                        showToast(`Switched profile to ${env.name}`, "info");
+                      }}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                        targetEnvironment === env.id
+                          ? "border-brand-500 bg-brand-50/50 dark:bg-brand-950/40 text-brand-700 dark:text-brand-300 font-semibold"
+                          : "border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-700 dark:text-slate-300"
+                      }`}
+                    >
+                      <div className="font-bold">{env.name}</div>
+                      <div className="text-[10px] text-slate-400">{env.sub}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {/* Viewport Resolution */}
               <div>
-                <label className="block text-slate-500 font-bold mb-1">Test Case Name</label>
-                <input
-                  type="text"
-                  value={testcaseName}
-                  onChange={(e) => setTestcaseName(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-white"
-                />
+                <label className="block text-slate-500 font-bold mb-1.5 uppercase tracking-wider text-[10px]">
+                  Screen Resolution Presets
+                </label>
+                <div className="space-y-1.5">
+                  {[
+                    { name: "Desktop (Wide)", w: 1440, h: 900, icon: Laptop, tag: "Desktop" },
+                    { name: "Laptop (HD)", w: 1280, h: 720, icon: Monitor, tag: "Standard" },
+                    { name: "Tablet (iPad Pro)", w: 834, h: 1194, icon: Tablet, tag: "Tablet" },
+                    { name: "Mobile (iPhone 15 Pro)", w: 393, h: 852, icon: Smartphone, tag: "Mobile" },
+                    { name: "Mobile (Pixel 8)", w: 412, h: 915, icon: Smartphone, tag: "Mobile" },
+                  ].map((preset) => {
+                    const Icon = preset.icon;
+                    const isSelected = viewportDims.width === preset.w && viewportDims.height === preset.h;
+                    return (
+                      <button
+                        key={`${preset.w}x${preset.h}`}
+                        type="button"
+                        onClick={() => {
+                          setViewportDims({ width: preset.w, height: preset.h });
+                          if (preset.tag === "Mobile") {
+                            setDeviceMode("mobile");
+                          } else {
+                            setDeviceMode("desktop");
+                          }
+                          showToast(`Viewport updated to ${preset.w} × ${preset.h}`, "info");
+                        }}
+                        className={`w-full p-2.5 rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                          isSelected
+                            ? "border-brand-500 bg-brand-50/50 dark:bg-brand-950/40 text-brand-700 dark:text-brand-300 font-semibold"
+                            : "border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-700 dark:text-slate-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Icon className={`w-4 h-4 ${isSelected ? "text-brand-500" : "text-slate-400"}`} />
+                          <div className="text-left">
+                            <div className="font-semibold text-xs">{preset.name}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">
+                              {preset.w} &times; {preset.h} px
+                            </div>
+                          </div>
+                        </div>
+                        {isSelected && <Check className="w-4 h-4 text-brand-500" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Base URL Override */}
+              <div>
+                <label className="block text-slate-500 font-bold mb-1.5 uppercase tracking-wider text-[10px]">
+                  Target URL Override
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={chromeUrl}
+                    onChange={(e) => setChromeUrl(e.target.value)}
+                    placeholder="https://..."
+                    className="flex-1 px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-brand-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleNavigateSubmit();
+                      setIsEnvOpen(false);
+                    }}
+                    className="px-3 py-2 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                  >
+                    Go
+                  </button>
+                </div>
               </div>
             </div>
-            <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+
+            {/* Drawer Footer */}
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-950/50">
+              <span className="text-[11px] text-slate-400">
+                Applied to current studio session
+              </span>
               <button
                 type="button"
-                onClick={() => setIsSettingsOpen(false)}
-                className="px-4 py-1.5 text-xs font-bold rounded-lg bg-brand-600 text-white hover:bg-brand-500"
+                onClick={() => setIsEnvOpen(false)}
+                className="px-4 py-1.5 text-xs font-bold rounded-xl bg-brand-600 hover:bg-brand-500 text-white transition-colors cursor-pointer"
               >
                 Done
               </button>
             </div>
           </div>
-        </div>
+        </>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          ADVANCED SETTINGS DRAWER (Slides in from the right)
+          ────────────────────────────────────────────────────────────────────────── */}
+      {isSettingsOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px] animate-in fade-in"
+            onClick={() => setIsSettingsOpen(false)}
+          />
+          <div className="fixed inset-y-0 right-0 w-96 max-w-full bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-200">
+            {/* Drawer Header */}
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                  <Settings className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Studio Advanced Settings</h3>
+                  <p className="text-[10px] text-slate-400">Configure recording engine &amp; heuristics</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Drawer Body */}
+            <div className="p-4 flex-1 overflow-y-auto space-y-4 text-xs">
+              {/* Browser Engine */}
+              <div>
+                <label className="block text-slate-500 font-bold mb-1.5 uppercase tracking-wider text-[10px]">
+                  Execution Engine
+                </label>
+                <select
+                  value={browser}
+                  onChange={(e) => {
+                    const newB = e.target.value;
+                    setBrowser(newB);
+                    localStorage.setItem("tracecase_default_browser", newB);
+                    window.dispatchEvent(
+                      new CustomEvent("tracecase:browser-changed", {
+                        detail: newB,
+                      })
+                    );
+                    showToast(`Active browser set to ${newB}`, "info");
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 font-medium focus:outline-none focus:border-brand-500 cursor-pointer"
+                >
+                  <option value="chromium">Google Chrome / Chromium</option>
+                  <option value="webkit">WebKit (Safari)</option>
+                  <option value="firefox">Mozilla Firefox</option>
+                  <option value="msedge">Microsoft Edge</option>
+                </select>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Runs directly on local machine via Playwright engine.
+                </p>
+              </div>
+
+              {/* Test Case Name */}
+              <div>
+                <label className="block text-slate-500 font-bold mb-1.5 uppercase tracking-wider text-[10px]">
+                  Test Case Title
+                </label>
+                <input
+                  type="text"
+                  value={testcaseName}
+                  onChange={(e) => setTestcaseName(e.target.value)}
+                  placeholder="e.g. OrangeHRM Login Journey"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              {/* Action Timeout */}
+              <div>
+                <label className="block text-slate-500 font-bold mb-1.5 uppercase tracking-wider text-[10px]">
+                  Default Step Timeout
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="0"
+                    max="60000"
+                    step="5000"
+                    value={stepTimeoutMs}
+                    onChange={(e) => setStepTimeoutMs(Number(e.target.value))}
+                    className="flex-1 accent-brand-500 cursor-pointer"
+                  />
+                  <span className="font-mono font-bold text-xs w-24 text-right">
+                    {stepTimeoutMs === 0 ? "No Timeout (∞)" : `${(stepTimeoutMs / 1000).toFixed(0)}s`}
+                  </span>
+                </div>
+              </div>
+
+              {/* Toggles: Self-Healing & Network Logs */}
+              <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800/80">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-slate-800 dark:text-slate-200 block">
+                      Multi-Selector Self-Healing
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Captures ID, CSS, XPath &amp; Text fallback selectors
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={enableSelfHealing}
+                    onChange={(e) => setEnableSelfHealing(e.target.checked)}
+                    className="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 accent-brand-600 cursor-pointer"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-slate-800 dark:text-slate-200 block">
+                      Capture Network HAR
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Logs all HTTP requests, responses, and API latencies
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={captureNetwork}
+                    onChange={(e) => setCaptureNetwork(e.target.checked)}
+                    className="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 accent-brand-600 cursor-pointer"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-slate-800 dark:text-slate-200 block">
+                      Capture Console Logs
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Records page errors and console warnings
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={captureConsole}
+                    onChange={(e) => setCaptureConsole(e.target.checked)}
+                    className="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 accent-brand-600 cursor-pointer"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Drawer Footer */}
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-950/50">
+              <span className="text-[11px] text-slate-400">
+                Changes persist locally
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                className="px-4 py-1.5 text-xs font-bold rounded-xl bg-brand-600 hover:bg-brand-500 text-white transition-colors cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </>
       )}
 
       {/* ──────────────────────────────────────────────────────────────────────────
           LOCAL VARIABLES DRAWER
           ────────────────────────────────────────────────────────────────────────── */}
       {isVariablesOpen && (
-        <div className="fixed inset-y-0 right-0 w-96 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-200">
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px] animate-in fade-in"
+            onClick={() => setIsVariablesOpen(false)}
+          />
+          <div className="fixed inset-y-0 right-0 w-96 max-w-full bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-200">
           <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="w-6 h-6 rounded bg-brand-50 dark:bg-brand-500/20 text-brand-600 dark:text-brand-400 font-mono font-bold text-xs flex items-center justify-center">
@@ -1855,6 +2270,7 @@ export function Recorder() {
             </form>
           </div>
         </div>
+        </>
       )}
     </div>
   );

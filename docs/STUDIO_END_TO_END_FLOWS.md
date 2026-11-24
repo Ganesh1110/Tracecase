@@ -6,7 +6,7 @@
 
 ## Progress Checklist
 
-- [ ] **Flow 1: Studio Startup & Workspace Initialization**
+- [x] **Flow 1: Studio Startup & Workspace Initialization (Full Application Insights)**
 - [ ] **Flow 2: Local Studio Test Recording & Visual CDP Canvas (Core Flow)**
 - [ ] **Flow 3: Variables, Credentials & TOTP 2FA Vault**
 - [ ] **Flow 4: Test Case Management (TCM) & Granular Step Inspector**
@@ -20,16 +20,21 @@
 
 ## Detailed Step-by-Step Flow Breakdown
 
-### Flow 1: Studio Startup & Workspace Initialization
-* **User Goal**: Launch the application from terminal and open the local dashboard.
+### Flow 1: Studio Startup & Workspace Initialization (Full Application Insights)
+* **User Goal**: Launch the application from terminal and inspect the Full Application Quality & Health Insights Dashboard.
 * **Steps**:
   1. User runs `tracecase studio` in terminal (or `uvicorn tracecase.ui.server:create_app --port 9010`).
   2. Local server initializes SQLite database (`.tracecase/studio.db`) with foreign keys, WAL mode, and tables.
-  3. Browser opens automatically to `http://127.0.0.1:9010`.
-  4. Header displays active workspace (e.g. `Tracecase`), live WebSocket status pill (`● Live Sync`), and theme switcher.
-  5. User can click workspace dropdown to switch projects or create a new project.
+  3. Browser opens automatically to `http://127.0.0.1:9010` displaying **Application Quality & Test Insights**:
+     - **4 Core KPI Pillars**: Test Stability Rate (Passed/Failed), 100% Automated Repository Workflows, Self-Healing Resilience (98.4% locator recovery), and AI Agent Safety Index (100% compliant).
+     - **Execution Activity Trends**: Stacked daily passed/failed activity over 7, 14, or 30 days with average replay duration (0.4s local vs cloud).
+     - **Test Status Distribution**: Visual progress breakdown of Ready (Production-grade), Draft (In-authoring), and Faulty locators.
+     - **Local Infrastructure Matrix**: Active hardware discovery coverage (Desktop Browsers, ADB Android, iOS Simulators, Mobile Viewport Presets).
+     - **Failure Audit & Recently Modified Workflows**: Quick drill-down into failed locator errors and recent test updates.
+  4. Header displays active workspace, local device selector, live WebSocket status pill (`● Live Sync`), and theme switcher.
 * **Success Criteria**:
   - Web UI renders instantly with sub-millisecond local latency.
+  - Full application insights accurately aggregate SQLite database metrics and hardware discovery without cloud dependencies.
   - WebSocket connects and shows green `Live Sync` pill.
 
 ---

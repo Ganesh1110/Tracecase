@@ -101,6 +101,7 @@ async def dispatch_input_event(
         )
 
         if event_type == InputEventType.CLICK:
+            await page.mouse.move(x=mapped_x, y=mapped_y)
             await page.mouse.click(
                 x=mapped_x,
                 y=mapped_y,
@@ -108,6 +109,7 @@ async def dispatch_input_event(
                 click_count=event.click_count,
             )
         elif event_type == InputEventType.DBLCLICK:
+            await page.mouse.move(x=mapped_x, y=mapped_y)
             await page.mouse.dblclick(
                 x=mapped_x,
                 y=mapped_y,
@@ -124,7 +126,26 @@ async def dispatch_input_event(
 
     elif event_type == InputEventType.KEY_DOWN:
         if event.key:
-            await page.keyboard.down(event.key)
+            action_keys = (
+                "Enter",
+                "Backspace",
+                "Tab",
+                "Escape",
+                "Delete",
+                "ArrowLeft",
+                "ArrowRight",
+                "ArrowUp",
+                "ArrowDown",
+                "Space",
+                "Home",
+                "End",
+                "PageUp",
+                "PageDown",
+            )
+            if event.key in action_keys:
+                await page.keyboard.press(event.key)
+            else:
+                await page.keyboard.down(event.key)
 
     elif event_type == InputEventType.KEY_UP:
         if event.key:

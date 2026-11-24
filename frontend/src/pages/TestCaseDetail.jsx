@@ -927,12 +927,13 @@ export function TestCaseDetail() {
 
           {/* Right Column: Metadata & Execution Sidebar (4 cols) */}
           <div className="col-span-12 lg:col-span-4 space-y-4">
-            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm space-y-4">
+            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm space-y-4 lg:sticky lg:top-4">
               {/* Primary Execute Button */}
               <button
                 type="button"
                 onClick={() => setShowReplayModal(true)}
-                className="w-full py-3 px-4 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                aria-label="Execute test case"
+                className="w-full py-3 px-4 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
               >
                 <Play className="w-4 h-4 fill-current" />
                 <span>Execute test case</span>
@@ -1457,12 +1458,19 @@ export function TestCaseDetail() {
                 </label>
                 <select
                   value={replayOptions.browser}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const newBrowser = e.target.value;
                     setReplayOptions({
                       ...replayOptions,
-                      browser: e.target.value,
-                    })
-                  }
+                      browser: newBrowser,
+                    });
+                    localStorage.setItem("tracecase_default_browser", newBrowser);
+                    window.dispatchEvent(
+                      new CustomEvent("tracecase:browser-changed", {
+                        detail: newBrowser,
+                      })
+                    );
+                  }}
                   className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900"
                 >
                   <option value="chromium">Chromium</option>

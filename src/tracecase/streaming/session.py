@@ -115,6 +115,7 @@ class ManagedChromiumSession:
                     user_agent="Mozilla/5.0 Tracecase Embedded Studio (Chromium)",
                 )
 
+                self._context.set_default_navigation_timeout(0)
                 self._page = await self._context.new_page()
 
                 # Navigate to initial URL if provided and not blank
@@ -123,8 +124,8 @@ class ManagedChromiumSession:
                     try:
                         await self._page.goto(
                             target_url,
-                            timeout=self.config.timeout_ms,
-                            wait_until="domcontentloaded",
+                            timeout=0,
+                            wait_until="commit",
                         )
                     except Exception as nav_err:
                         logger.warning("Initial navigation error for %s: %s", target_url, nav_err)
@@ -214,6 +215,18 @@ class ManagedChromiumSession:
         if self._screencast:
             self._screencast.max_width = w
             self._screencast.max_height = h
+
+    async def navigate_to(self, url: str) -> None:
+        """Navigate active page to URL without timing out."""
+        if not self._page or self._page.is_closed():
+            return
+        target = url.strip()
+        if not target.startswith("http://") and not target.startswith("https://") and not target.startswith("data:") and not target.startswith("about:"):
+            target = f"https://{target}"
+        try:
+            await self._page.goto(target, wait_until="commit", timeout=0)
+        except Exception as exc:
+            logger.warning("Navigation notice for %s: %s", target, exc)
 
     async def close(self) -> None:
         """Gracefully terminate screencast, close context, and reap browser process."""

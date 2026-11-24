@@ -39,11 +39,13 @@ class RecordingSessionManager:
         output_dir: Path | str | None = None,
         browser_type: str = "chromium",
         headless: bool = False,
-        timeout: int = 30000,
+        timeout: int = 0,
         project_id: str = "default_project",
         embedded: bool = True,
     ) -> dict[str, Any]:
         """Start a new recording session."""
+        if embedded and (timeout == 30000 or timeout is None):
+            timeout = 0
         async with self._lock:
             if self.current_session and self.current_session.get("status") in ("recording", "paused"):
                 raise RuntimeError("A recording session is already active.")

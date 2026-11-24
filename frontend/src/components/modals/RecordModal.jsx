@@ -35,7 +35,7 @@ export function RecordModal({ isOpen, onClose }) {
         name: name.trim() || undefined,
         browser,
         headless,
-        timeout: 30000,
+        timeout: 0,
         project_id: currentProject?.id || "default_project",
         embedded: true,
       });

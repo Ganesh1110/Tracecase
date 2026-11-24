@@ -69,6 +69,9 @@ async def test_recorder_pause_resume_and_step_callback(temp_env):
     mock_rec.pause_recording = AsyncMock()
     mock_rec.resume_recording = AsyncMock()
     mock_rec.stop_recording = AsyncMock(side_effect=lambda: run_finish_event.set())
+    mock_rec._export_testcase = AsyncMock()
+    mock_rec.ready_event = asyncio.Event()
+    mock_rec.ready_event.set()
     mock_rec.page_errors = []
     mock_rec.network_requests = []
 

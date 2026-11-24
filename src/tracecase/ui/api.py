@@ -162,7 +162,7 @@ class RecordRequest(BaseModel):
     name: str | None = Field(default=None, description="Test case name")
     browser: str = Field(default="chromium", description="Browser type: chromium, firefox, webkit")
     headless: bool = Field(default=False, description="Run browser headless")
-    timeout: int = Field(default=30000, description="Action timeout in milliseconds")
+    timeout: int = Field(default=0, description="Action timeout in milliseconds (0 for unlimited)")
     project_id: str = Field(default="default_project", description="Target project ID")
     embedded: bool = Field(default=True, description="Run headless embedded in Studio UI with CDP screencast")
 
@@ -3386,19 +3386,31 @@ async def record_stream_websocket(
             elif msg_type == "navigate":
                 if hasattr(session, "navigate_to"):
                     url = str(client_msg.data.get("url", ""))
-                    await session.navigate_to(url)
+                    try:
+                        await session.navigate_to(url)
+                    except Exception as nav_err:
+                        logger.warning("Error handling client navigate: %s", nav_err)
 
             elif msg_type == "go_back":
                 if hasattr(session, "go_back"):
-                    await session.go_back()
+                    try:
+                        await session.go_back()
+                    except Exception as nav_err:
+                        logger.warning("Error handling client go_back: %s", nav_err)
 
             elif msg_type == "go_forward":
                 if hasattr(session, "go_forward"):
-                    await session.go_forward()
+                    try:
+                        await session.go_forward()
+                    except Exception as nav_err:
+                        logger.warning("Error handling client go_forward: %s", nav_err)
 
             elif msg_type == "reload":
                 if hasattr(session, "reload_page"):
-                    await session.reload_page()
+                    try:
+                        await session.reload_page()
+                    except Exception as nav_err:
+                        logger.warning("Error handling client reload: %s", nav_err)
 
             elif msg_type == "dialog_response":
                 if hasattr(session, "handle_dialog_response"):

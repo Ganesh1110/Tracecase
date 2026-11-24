@@ -128,18 +128,47 @@ EVENT_LISTENER_JS = """
     // Track input values for debouncing
     let inputDebounceTimer = null;
     let lastInputValue = {};
+
+    // Helper: Flush pending input before click or navigation
+    function flushPendingInput(el) {
+        if (!el) return;
+        const selector = getCssSelector(el);
+        if (lastInputValue[selector] !== undefined) {
+            if (inputDebounceTimer) {
+                clearTimeout(inputDebounceTimer);
+                inputDebounceTimer = null;
+            }
+            const val = lastInputValue[selector];
+            delete lastInputValue[selector];
+            const info = getElementInfo(el);
+            info.eventType = 'input';
+            info.value = val;
+            if (window.__tracecase_on_action) {
+                window.__tracecase_on_action(info).catch(function(err) {
+                    console.debug('Tracecase: input flush error', err);
+                });
+            }
+        }
+    }
     
     // Click handler
     document.addEventListener('click', async (e) => {
         if (isControlPanel(e.target)) return;
         
+        // Flush active input if clicking away from it
+        if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+            flushPendingInput(document.activeElement);
+        }
+
         const info = getElementInfo(e.target);
         info.eventType = 'click';
         info.clientX = e.clientX;
         info.clientY = e.clientY;
         
         try {
-            await window.__tracecase_on_action(info);
+            if (window.__tracecase_on_action) {
+                await window.__tracecase_on_action(info);
+            }
         } catch (err) {
             console.debug('Tracecase: click handler error', err);
         }
@@ -153,7 +182,9 @@ EVENT_LISTENER_JS = """
         info.eventType = 'dblclick';
         
         try {
-            await window.__tracecase_on_action(info);
+            if (window.__tracecase_on_action) {
+                await window.__tracecase_on_action(info);
+            }
         } catch (err) {
             console.debug('Tracecase: dblclick handler error', err);
         }
@@ -182,7 +213,9 @@ EVENT_LISTENER_JS = """
             info.value = lastInputValue[selector];
             
             try {
-                await window.__tracecase_on_action(info);
+                if (window.__tracecase_on_action) {
+                    await window.__tracecase_on_action(info);
+                }
             } catch (err) {
                 console.debug('Tracecase: input handler error', err);
             }
@@ -190,12 +223,24 @@ EVENT_LISTENER_JS = """
             delete lastInputValue[selector];
         }, 500);
     }, true);
+
+    // Flush on blur
+    document.addEventListener('blur', (e) => {
+        if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+            flushPendingInput(e.target);
+        }
+    }, true);
     
     // Change handler (for select, checkbox, radio)
     document.addEventListener('change', async (e) => {
         if (isControlPanel(e.target)) return;
         
         const el = e.target;
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+            flushPendingInput(el);
+            return;
+        }
+
         const info = getElementInfo(el);
         
         // Determine action type based on element
@@ -210,12 +255,13 @@ EVENT_LISTENER_JS = """
             info.value = el.value;
             info.selectedText = el.options[el.selectedIndex]?.text || '';
         } else {
-            // Skip for regular inputs (handled by input event)
             return;
         }
         
         try {
-            await window.__tracecase_on_action(info);
+            if (window.__tracecase_on_action) {
+                await window.__tracecase_on_action(info);
+            }
         } catch (err) {
             console.debug('Tracecase: change handler error', err);
         }
@@ -225,6 +271,10 @@ EVENT_LISTENER_JS = """
     document.addEventListener('keydown', async (e) => {
         if (isControlPanel(e.target)) return;
         
+        if (e.key === 'Enter') {
+            flushPendingInput(e.target);
+        }
+
         // Only capture special keys
         const specialKeys = ['Enter', 'Escape', 'Tab'];
         if (!specialKeys.includes(e.key)) return;
@@ -234,7 +284,9 @@ EVENT_LISTENER_JS = """
         info.key = e.key;
         
         try {
-            await window.__tracecase_on_action(info);
+            if (window.__tracecase_on_action) {
+                await window.__tracecase_on_action(info);
+            }
         } catch (err) {
             console.debug('Tracecase: keydown handler error', err);
         }
@@ -257,17 +309,27 @@ async def setup_event_listeners(page: Page, recorder: Recorder, page_id: int = 0
         recorder: Recorder instance to receive events
         page_id: 0-based tab index
     """
-    # Expose the action handler to JavaScript
-    await page.expose_function(
-        "__tracecase_on_action",
-        lambda data: recorder.on_action(data, page_id=page_id),
-    )
+    # Expose the action handler to JavaScript as an async function so Playwright awaits it!
+    async def _on_action_bridge(data: dict[str, Any]) -> None:
+        try:
+            await recorder.on_action(data, page_id=page_id)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Error executing recorder.on_action: %s", exc)
+
+    with contextlib.suppress(Exception):
+        await page.expose_function(
+            "__tracecase_on_action",
+            _on_action_bridge,
+        )
 
     # Add script that runs on every page load
-    await page.add_init_script(EVENT_LISTENER_JS)
+    with contextlib.suppress(Exception):
+        await page.add_init_script(EVENT_LISTENER_JS)
 
     # Also run it now for the current page
-    await page.evaluate(EVENT_LISTENER_JS)
+    with contextlib.suppress(Exception):
+        await page.evaluate(EVENT_LISTENER_JS)
 
 
 async def reinject_listeners(page: Page) -> None:

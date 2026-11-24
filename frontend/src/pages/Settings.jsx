@@ -32,6 +32,14 @@ export function Settings() {
     try {
       setLoading(true);
       await api.updateSettings(settings);
+      if (settings?.default_browser) {
+        localStorage.setItem("tracecase_default_browser", settings.default_browser);
+        window.dispatchEvent(
+          new CustomEvent("tracecase:browser-changed", {
+            detail: settings.default_browser,
+          })
+        );
+      }
       showToast("Settings saved successfully!", "success");
     } catch (err) {
       showToast("Failed to save settings: " + err.message, "error");

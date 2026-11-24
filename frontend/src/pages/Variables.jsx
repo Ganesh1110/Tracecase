@@ -354,12 +354,13 @@ export function Variables() {
       {activeTab === 'variables' && (
         <div className="space-y-3">
           {/* Action Toolbar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm">
-            <div className="flex items-center gap-2 flex-1 min-w-[280px]">
-              <div className="relative flex-1">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+              <div className="relative flex-1 min-w-[180px]">
                 <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
+                  aria-label="Search variables"
                   placeholder="Search variables..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -370,8 +371,9 @@ export function Variables() {
               {/* Environment Filter */}
               <select
                 value={selectedEnv}
+                aria-label="Filter by environment"
                 onChange={(e) => setSelectedEnv(e.target.value)}
-                className="px-2.5 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 font-medium"
+                className="px-2.5 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 font-medium shrink-0"
               >
                 <option value="all">Environment: All</option>
                 <option value="global">Global</option>
@@ -387,7 +389,8 @@ export function Variables() {
                 setVarType('string');
                 setIsNewVarOpen(true);
               }}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold bg-brand-600 hover:bg-brand-500 text-white shadow-sm shadow-brand-600/30 transition-all"
+              aria-label="Create Variable"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold bg-brand-600 hover:bg-brand-500 text-white shadow-sm shadow-brand-600/30 transition-all shrink-0"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Create Variable</span>
@@ -395,14 +398,15 @@ export function Variables() {
           </div>
 
           {/* Variables Table */}
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm overflow-hidden">
-            <div className="grid grid-cols-12 px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-500">
-              <span className="col-span-3">Variable Key</span>
-              <span className="col-span-4">Value</span>
-              <span className="col-span-2">Environment</span>
-              <span className="col-span-2">Type</span>
-              <span className="col-span-1 text-right">Actions</span>
-            </div>
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm overflow-x-auto">
+            <div className="min-w-[650px]">
+              <div className="grid grid-cols-12 px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-500">
+                <span className="col-span-3">Variable Key</span>
+                <span className="col-span-4">Value</span>
+                <span className="col-span-2">Environment</span>
+                <span className="col-span-2">Type</span>
+                <span className="col-span-1 text-right">Actions</span>
+              </div>
 
             {loadingVars ? (
               <div className="p-8 text-center text-xs text-slate-400">Loading vault...</div>
@@ -491,6 +495,7 @@ export function Variables() {
                 })}
               </div>
             )}
+            </div>
           </div>
         </div>
       )}
