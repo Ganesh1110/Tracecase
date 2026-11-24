@@ -1,0 +1,17 @@
+=== BUG-007 CLEAN VENV PASSING TEST EXECUTION ===
+Command: /tmp/clean_venv_test/bin/pytest /tmp/clean_codegen_test/test_sample_tc.py -v
+/private/tmp/clean_venv_test/lib/python3.14/site-packages/pytest_asyncio/plugin.py:306: PytestDeprecationWarning: The configuration option "asyncio_default_fixture_loop_scope" is unset.
+The event loop scope for asynchronous fixtures will default to the fixture scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to "function" scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: "function", "class", "module", "package", "session". Set it to "fixture-scope" to keep the current behavior.
+
+  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.2.0, pluggy-1.7.0 -- /private/tmp/clean_venv_test/bin/python3.14
+cachedir: .pytest_cache
+rootdir: /tmp/clean_codegen_test
+plugins: playwright-0.10.0, asyncio-1.5.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 1 item
+
+../../../../tmp/clean_codegen_test/test_sample_tc.py::test_login_flow_test[chromium] PASSED [100%]
+
+============================== 1 passed in 0.83s ===============================

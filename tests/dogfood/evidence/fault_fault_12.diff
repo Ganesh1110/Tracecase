@@ -1,0 +1,10 @@
+--- a/tracecase/replay/engine.py
++++ b/tracecase/replay/engine.py
+@@ -313,6 +313,7 @@
+             step_status = "failed"
+         elif healed_from is not None:
+             step_status = "healed"
++            healed_from = None  # FAULT-12: omit healed_from
+         else:
+             step_status = "passed"
+ 

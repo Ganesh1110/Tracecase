@@ -1,0 +1,10 @@
+--- a/tracecase/mcp/server.py
++++ b/tracecase/mcp/server.py
+@@ -155,6 +155,7 @@
+                         step["description_short"] = step["description_short"].replace(old_val, "********")
+                     if "description_detailed" in step and old_val in step["description_detailed"]:
+                         step["description_detailed"] = step["description_detailed"].replace(old_val, "********")
++            tc_data['id'] = 'wrong_mutated_id'  # FAULT-11
+             return tc_data
+ 
+         if name == "coverage_report":

@@ -183,6 +183,7 @@ class FakeLLMHandler(BaseHTTPRequestHandler):
 
 class ReusableFakeLLMServer(ThreadingHTTPServer):
     allow_reuse_address = True
+    allow_reuse_port = True
     daemon_threads = True
 
 

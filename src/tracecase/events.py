@@ -100,6 +100,9 @@ EVENT_LISTENER_JS = """
     // Helper: Get element info
     function getElementInfo(el) {
         const rect = el.getBoundingClientRect();
+        const isPassword = (el.type || '').toLowerCase() === 'password';
+        const rawValue = el.value || null;
+        const safeValue = isPassword ? '*'.repeat((rawValue || '').length || 8) : rawValue;
         return {
             selector: getCssSelector(el),
             xpath: getXPath(el),
@@ -110,7 +113,7 @@ EVENT_LISTENER_JS = """
             name: el.name || null,
             type: el.type || null,
             href: el.href || null,
-            value: el.value || null,
+            value: safeValue,
             className: el.className || null,
             attributes: {},
             boundingBox: {
@@ -162,14 +165,15 @@ EVENT_LISTENER_JS = """
         
         const el = e.target;
         const selector = getCssSelector(el);
+        const isPassword = (el.type || '').toLowerCase() === 'password';
         
         // Clear previous timer
         if (inputDebounceTimer) {
             clearTimeout(inputDebounceTimer);
         }
         
-        // Store current value
-        lastInputValue[selector] = el.value;
+        // Store current value (masked if password)
+        lastInputValue[selector] = isPassword ? '*'.repeat((el.value || '').length || 8) : el.value;
         
         // Debounce: wait 500ms after last keystroke
         inputDebounceTimer = setTimeout(async () => {

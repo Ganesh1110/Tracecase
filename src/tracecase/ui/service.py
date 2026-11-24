@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import secrets
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +41,7 @@ class RecordingSessionManager:
         headless: bool = False,
         timeout: int = 30000,
         project_id: str = "default_project",
+        embedded: bool = True,
     ) -> dict[str, Any]:
         """Start a new recording session."""
         async with self._lock:
@@ -47,6 +49,7 @@ class RecordingSessionManager:
                 raise RuntimeError("A recording session is already active.")
 
             session_id = f"rec_{uuid.uuid4().hex[:8]}"
+            stream_token = secrets.token_urlsafe(32)
             safe_name = (
                 name.strip()
                 if name and name.strip()
@@ -67,12 +70,14 @@ class RecordingSessionManager:
 
             self.current_session = {
                 "session_id": session_id,
+                "stream_token": stream_token,
                 "project_id": project_id,
                 "name": safe_name,
                 "url": url,
                 "browser": browser_type,
                 "status": "recording",
                 "is_paused": False,
+                "embedded": embedded,
                 "output_dir": str(target_dir),
                 "started_at": datetime.now().isoformat(),
                 "completed_at": None,
@@ -83,44 +88,56 @@ class RecordingSessionManager:
                 "network_requests_count": 0,
             }
 
-            # Spawn recording task
-            self._task = asyncio.create_task(
-                self._run_recorder_task(
-                    session_id=session_id,
-                    target_dir=target_dir,
-                    url=url,
-                    name=safe_name,
-                    browser_type=browser_type,
-                    headless=headless,
-                    timeout=timeout,
-                    project_id=project_id,
-                )
-            )
+            # Create and register recorder immediately
+            from tracecase.streaming import get_streaming_session_manager
 
-            return dict(self.current_session)
-
-    async def _run_recorder_task(
-        self,
-        session_id: str,
-        target_dir: Path,
-        url: str,
-        name: str,
-        browser_type: str,
-        headless: bool,
-        timeout: int,
-        project_id: str = "default_project",
-    ) -> None:
-        try:
+            stream_mgr = get_streaming_session_manager()
             recorder = Recorder(
                 output_dir=target_dir,
                 start_url=url,
-                name=name,
+                name=safe_name,
                 browser_type=browser_type,
                 headless=headless,
                 viewport=(1280, 720),
                 timeout=timeout,
                 auto_start=True,
+                embedded=embedded,
+                session_id=session_id,
+                stream_token=stream_token,
+                project_id=project_id,
             )
+            stream_mgr.register_session(recorder)
+            self._recorder = recorder
+
+            # Spawn recording task
+            self._task = asyncio.create_task(
+                self._run_recorder_task(
+                    recorder=recorder,
+                    session_id=session_id,
+                    target_dir=target_dir,
+                    project_id=project_id,
+                )
+            )
+
+            # Wait for recorder to be initialized and ready
+            try:
+                await asyncio.wait_for(recorder.ready_event.wait(), timeout=15.0)
+            except asyncio.TimeoutError:
+                logger.warning("Recorder ready event timed out for session %s", session_id)
+
+            return dict(self.current_session)
+
+    async def _run_recorder_task(
+        self,
+        recorder: Recorder,
+        session_id: str,
+        target_dir: Path,
+        project_id: str = "default_project",
+    ) -> None:
+        from tracecase.streaming import get_streaming_session_manager
+
+        stream_mgr = get_streaming_session_manager()
+        try:
 
             def on_step_recorded(step: Step) -> None:
                 if (
@@ -152,8 +169,13 @@ class RecordingSessionManager:
             self._recorder = recorder
             await recorder.run()
 
-            # Find generated testcase.json
+            # Data preservation (BUG-012): If recording has steps but wasn't exported via Stop, export now
             tc_file = target_dir / "testcase.json"
+            if not tc_file.exists() and recorder.steps:
+                logger.info("Preserving %d recorded steps on session end (BUG-012)", len(recorder.steps))
+                await recorder._export_testcase()
+
+            # Find generated testcase.json
             testcase_id = None
             if tc_file.exists():
                 try:
@@ -195,6 +217,7 @@ class RecordingSessionManager:
                 data={"status": "error", "error": str(exc)},
             )
         finally:
+            stream_mgr.unregister_session(session_id)
             self._recorder = None
 
     async def pause(self) -> dict[str, Any]:

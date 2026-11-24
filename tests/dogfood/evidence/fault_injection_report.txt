@@ -1,0 +1,533 @@
+=== TRACECASE 12-FAULT INJECTION DETAILED BENCHMARK REPORT ===
+================================================================================
+FAULT INJECTION BASELINE (CLEAN THROWAWAY SRC)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     0
+Final Summary Line:   136 passed, 18 xfailed in 157.56s (0:02:37)
+Failing Tests Count:  0
+Verdict:              BASELINE CLEAN
+
+--------------------------------------------------------------------------------
+
+✓ Baseline Clean: 0 failing tests (136 passed, 18 xfailed in 157.56s (0:02:37))
+================================================================================
+FAULT INJECTION: FAULT-1 (Replay always exits 0)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     1
+Final Summary Line:   4 failed, 132 passed, 18 xfailed in 156.58s (0:02:36)
+Verdict:              DETECTED
+Failing Tests Count:  4
+
+Failing Tests & First Assertion Line:
+  - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c4_exit_codes
+    E   assert 0 == 1
+  - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c5_derived_assertions_flag
+    E   AssertionError: --assert must fail with exit code 1 when assertion fails
+  - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c6_url_assertion_evaluation
+    E   AssertionError: URL assertion mismatch must fail replay with exit code 1
+  - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c7_timeout_sensitivity
+    E   AssertionError: assert 0 in (1, 2)
+
+Unified Diff:
+```diff
+--- a/tracecase/cli.py
++++ b/tracecase/cli.py
+@@ -505,7 +505,7 @@
+         path = write_replay_result(result, output)
+         console.print(f"[dim]Replay report: {path}[/dim]")
+ 
+-    raise typer.Exit(result.exit_code)
++    raise typer.Exit(0)  # FAULT-1: always exit 0
+ 
+ 
+ def _print_replay_summary(result: ReplayResult) -> None:
+```
+
+--------------------------------------------------------------------------------
+
+================================================================================
+FAULT INJECTION: FAULT-2 (Healing returns first element matching ANY element)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     -9
+Final Summary Line:   NO SUMMARY OUTPUT
+Verdict:              INFRA FAILURE
+Failing Tests Count:  0
+
+Failing Tests & First Assertion Line:
+  *None*
+
+Unified Diff:
+```diff
+--- a/tracecase/replay/healing.py
++++ b/tracecase/replay/healing.py
+@@ -107,7 +107,7 @@
+         locator = page.locator(selector)
+         # Give candidate 0 time to mount (for SPAs), fallbacks check quickly
+         wait_ms = timeout_ms if index == 0 else 500
+-        if await _is_single_visible(locator, wait_ms=wait_ms):
++        if await locator.count() > 0:  # FAULT-2: accept first candidate matching ANY element, skipping checks
+             result.selector = selector
+             if index > 0:
+                 result.healed_from = step.element.selector
+```
+
+--------------------------------------------------------------------------------
+
+❌ Unknown fault ID: 2b (expected one of: ['FAULT-1', 'FAULT-2', 'FAULT-2b', 'FAULT-3', 'FAULT-4', 'FAULT-5', 'FAULT-6', 'FAULT-7', 'FAULT-8', 'FAULT-9', 'FAULT-10', 'FAULT-11', 'FAULT-12'])
+================================================================================
+FAULT INJECTION: FAULT-2 (Healing returns first element matching ANY element)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     0
+Final Summary Line:   136 passed, 18 xfailed in 140.99s (0:02:20)
+Verdict:              NOT DETECTED
+Failing Tests Count:  0
+
+Failing Tests & First Assertion Line:
+  *None*
+
+Unified Diff:
+```diff
+--- a/tracecase/replay/healing.py
++++ b/tracecase/replay/healing.py
+@@ -107,7 +107,7 @@
+         locator = page.locator(selector)
+         # Give candidate 0 time to mount (for SPAs), fallbacks check quickly
+         wait_ms = timeout_ms if index == 0 else 500
+-        if await _is_single_visible(locator, wait_ms=wait_ms):
++        if await locator.count() > 0:  # FAULT-2: accept first candidate matching ANY element, skipping checks
+             result.selector = selector
+             if index > 0:
+                 result.healed_from = step.element.selector
+```
+
+--------------------------------------------------------------------------------
+
+================================================================================
+FAULT INJECTION: FAULT-2b (Crude healing returns first body element)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     1
+Final Summary Line:   3 failed, 133 passed, 18 xfailed in 140.21s (0:02:20)
+Verdict:              DETECTED
+Failing Tests Count:  3
+
+Failing Tests & First Assertion Line:
+  - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c7_timeout_sensitivity
+    E   AssertionError: Replay took too long (974.029265s), timeout not respected
+  - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c9_replay_with_heal_version_b
+    E   assert 1 == 0
+  - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c10_healing_tiers_and_false_positive_audit
+    E   assert 'body *' == "xpath=//div[...r']/button[1]"
+
+Unified Diff:
+```diff
+--- a/tracecase/replay/healing.py
++++ b/tracecase/replay/healing.py
+@@ -103,6 +103,10 @@
+         candidates = candidates[:1]
+ 
+     result = HealResult(attempts=candidates)
++    if heal and len(candidates) > 1:
++        result.selector = 'body *'
++        result.healed_from = step.element.selector
++        return page.locator('button, a, input, div').first, result
+     for index, selector in enumerate(candidates):
+         locator = page.locator(selector)
+         # Give candidate 0 time to mount (for SPAs), fallbacks check quickly
+```
+
+--------------------------------------------------------------------------------
+
+================================================================================
+FAULT INJECTION: FAULT-3 (Codegen drops last step)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     1
+Final Summary Line:   2 failed, 134 passed, 18 xfailed in 159.39s (0:02:39)
+Verdict:              DETECTED
+Failing Tests Count:  2
+
+Failing Tests & First Assertion Line:
+  - tests/dogfood/cli_tests/test_cli_f_codegen.py::test_f1_default_codegen
+    E   assert '# Step 2: ' in '"""Generated Playwright test for User Checkout Flow."""\n\nfrom __future__ import annotations\n\nimport re\nfrom coll...27.0.0.1:9010/login.html")\n    # Step 1: Navigate to login\n    await page.goto("http://127.0.0.1:9010/login.html")\n'
+  - tests/dogfood/cli_tests/test_cli_f_codegen.py::test_f8_all_recorded_steps_emitted
+    E   assert ('btn-submit' in '"""Generated Playwright test for Login Flow Test."""\n\nfrom __future__ import annotations\n\nimport re\nfrom collect...("http://127.0.0.1:9010/login.html")\n    # Step 2: Fill username\n    await page.locator("#username").fill("alice")\n' or 'submit' in '"""Generated Playwright test for Login Flow Test."""\n\nfrom __future__ import annotations\n\nimport re\nfrom collect...("http://127.0.0.1:9010/login.html")\n    # Step 2: Fill username\n    await page.locator("#username").fill("alice")\n')
+
+Unified Diff:
+```diff
+--- a/tracecase/codegen/pytest_exporter.py
++++ b/tracecase/codegen/pytest_exporter.py
+@@ -90,7 +90,7 @@
+ 
+     body_lines.append(f'await page.goto("{testcase.start_url}")')
+ 
+-    for step in testcase.steps:
++    for step in testcase.steps[:-1]:  # FAULT-3: drop last step
+         body_lines.append(f"# Step {step.number}: {step.description_short}")
+         body_lines.extend(_format_step(step))
+         for assertion_line in assertions_by_step.get(step.number, []):
+```
+
+--------------------------------------------------------------------------------
+
+================================================================================
+FAULT INJECTION: FAULT-4 (Mutate ignores --limit)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     1
+Final Summary Line:   5 failed, 135 passed, 14 xfailed in 158.40s (0:02:38)
+Verdict:              DETECTED
+Failing Tests Count:  5
+
+Failing Tests & First Assertion Line:
+  - tests/dogfood/cli_tests/test_cli_b_record.py::test_b27_password_masking_json
+    Assertion failed
+  - tests/dogfood/cli_tests/test_cli_b_record.py::test_b27_password_masking_markdown
+    Assertion failed
+  - tests/dogfood/cli_tests/test_cli_b_record.py::test_b27_password_masking_html
+    Assertion failed
+  - tests/dogfood/cli_tests/test_cli_g_mutate.py::test_g6_limit_flag
+    E   AssertionError: assert 7 <= 3
+  - tests/dogfood/cli_tests/test_cli_i_corpus_mcp.py::test_i20_mcp_password_masking
+    Assertion failed
+
+Unified Diff:
+```diff
+--- a/tracecase/cli.py
++++ b/tracecase/cli.py
+@@ -672,7 +672,7 @@
+         if strategy in ("inputs", "actions", "network")
+         else ["inputs", "actions", "network"]
+     )
+-    mutations = engine.generate(case, strategies=selected_strategies, limit=limit)
++    mutations = engine.generate(case, strategies=selected_strategies, limit=999)  # FAULT-4
+ 
+     if not mutations:
+         console.print("[yellow]No mutations generated for this test case.[/yellow]")
+```
+
+--------------------------------------------------------------------------------
+
+================================================================================
+FAULT INJECTION: FAULT-5 (Search ignores query)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     1
+Final Summary Line:   1 failed, 139 passed, 14 xfailed in 157.87s (0:02:37)
+Verdict:              DETECTED
+Failing Tests Count:  1
+
+Failing Tests & First Assertion Line:
+  - tests/dogfood/cli_tests/test_cli_i_corpus_mcp.py::test_i8_search_no_results
+    E   assert 'No test cases found' in "           Search Results for 'totally_absent_phrase_999'            \n┏━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━...tp://127.0.0.1:9010/index │ Some Flow       │\n└───────┴───────────┴─────────────────────────────┴─────────────────┘\n"
+
+Unified Diff:
+```diff
+--- a/tracecase/index/search.py
++++ b/tracecase/index/search.py
+@@ -31,7 +31,7 @@
+             bm25(steps_fts) as rank
+         FROM steps_fts
+         JOIN testcases t ON t.id = steps_fts.testcase_id
+-        WHERE steps_fts MATCH ?
++        WHERE 1=1 OR steps_fts MATCH ?  -- FAULT-5: match everything
+         ORDER BY rank
+         LIMIT ?
+         """,
+```
+
+--------------------------------------------------------------------------------
+
+================================================================================
+FAULT INJECTION: FAULT-6 (Export-har writes empty entries list)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     1
+Final Summary Line:   2 failed, 138 passed, 14 xfailed in 158.38s (0:02:38)
+Verdict:              DETECTED
+Failing Tests Count:  2
+
+Failing Tests & First Assertion Line:
+  - tests/dogfood/cli_tests/test_cli_e_export_har.py::test_e1_export_har_with_output_flag
+    E   assert 0 == 1
+  - tests/dogfood/cli_tests/test_cli_e_export_har.py::test_e2_entry_fields
+    E   AssertionError: HAR entries list must not be empty
+
+Unified Diff:
+```diff
+--- a/tracecase/replay/har.py
++++ b/tracecase/replay/har.py
+@@ -67,7 +67,7 @@
+             "version": "1.2",
+             "creator": {"name": "tracecase", "version": __version__},
+             "pages": [],
+-            "entries": [_har_entry(request) for request in testcase.network_requests],
++            "entries": [],  # FAULT-6: empty entries
+         }
+     }
+```
+
+--------------------------------------------------------------------------------
+
+================================================================================
+FAULT INJECTION: FAULT-7 (Analyze labels heuristic output as LLM-generated)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     1
+Final Summary Line:   1 failed, 139 passed, 14 xfailed in 157.32s (0:02:37)
+Verdict:              DETECTED
+Failing Tests Count:  1
+
+Failing Tests & First Assertion Line:
+  - tests/dogfood/cli_tests/test_cli_h_analyze.py::test_h7_schema_validation
+    E   AssertionError: assert 'openai' in ('null', 'heuristics')
+
+Unified Diff:
+```diff
+--- a/tracecase/ai/analyst.py
++++ b/tracecase/ai/analyst.py
+@@ -98,7 +98,7 @@
+     return AnalysisResult(
+         testcase_id=testcase.id,
+         testcase_name=testcase.name,
+-        provider=provider.name,
++        provider='openai' if provider.name == 'null' else provider.name,  # FAULT-7
+         model=provider.model,
+         summary=summary,
+         annotations=annotations,
+```
+
+--------------------------------------------------------------------------------
+
+================================================================================
+FAULT INJECTION: FAULT-8 (clean --db also deletes recordings)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     1
+Final Summary Line:   1 failed, 139 passed, 14 xfailed in 157.27s (0:02:37)
+Verdict:              DETECTED
+Failing Tests Count:  1
+
+Failing Tests & First Assertion Line:
+  - tests/dogfood/cli_tests/test_cli_i_corpus_mcp.py::test_i13_clean_db_flag
+    E   AssertionError: assert False
+
+Unified Diff:
+```diff
+--- a/tracecase/cli.py
++++ b/tracecase/cli.py
+@@ -1002,6 +1002,9 @@
+     wiped_any = False
+ 
+     if db or all_artifacts:
++        rec_dir = Path('./recordings')
++        if rec_dir.exists():
++            shutil.rmtree(rec_dir)
+         if reset_db(target_db):
+             console.print(f"[green]✓[/green] Wiped local corpus database: {target_db}")
+             wiped_any = True
+```
+
+--------------------------------------------------------------------------------
+
+================================================================================
+FAULT INJECTION: FAULT-9 (Replay swallows assertion failures)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     1
+Final Summary Line:   5 failed, 136 passed, 13 xfailed in 157.71s (0:02:37)
+Verdict:              DETECTED
+Failing Tests Count:  5
+
+Failing Tests & First Assertion Line:
+  - tests/dogfood/cli_tests/test_cli_a_install_env.py::test_bug001_annotated_doc_shadowing_regression
+    E   assert 0 != 0
+  - tests/dogfood/cli_tests/test_cli_a_install_env.py::test_bug001_annotated_doc_correct_behavior
+    Assertion failed
+  - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c4_exit_codes
+    E   assert 0 == 1
+  - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c5_derived_assertions_flag
+    E   AssertionError: --assert must fail with exit code 1 when assertion fails
+  - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c6_url_assertion_evaluation
+    E   AssertionError: URL assertion mismatch must fail replay with exit code 1
+
+Unified Diff:
+```diff
+--- a/tracecase/replay/engine.py
++++ b/tracecase/replay/engine.py
+@@ -284,7 +284,7 @@
+             visible_targets=visible_targets,
+             page_text=page_text,
+         )
+-        failed = any(not result.passed for result in assertion_results)
++        failed = False  # FAULT-9: swallow assertion failures
+ 
+         candidate_screenshot = await self._screenshot(page, step)
+         visual_diff_result = None
+```
+
+--------------------------------------------------------------------------------
+
+================================================================================
+FAULT INJECTION: FAULT-10 (Record drops all network capture)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     1
+Final Summary Line:   2 failed, 139 passed, 13 xfailed in 159.16s (0:02:39)
+Verdict:              COLLATERAL ONLY
+Failing Tests Count:  2
+
+Failing Tests & First Assertion Line:
+  - tests/dogfood/cli_tests/test_cli_a_install_env.py::test_bug001_annotated_doc_shadowing_regression
+    E   assert 0 != 0
+  - tests/dogfood/cli_tests/test_cli_a_install_env.py::test_bug001_annotated_doc_correct_behavior
+    Assertion failed
+
+Unified Diff:
+```diff
+--- a/tracecase/recorder.py
++++ b/tracecase/recorder.py
+@@ -656,7 +656,7 @@
+         console.print(f"    [red]JS Error:[/red] {str(error)[:80]}")
+ 
+     def _on_request(self, request: Request) -> None:
+-        """Handle network request start."""
++        return  # FAULT-10: drop all network capture
+         if not self.is_recording or self.is_paused:
+             return
+```
+
+--------------------------------------------------------------------------------
+
+================================================================================
+FAULT INJECTION: FAULT-10 (Record drops all network capture)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     1
+Final Summary Line:   3 failed, 138 passed, 13 xfailed in 162.81s (0:02:42)
+Verdict:              DETECTED
+Failing Tests Count:  3
+
+Failing Tests & First Assertion Line:
+  - tests/dogfood/cli_tests/test_cli_a_install_env.py::test_bug001_annotated_doc_shadowing_regression
+    E   assert 0 != 0
+  - tests/dogfood/cli_tests/test_cli_a_install_env.py::test_bug001_annotated_doc_correct_behavior
+    Assertion failed
+  - tests/dogfood/cli_tests/test_cli_b_record.py::test_b19_network_capture
+    E   assert False
+
+Unified Diff:
+```diff
+--- a/tracecase/recorder.py
++++ b/tracecase/recorder.py
+@@ -656,7 +656,7 @@
+         console.print(f"    [red]JS Error:[/red] {str(error)[:80]}")
+ 
+     def _on_request(self, request: Request) -> None:
+-        """Handle network request start."""
++        return  # FAULT-10: drop all network capture
+         if not self.is_recording or self.is_paused:
+             return
+```
+
+--------------------------------------------------------------------------------
+
+================================================================================
+FAULT INJECTION: FAULT-11 (MCP get_testcase returns wrong testcase)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Traceback (most recent call last):
+  File "/Users/ganeshjayaprakash/experimental/Tracecase/tests/dogfood/fault_injection_runner.py", line 486, in <module>
+    run_single_fault(sys.argv[idx + 1])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/Users/ganeshjayaprakash/experimental/Tracecase/tests/dogfood/fault_injection_runner.py", line 308, in run_single_fault
+    diff_text = apply_fault(target_fault)
+  File "/Users/ganeshjayaprakash/experimental/Tracecase/tests/dogfood/fault_injection_runner.py", line 195, in apply_fault
+    raise ValueError(f"Could not find patch target in {target_path}:\n{fault['find']}")
+ValueError: Could not find patch target in /tmp/tc_fault_injection/src/tracecase/mcp/server.py:
+            return json.loads(file_path.read_text(encoding="utf-8"))
+================================================================================
+FAULT INJECTION: FAULT-11 (MCP get_testcase returns wrong testcase)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     1
+Final Summary Line:   3 failed, 138 passed, 13 xfailed in 160.84s (0:02:40)
+Verdict:              DETECTED
+Failing Tests Count:  3
+
+Failing Tests & First Assertion Line:
+  - tests/dogfood/cli_tests/test_cli_a_install_env.py::test_bug001_annotated_doc_shadowing_regression
+    E   assert 0 != 0
+  - tests/dogfood/cli_tests/test_cli_a_install_env.py::test_bug001_annotated_doc_correct_behavior
+    Assertion failed
+  - tests/dogfood/cli_tests/test_cli_i_corpus_mcp.py::test_i19_mcp_get_testcase_tool
+    E   AssertionError: assert 'wrong_mutated_id' == 'tc_mcp19'
+
+Unified Diff:
+```diff
+--- a/tracecase/mcp/server.py
++++ b/tracecase/mcp/server.py
+@@ -155,6 +155,7 @@
+                         step["description_short"] = step["description_short"].replace(old_val, "********")
+                     if "description_detailed" in step and old_val in step["description_detailed"]:
+                         step["description_detailed"] = step["description_detailed"].replace(old_val, "********")
++            tc_data['id'] = 'wrong_mutated_id'  # FAULT-11
+             return tc_data
+ 
+         if name == "coverage_report":
+```
+
+--------------------------------------------------------------------------------
+
+================================================================================
+FAULT INJECTION: FAULT-12 (replay.json stops recording healed tier)
+================================================================================
+Verified throwaway module import: /tmp/tc_fault_injection/src/tracecase/__init__.py
+Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly
+Pytest Exit Code:     1
+Final Summary Line:   3 failed, 138 passed, 13 xfailed in 163.10s (0:02:43)
+Verdict:              DETECTED
+Failing Tests Count:  3
+
+Failing Tests & First Assertion Line:
+  - tests/dogfood/cli_tests/test_cli_a_install_env.py::test_bug001_annotated_doc_shadowing_regression
+    E   assert 0 != 0
+  - tests/dogfood/cli_tests/test_cli_a_install_env.py::test_bug001_annotated_doc_correct_behavior
+    Assertion failed
+  - tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c9_replay_with_heal_version_b
+    E   assert None == 'button.btn-primary.is-active'
+
+Unified Diff:
+```diff
+--- a/tracecase/replay/engine.py
++++ b/tracecase/replay/engine.py
+@@ -313,6 +313,7 @@
+             step_status = "failed"
+         elif healed_from is not None:
+             step_status = "healed"
++            healed_from = None  # FAULT-12: omit healed_from
+         else:
+             step_status = "passed"
+```
+
+--------------------------------------------------------------------------------
+

@@ -1,0 +1,11 @@
+--- a/tracecase/recorder.py
++++ b/tracecase/recorder.py
+@@ -656,7 +656,7 @@
+         console.print(f"    [red]JS Error:[/red] {str(error)[:80]}")
+ 
+     def _on_request(self, request: Request) -> None:
+-        """Handle network request start."""
++        return  # FAULT-10: drop all network capture
+         if not self.is_recording or self.is_paused:
+             return
+ 

@@ -144,7 +144,18 @@ class MCPServer:
             file_path = Path(row[0])
             if not file_path.exists():
                 raise FileNotFoundError(f"Testcase file '{file_path}' does not exist.")
-            return json.loads(file_path.read_text(encoding="utf-8"))
+            tc_data = json.loads(file_path.read_text(encoding="utf-8"))
+            for step in tc_data.get("steps", []):
+                el = step.get("element") or {}
+                attrs = el.get("attributes") or {}
+                if (attrs.get("type") or "").lower() == "password" and step.get("input_value"):
+                    old_val = str(step["input_value"])
+                    step["input_value"] = "********"
+                    if "description_short" in step and old_val in step["description_short"]:
+                        step["description_short"] = step["description_short"].replace(old_val, "********")
+                    if "description_detailed" in step and old_val in step["description_detailed"]:
+                        step["description_detailed"] = step["description_detailed"].replace(old_val, "********")
+            return tc_data
 
         if name == "coverage_report":
             return get_coverage_report(db_path=self.db_path)

@@ -1,9 +1,20 @@
 """Pytest configuration and fixtures for Tracecase tests."""
 
+import sys
+from pathlib import Path
+
+# Ensure site-packages takes precedence over repository root to avoid root annotated_doc shadowing
+import os
+_repo_root = str(Path(__file__).resolve().parent.parent)
+_src_dir = os.environ.get("PYTHONPATH") or str(Path(__file__).resolve().parent.parent / "src")
+sys.path = [_src_dir] + [p for p in sys.path if p not in ("", _repo_root, _src_dir)] + [_repo_root]
+if "annotated_doc" in sys.modules:
+    del sys.modules["annotated_doc"]
+import annotated_doc
+
 import tempfile
 from collections.abc import Generator
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 

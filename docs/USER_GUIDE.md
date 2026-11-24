@@ -89,13 +89,37 @@ tracecase version
 
 ## 3. Quick Start: Your First Recording
 
-To record a user flow on any website or local web app:
+Tracecase supports two recording modes:
+1. **Tracecase Studio (Embedded Mode)** — Headless browser rendered directly inside Studio's web page with zero pop-up windows.
+2. **Tracecase CLI (Headed Mode)** — Standalone Chromium window with an injected floating control panel.
+
+### Mode A: Tracecase Studio (Recommended)
+
+1. Launch Tracecase Studio:
+   ```bash
+   tracecase ui
+   ```
+2. Navigate to the **Browser Recorder** page in the left navigation sidebar.
+3. In the top bar, enter your target URL (e.g. `https://example.com`) and an optional test name.
+4. Click **Start Recording**. A headless Chromium session launches on the backend and streams live frames into the embedded viewport canvas via CDP screencast and WebSockets (< 150 ms latency).
+5. Interact directly inside the viewport:
+   - **Mouse**: Click, double-click, drag, and scroll with accurate canvas coordinate mapping.
+   - **Keyboard**: Type into text boxes, press Enter/Tab/Escape, and paste clipboard content.
+   - **Browser Chrome**: Use the in-UI address bar, back, forward, and reload buttons.
+   - **Multi-Tab**: New tabs and pop-ups automatically appear as switchable tabs in the embedded tab strip.
+   - **Dialogs & Files**: Native JS dialogs (`alert`, `confirm`, `prompt`) and file uploads/downloads appear as interactive prompts in the UI.
+   - **Password Security**: Passwords entered into password inputs are automatically masked (`********`) at capture and never written in plaintext to `testcase.json`, markdown, or HTML files.
+6. The timeline panel on the right captures every step, network request, console log, and error in real-time.
+7. Click **Stop & Save** to finalize the recording.
+
+### Mode B: CLI Recording (Headed Mode)
+
+To record a user flow from the terminal:
 
 ```bash
 tracecase record https://example.com -o ./recordings/example_flow -n "Example Homepage Flow"
 ```
 
-### During the Recording:
 1. A Chromium browser window will open displaying the target URL.
 2. Look at the **top-right corner** of the browser window: you will see the floating **Tracecase Control Panel**.
 3. Click **Start** in the panel to begin capturing actions.

@@ -32,23 +32,48 @@ class StreamingSessionManager:
         self._lock = asyncio.Lock()
 
     def get_session(
-        self, session_id: str, owner_id: str | None = None
-    ) -> ManagedChromiumSession | None:
+        self,
+        session_id: str,
+        owner_id: str | None = None,
+        token: str | None = None,
+    ) -> Any | None:
         """
-        Retrieve an active session with optional ownership validation.
+        Retrieve an active session with optional ownership and per-session token validation.
         
-        Raises PermissionError if owner_id does not match the session owner.
+        Raises PermissionError if token or owner_id does not match the session.
         """
         session = self._sessions.get(session_id)
         if not session:
             return None
 
-        if owner_id and session.config.owner_id != owner_id:
-            raise PermissionError(
-                f"Unauthorized access: session '{session_id}' belongs to a different user."
-            )
+        # Verify secret session token if session was created with one
+        session_token = getattr(session, "stream_token", None)
+        if session_token is not None:
+            if not token or token != session_token:
+                raise PermissionError(
+                    f"Unauthorized access: invalid or missing security token for session '{session_id}'."
+                )
+
+        # Verify owner_id if session has a restricted owner
+        if hasattr(session, "config"):
+            session_owner = getattr(session.config, "owner_id", None)
+            if session_owner and session_owner != "default_user":
+                if token != session_owner and owner_id != session_owner:
+                    raise PermissionError(
+                        f"Unauthorized access: session '{session_id}' belongs to a different user."
+                    )
 
         return session
+
+    def register_session(self, session: Any) -> None:
+        """Register an externally created streaming session (such as unified Recorder)."""
+        sid = getattr(session, "session_id", None)
+        if sid:
+            self._sessions[sid] = session
+
+    def unregister_session(self, session_id: str) -> None:
+        """Unregister a streaming session."""
+        self._sessions.pop(session_id, None)
 
     def list_sessions(self) -> list[ManagedChromiumSession]:
         """List all active streaming sessions."""

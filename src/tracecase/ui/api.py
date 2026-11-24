@@ -152,6 +152,7 @@ class RecordRequest(BaseModel):
     headless: bool = Field(default=False, description="Run browser headless")
     timeout: int = Field(default=30000, description="Action timeout in milliseconds")
     project_id: str = Field(default="default_project", description="Target project ID")
+    embedded: bool = Field(default=True, description="Run headless embedded in Studio UI with CDP screencast")
 
 
 class TestCaseUpdateRequest(BaseModel):
@@ -972,6 +973,7 @@ async def start_recording(req: RecordRequest) -> dict[str, Any]:
             headless=req.headless,
             timeout=req.timeout,
             project_id=req.project_id,
+            embedded=req.embedded,
         )
         return session
     except RuntimeError as exc:
@@ -3193,6 +3195,7 @@ async def record_stream_websocket(
     keyboard, typing, and wheel interactions to the active Playwright page.
     """
     import time
+    import urllib.parse
     from tracecase.streaming import (
         InputEvent,
         ScreencastFrame,
@@ -3202,16 +3205,23 @@ async def record_stream_websocket(
         get_streaming_session_manager,
     )
 
+    # Origin header validation (Security Requirement 5)
+    origin = websocket.headers.get("origin")
+    host = websocket.headers.get("host")
+    if origin:
+        parsed = urllib.parse.urlparse(origin)
+        allowed_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "testserver"}
+        if host:
+            allowed_hosts.add(host.split(":")[0])
+        if parsed.hostname and parsed.hostname not in allowed_hosts:
+            logger.warning("Rejected WebSocket with unauthorized origin: %s", origin)
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Origin not allowed")
+            return
+
     mgr = get_streaming_session_manager()
 
-    # Authenticate / resolve user identity from query token (never trust client-supplied owner_id in payload)
-    authenticated_user = "default_user"
-    if token and token.strip():
-        # In multi-tenant environments this resolves token -> user_id
-        authenticated_user = token.strip()
-
     try:
-        session = mgr.get_session(session_id, owner_id=authenticated_user)
+        session = mgr.get_session(session_id, token=token)
     except PermissionError as perm_err:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=str(perm_err))
         return
@@ -3248,6 +3258,20 @@ async def record_stream_websocket(
             pass
 
     session.add_frame_listener(frame_sender)
+
+    # Broadcast listener for dialogs, file choosers, downloads, and tabs
+    async def broadcast_sender(msg_dict: dict[str, Any]) -> None:
+        try:
+            msg = StreamServerMessage(
+                type=msg_dict.get("type", "event"),
+                payload=msg_dict.get("payload", {}),
+            )
+            await websocket.send_text(msg.model_dump_json())
+        except Exception:
+            pass
+
+    if hasattr(session, "add_broadcast_listener"):
+        session.add_broadcast_listener(broadcast_sender)
 
     # Send initial session metadata and state
     try:
@@ -3301,14 +3325,30 @@ async def record_stream_websocket(
             msg_type = client_msg.type.lower().strip()
 
             if msg_type == "ping":
+                client_ts = client_msg.data.get("client_ts")
+                payload = {"pong": True}
+                if client_ts is not None:
+                    payload["client_ts"] = client_ts
+                    payload["server_ts"] = time.time() * 1000
                 await websocket.send_text(
-                    StreamServerMessage(type="pong").model_dump_json()
+                    StreamServerMessage(type="pong", payload=payload).model_dump_json()
                 )
 
             elif msg_type == "input":
                 try:
                     event = InputEvent(**client_msg.data)
                     await session.handle_input(event)
+                    # Respond with ack if client tracked timestamp
+                    if client_msg.data.get("client_ts"):
+                        await websocket.send_text(
+                            StreamServerMessage(
+                                type="input_ack",
+                                payload={
+                                    "client_ts": client_msg.data.get("client_ts"),
+                                    "server_ts": time.time() * 1000,
+                                },
+                            ).model_dump_json()
+                        )
                 except Exception as input_err:
                     logger.warning("Error dispatching input event: %s", input_err)
                     await websocket.send_text(
@@ -3326,10 +3366,47 @@ async def record_stream_websocket(
                 except Exception as resize_err:
                     logger.warning("Error resizing viewport: %s", resize_err)
 
+            elif msg_type == "switch_tab":
+                if hasattr(session, "switch_tab"):
+                    page_id = int(client_msg.data.get("page_id", 0))
+                    await session.switch_tab(page_id)
+
+            elif msg_type == "navigate":
+                if hasattr(session, "navigate_to"):
+                    url = str(client_msg.data.get("url", ""))
+                    await session.navigate_to(url)
+
+            elif msg_type == "go_back":
+                if hasattr(session, "go_back"):
+                    await session.go_back()
+
+            elif msg_type == "go_forward":
+                if hasattr(session, "go_forward"):
+                    await session.go_forward()
+
+            elif msg_type == "reload":
+                if hasattr(session, "reload_page"):
+                    await session.reload_page()
+
+            elif msg_type == "dialog_response":
+                if hasattr(session, "handle_dialog_response"):
+                    dlg_id = str(client_msg.data.get("dialog_id", ""))
+                    accept = bool(client_msg.data.get("accept", True))
+                    prompt_txt = client_msg.data.get("prompt_text")
+                    await session.handle_dialog_response(dlg_id, accept, prompt_txt)
+
+            elif msg_type == "file_upload":
+                if hasattr(session, "handle_file_chooser_response"):
+                    fc_id = str(client_msg.data.get("chooser_id", ""))
+                    files = list(client_msg.data.get("files", []))
+                    await session.handle_file_chooser_response(fc_id, files)
+
     except WebSocketDisconnect:
         pass
     except Exception as exc:
         logger.debug("Websocket exception in stream %s: %s", session_id, exc)
     finally:
         session.remove_frame_listener(frame_sender)
+        if hasattr(session, "remove_broadcast_listener"):
+            session.remove_broadcast_listener(broadcast_sender)
 

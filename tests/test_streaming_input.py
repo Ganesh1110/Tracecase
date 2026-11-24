@@ -314,13 +314,25 @@ def test_websocket_security_and_error_handling() -> None:
             # Test oversized message rejection
             oversized_payload = "x" * 70000
             ws.send_text(oversized_payload)
-            err_msg = json.loads(ws.receive_text())
+            err_msg = None
+            for _ in range(5):
+                msg = json.loads(ws.receive_text())
+                if msg.get("type") == "error":
+                    err_msg = msg
+                    break
+            assert err_msg is not None
             assert err_msg["type"] == "error"
             assert "64KB" in err_msg["payload"]["error"]
 
             # Test malformed JSON
             ws.send_text("{not: valid: json")
-            err_json = json.loads(ws.receive_text())
+            err_json = None
+            for _ in range(5):
+                msg = json.loads(ws.receive_text())
+                if msg.get("type") == "error":
+                    err_json = msg
+                    break
+            assert err_json is not None
             assert err_json["type"] == "error"
 
     finally:

@@ -121,6 +121,7 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
 
 class ReusableThreadingServer(ThreadingHTTPServer):
     allow_reuse_address = True
+    allow_reuse_port = True
     daemon_threads = True
 
 
@@ -129,8 +130,13 @@ def create_playground_server(host: str = "127.0.0.1", port: int = 9000) -> Threa
 
 
 if __name__ == "__main__":
-    server = create_playground_server()
-    print("Playground server started on http://127.0.0.1:9000")
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=9010)
+    parser.add_argument("--host", default="127.0.0.1")
+    args = parser.parse_args()
+    server = create_playground_server(host=args.host, port=args.port)
+    print(f"Playground server started on http://{args.host}:{args.port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

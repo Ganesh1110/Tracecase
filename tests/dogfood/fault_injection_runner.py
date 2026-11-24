@@ -115,8 +115,8 @@ FAULTS = [
         "name": "MCP get_testcase returns wrong testcase",
         "description": "MCP get_testcase tool returns wrong testcase or payload for valid ID",
         "file": "tracecase/mcp/server.py",
-        "find": "            return json.loads(file_path.read_text(encoding=\"utf-8\"))",
-        "replace": "            data = json.loads(file_path.read_text(encoding=\"utf-8\"))\n            data['id'] = 'wrong_mutated_id'  # FAULT-11\n            return data",
+        "find": "            return tc_data",
+        "replace": "            tc_data['id'] = 'wrong_mutated_id'  # FAULT-11\n            return tc_data",
     },
     {
         "id": "FAULT-12",
@@ -272,16 +272,94 @@ def run_full_suite() -> dict:
     }
 
 
+def get_expected_detectors(fault_id: str) -> list[str]:
+    detector_md = EVIDENCE_DIR / "fault_expected_detectors.md"
+    if not detector_md.exists():
+        return []
+    content = detector_md.read_text(encoding="utf-8")
+    pattern = rf"\|\s*\*\*{fault_id}\*\*\s*\|\s*[^|]+\|\s*([^|]+)\|"
+    match = re.search(pattern, content)
+    if not match:
+        return []
+    cell = match.group(1)
+    nodes = re.findall(r"`(test_cli_[^`]+)`", cell)
+    return [f"tests/dogfood/cli_tests/{n}" if not n.startswith("tests/dogfood/cli_tests/") else n for n in nodes]
+
+
+def run_single_fault(fault_key: str):
+    norm_key = fault_key.upper().strip()
+    if not norm_key.startswith("FAULT-"):
+        norm_key = f"FAULT-{norm_key}"
+
+    target_fault = None
+    for f in FAULTS:
+        if f["id"].upper() == norm_key:
+            target_fault = f
+            break
+    if not target_fault:
+        print(f"❌ Unknown fault ID: {fault_key} (expected one of: {[f['id'] for f in FAULTS]})")
+        sys.exit(1)
+
+    print("=" * 80)
+    print(f"FAULT INJECTION: {target_fault['id']} ({target_fault['name']})")
+    print("=" * 80)
+    reset_throwaway_src()
+    verify_throwaway_env()
+    diff_text = apply_fault(target_fault)
+
+    expected = get_expected_detectors(target_fault["id"])
+    run_res = run_full_suite()
+
+    has_expected_caught = any(
+        any(exp in node for exp in expected) for node in run_res["failing_nodes"]
+    )
+    if run_res["is_infra_failure"]:
+        verdict = "INFRA FAILURE"
+    elif len(run_res["failing_nodes"]) == 0:
+        verdict = "NOT DETECTED"
+    elif has_expected_caught:
+        verdict = "DETECTED"
+    else:
+        verdict = "COLLATERAL ONLY"
+
+    print(f"Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly")
+    print(f"Pytest Exit Code:     {run_res['exit_code']}")
+    print(f"Final Summary Line:   {run_res['summary_line']}")
+    print(f"Verdict:              {verdict}")
+    print(f"Failing Tests Count:  {len(run_res['failing_nodes'])}")
+    print("\nFailing Tests & First Assertion Line:")
+    if run_res["failing_nodes"]:
+        for node in run_res["failing_nodes"]:
+            func_name = node.split("::")[-1]
+            trace = run_res["failure_traces"].get(func_name, "Assertion failed")
+            print(f"  - {node}")
+            print(f"    {trace}")
+    else:
+        print("  *None*")
+
+    print("\nUnified Diff:")
+    print("```diff")
+    print(diff_text.strip())
+    print("```")
+    print("\n" + "-" * 80 + "\n")
+
+    reset_throwaway_src()
+
+
 def run_baseline():
-    print("================================================================================")
+    print("=" * 80)
     print("FAULT INJECTION BASELINE (CLEAN THROWAWAY SRC)")
-    print("================================================================================")
+    print("=" * 80)
     reset_throwaway_src()
     verify_throwaway_env()
 
     res = run_full_suite()
-    print(f"Baseline Exit Code: {res['exit_code']}")
-    print(f"Baseline Summary:   {res['summary_line']}")
+    print("Command:              .venv/bin/pytest tests/dogfood/cli_tests/ -q --tb=short -p no:randomly")
+    print(f"Pytest Exit Code:     {res['exit_code']}")
+    print(f"Final Summary Line:   {res['summary_line']}")
+    print(f"Failing Tests Count:  {len(res['failing_nodes'])}")
+    print(f"Verdict:              {'BASELINE CLEAN' if len(res['failing_nodes']) == 0 and res['exit_code'] == 0 else 'BASELINE FAILED'}")
+    print("\n" + "-" * 80 + "\n")
 
     out_file = EVIDENCE_DIR / "fault_baseline.txt"
     out_file.write_text(
@@ -402,5 +480,12 @@ def run_all_faults():
 if __name__ == "__main__":
     if "--baseline" in sys.argv:
         run_baseline()
+    elif "--fault" in sys.argv:
+        idx = sys.argv.index("--fault")
+        if idx + 1 < len(sys.argv):
+            run_single_fault(sys.argv[idx + 1])
+        else:
+            print("Error: --fault requires an argument (e.g. 1, 2, 2b, 3...)")
+            sys.exit(1)
     else:
         run_all_faults()

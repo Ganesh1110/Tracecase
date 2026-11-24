@@ -66,6 +66,9 @@ Tracecase is built for:
 
 ### Record and document
 
+- **Embedded Studio Recorder**: Stream headless browser interactions directly into Tracecase Studio with ultra-low latency (< 150 ms) CDP screencast, interactive canvas viewport, browser navigation controls (URL bar, back, forward, reload), multi-tab support, and JS dialog handlers with zero popups.
+- **CLI Headed Recording**: `tracecase record <url>` opens an interactive headed browser with an injected in-page control panel for standalone CLI workflows.
+- **Strict Password Protection**: Password fields (`type="password"`) are masked at capture (`********`) and never written in plaintext to `testcase.json`, `.md`, `.html`, or HAR exports.
 - Capture clicks, inputs, selects, checkboxes, key presses, and navigation
 - Screenshot per step with the target element outlined
 - Element metadata: CSS selector, XPath, text, placeholder, attributes, bounding box
@@ -170,6 +173,14 @@ cd frontend
 npm install
 npm run build
 ```
+
+#### Recording inside Tracecase Studio
+1. Navigate to **Browser Recorder** (`/recorder`) in the sidebar.
+2. Enter the target web application URL and optional test case name.
+3. Click **Start Recording**. A headless Chromium session launches on the backend and streams live frames directly into the embedded viewport canvas with zero popup windows.
+4. Interact directly with the application inside the canvas: click, type, submit forms, open new tabs, and respond to JavaScript dialogs.
+5. Watch the live step timeline and network/console diagnostics update in real-time alongside the viewport.
+6. Click **Stop & Save** to finalize the test case (`testcase.json`, `testcase.md`, and `testcase.html`). Passwords entered in password fields are automatically masked.
 
 For a guided walkthrough, see the [QA Demo Guide](docs/DEMO_GUIDE.md).
 

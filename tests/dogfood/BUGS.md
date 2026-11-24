@@ -41,16 +41,17 @@ This document tracks all defects, inconsistencies, and functional regressions di
 
 ---
 
-## BUG-003: Replay Exits with Code 2 Instead of Code 1 on Missing Element Without Heal
-- **Severity**: Medium (Conflates test failure with infrastructure error in CI pipelines)
+## BUG-003: Exit Code Contract Ambiguity on Missing Element Without Heal
+- **Severity**: Medium (Contract Ambiguity between README documentation and CLI behavior)
 - **Component**: `src/tracecase/cli.py` & `src/tracecase/replay/engine.py`
 - **Observed Behavior**:
   When an element is missing on replay without `--heal`, `ReplayEngine` raises `ReplayError("Element not found")`. `cli.py` catches this as a fatal command error and exits with `code 2` (status="error") rather than `code 1` (status="failed").
 - **Documentation Contract**:
-  The CLI contract states:
-  - Exit code 0: Replay passed successfully.
-  - Exit code 1: Replay failed (assertion failure or missing element).
-  - Exit code 2: Infrastructure / CLI command error (syntax, missing file, browser crash).
+  The README (`README.md#replay`) explicitly defines:
+  > `Exit codes: 0 passed, 1 assertion or visual diff failed, 2 infrastructure error.`
+  Notice that "missing element" is not explicitly defined in the README. In CI test runners, a failed selector/element lookup is typically classified as a test failure (exit code 1) rather than a tool/infrastructure crash (exit code 2). Currently, `ReplayError` bubbles up to the CLI top-level exception handler, causing exit code 2.
+- **Contract Resolution**:
+  Contract needs explicit definition: should a missing element be classified under code 1 (test step failed) or code 2 (unhandled selector error)? The dogfood test suite asserts code 1 as the desired behavior for test assertion/locator failures.
 - **Test Target**:
   Marked `@pytest.mark.xfail(strict=True, reason="BUG-003: replay exits with code 2 instead of code 1 when element is missing without heal")` in `tests/dogfood/cli_tests/test_cli_c_replay_healing.py::test_c8_replay_without_heal_version_b`.
 
@@ -68,14 +69,16 @@ This document tracks all defects, inconsistencies, and functional regressions di
 
 ---
 
-## BUG-005: Incomplete Mutation Strategies in MutationEngine
+## BUG-005: Incomplete Mutation Strategies in `tracecase/mutation/`
 - **Severity**: Medium (Missing documented mutation capabilities)
-- **Component**: `src/tracecase/engines/mutation.py`
+- **Component**: `src/tracecase/mutation/network.py` (line 31) and `src/tracecase/mutation/engine.py`
 - **Observed Behavior**:
-  `MutationEngine` currently only generates:
-  - `double_click` for actions
-  - `500` status error for network requests
-  Strategies promised in documentation (`skip_action`, `reorder_inputs`, `latency`, `403`, `429`) are unimplemented.
+  `src/tracecase/mutation/network.py` line 31 only implements HTTP 500 error mutation:
+  ```python
+  target_req.status = 500
+  target_req.response_body = '{"error": "Simulated Internal Server Error"}'
+  ```
+  HTTP 403 and 429 error mutations are completely absent from the implementation. Additionally, action-level mutations only support `double_click`. Strategies documented in earlier architectural specs (`skip_action`, `reorder_inputs`, `latency_injection`, `403_forbidden`, `429_rate_limit`) are not implemented.
 - **Test Target**:
   Marked `@pytest.mark.xfail(strict=True)` in:
   - `tests/dogfood/cli_tests/test_cli_g_mutate.py::test_g3_missing_skip_action_mutation`
@@ -84,11 +87,12 @@ This document tracks all defects, inconsistencies, and functional regressions di
 
 ---
 
-## BUG-006: Legacy `__qa_` DOM Identifiers in Injected Control Panel
+## BUG-006: Legacy `__qa_` DOM Identifiers and Artifacts
 - **Severity**: Low (Branding / Code Hygiene Inconsistency)
-- **Component**: `src/tracecase/control_panel.py`
+- **Component**: `src/tracecase/control_panel.py` and `.qa_auto/` legacy directory
 - **Observed Behavior**:
-  The control panel container uses `#__tracecase_panel__`, but internal elements retain legacy naming: `#__qa_start_btn__`, `#__qa_stop_btn__`, `#__qa_status_dot__`, `#__qa_steps_count__`, and CSS `@keyframes __qa_pulse`. Leftover artifacts from the previous `qa_auto` product name.
+  1. The control panel container uses `#__tracecase_panel__`, but internal elements retain legacy naming: `#__qa_start_btn__`, `#__qa_stop_btn__`, `#__qa_status_dot__`, `#__qa_steps_count__`, and CSS `@keyframes __qa_pulse`.
+  2. Legacy directory `.qa_auto/` remains at the repository root containing legacy studio database files and exploration screenshots, left over from previous product branding.
 
 ---
 
@@ -159,6 +163,36 @@ This document tracks all defects, inconsistencies, and functional regressions di
 
 ---
 
+## BUG-009E: Plaintext Credential Leakage in Exported HAR (`replay/har.py`)
+- **Severity**: Critical (Export Artifact Secret Exposure)
+- **Component**: `src/tracecase/replay/har.py`
+- **Observed Behavior**:
+  When replaying and exporting traffic to HAR (`tracecase export-har`), POST request bodies containing passwords (`password=secret`) and authorization headers (`Authorization: Bearer ...`) are serialized verbatim into the `postData` and `headers` sections of `testcase.har` without redaction.
+- **Test Target**:
+  Detected in credential leak sweep; tracked for sanitization fixture in export engine.
+
+---
+
+## BUG-009F: Mutation Engine Propagates Plaintext Secrets into Generated Mutation Pool
+- **Severity**: High (Derived Artifact Secret Proliferation)
+- **Component**: `src/tracecase/mutation/` (`engine.py`, `network.py`)
+- **Observed Behavior**:
+  When `tracecase mutate` generates mutated variants from a baseline test case containing credentials or API keys, those secrets are cloned verbatim into all mutated `testcase.json` files and their metadata descriptions across the entire mutant pool.
+- **Test Target**:
+  Detected in credential leak sweep.
+
+---
+
+## BUG-009G: Generated Pytest Suite Hardcodes Plaintext API Keys and Secrets
+- **Severity**: High (Committed Test Code Secret Leakage)
+- **Component**: `src/tracecase/codegen/pytest_exporter.py`
+- **Observed Behavior**:
+  When exporting recorded sessions to standalone Python tests (`tracecase codegen`), input values for API keys and tokens are emitted as literal python string arguments: `await page.fill("#api-key", "CANARY_APIKEY_...")`, encouraging developers to commit hardcoded secrets into version control.
+- **Test Target**:
+  Detected in credential leak sweep.
+
+---
+
 ## BUG-010: ActionType `scroll` Unhandled in ReplayEngine and Missing Browser Event Listeners
 - **Severity**: Medium (Missing Core Action Support in Replay & Recorder)
 - **Component**: `src/tracecase/replay/engine.py` (`_perform`) & `src/tracecase/events.py`
@@ -190,6 +224,9 @@ This document tracks all defects, inconsistencies, and functional regressions di
 | **BUG-009B** | Plaintext credential leakage in `testcase.md` | `templates/`, `recorder.py` | `test_cli_b_record.py::test_b27_password_masking_markdown` | `xfail(strict=True)` |
 | **BUG-009C** | Plaintext credential leakage in `testcase.html` | `templates/`, `recorder.py` | `test_cli_b_record.py::test_b27_password_masking_html` | `xfail(strict=True)` |
 | **BUG-009D** | Plaintext credential leakage via MCP `get_testcase` | `mcp/server.py` | `test_cli_i_corpus_mcp.py::test_i20_mcp_password_masking` | `xfail(strict=True)` |
+| **BUG-009E** | Plaintext credential leakage in exported HAR | `replay/har.py` | `credential_leak_sweep.py` (har sweep) | Verified in sweep |
+| **BUG-009F** | Mutation engine propagates plaintext secrets | `mutation/` | `credential_leak_sweep.py` (mutations sweep) | Verified in sweep |
+| **BUG-009G** | Codegen hardcodes plaintext secrets in python | `codegen/` | `credential_leak_sweep.py` (codegen sweep) | Verified in sweep |
 | **BUG-010** | ReplayEngine crashes on action_type `scroll` | `replay/engine.py` | `test_cli_b_record.py::test_b16_action_types_replay_scroll_bug` | `xfail(strict=True)` |
 | **BUG-011** | MCP `get_testcase` tool throws JSON-RPC -32603 instead of `result.isError=true` | `mcp/server.py` | `test_cli_i_corpus_mcp.py::test_i19_mcp_missing_testcase_iserror` | `xfail(strict=True)` |
 | **BUG-012** | Closing browser without Stop silently drops recording without saving or notice | `recorder.py`, `cli.py` | `test_cli_b_record.py::test_b14_close_browser_without_stop_saves_or_warns` | `xfail(strict=True)` |

@@ -615,7 +615,6 @@ def test_b26_path_with_spaces_unicode(isolated_workspace: Path, playground_serve
 
 
 @pytest.mark.flow("B27")
-@pytest.mark.xfail(strict=True, reason="BUG-009A: Password input values stored in plaintext in testcase.json")
 def test_b27_password_masking_json(isolated_workspace: Path, playground_server_url: str):
     """B27 / BUG-009A: Password input values masked with asterisks in testcase.json."""
     out_dir = isolated_workspace / "b27_json"
@@ -640,7 +639,6 @@ def test_b27_password_masking_json(isolated_workspace: Path, playground_server_u
 
 
 @pytest.mark.flow("B27")
-@pytest.mark.xfail(strict=True, reason="BUG-009B: Plaintext password leaked in exported testcase.md")
 def test_b27_password_masking_markdown(isolated_workspace: Path, playground_server_url: str):
     """B27 / BUG-009B: Password values must NOT leak into exported testcase.md."""
     out_dir = isolated_workspace / "b27_md"
@@ -660,7 +658,6 @@ def test_b27_password_masking_markdown(isolated_workspace: Path, playground_serv
 
 
 @pytest.mark.flow("B27")
-@pytest.mark.xfail(strict=True, reason="BUG-009C: Plaintext password leaked in exported testcase.html")
 def test_b27_password_masking_html(isolated_workspace: Path, playground_server_url: str):
     """B27 / BUG-009C: Password values must NOT leak into exported testcase.html."""
     out_dir = isolated_workspace / "b27_html"

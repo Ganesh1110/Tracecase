@@ -90,6 +90,7 @@ async def dispatch_input_event(
         InputEventType.MOUSE_DOWN,
         InputEventType.MOUSE_UP,
         InputEventType.CLICK,
+        InputEventType.DBLCLICK,
     ):
         mapped_x, mapped_y = map_client_coordinates(
             x=event.x,
@@ -105,6 +106,12 @@ async def dispatch_input_event(
                 y=mapped_y,
                 button=event.button.value,
                 click_count=event.click_count,
+            )
+        elif event_type == InputEventType.DBLCLICK:
+            await page.mouse.dblclick(
+                x=mapped_x,
+                y=mapped_y,
+                button=event.button.value,
             )
         elif event_type == InputEventType.MOUSE_MOVE:
             await page.mouse.move(x=mapped_x, y=mapped_y)
@@ -125,8 +132,13 @@ async def dispatch_input_event(
 
     elif event_type == InputEventType.TYPE:
         if event.text:
-            # Use insert_text or type depending on text length
+            # Native typing simulates key events
             await page.keyboard.type(event.text)
+
+    elif event_type == InputEventType.PASTE:
+        if event.text:
+            # Use insert_text (CDP Input.insertText) for fast paste and IME input
+            await page.keyboard.insert_text(event.text)
 
     elif event_type == InputEventType.WHEEL:
         if event.x is not None and event.y is not None:

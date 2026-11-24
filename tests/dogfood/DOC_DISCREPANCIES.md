@@ -123,5 +123,22 @@ This document tracks all discrepancies discovered between the documentation (`RE
   - The padded difference area is counted toward `diff_pixels`, producing an accurate diff percentage and returning `passed = False` (which causes `tracecase diff` CLI to exit with code 1, not exit code 2).
 - **Resolution for Testing**: Tests assert graceful canvas padding and exit code 1 on dimension mismatches.
 
-  - Planning documents in `docs/superpowers/plans/*.md` use `qa_auto` instead of `tracecase` throughout.
-- **Resolution for Testing**: Test selectors against real DOM IDs (`#__qa_start_btn__` etc.).
+---
+
+## 10. Codegen Asynchronous Fixture vs Sync Playwright Documentation (BUG-007)
+- **Location**: `src/tracecase/codegen/pytest_exporter.py` vs `docs/USER_GUIDE.md` / Playwright docs
+- **Docs**: Documentation suggests running generated tests directly via standard `pytest` / Playwright runner.
+- **Code**:
+  - `pytest_exporter.py` generates `import pytest_asyncio` and `async def test_*(page: Page): ...`.
+  - In environments without `pytest-asyncio` installed, pytest fails at collection with `ModuleNotFoundError: No module named 'pytest_asyncio'`. Standard `pytest-playwright` tests use synchronous test functions (`def test_*(page: Page): ...`).
+- **Resolution for Testing**: Documented as BUG-007; characterized in test suite and tracked with strict xfail.
+
+---
+
+## 11. Browser Disconnect Handling During Active Recording (BUG-012)
+- **Location**: `src/tracecase/recorder.py` and `src/tracecase/cli.py` vs User Guide
+- **Docs**: Documentation implies user workflows are preserved and saved when recording completes.
+- **Code**:
+  - Closing the browser window without pressing "Stop" in the control panel triggers browser disconnect, which causes the CLI to exit 0 with "Browser closed".
+  - However, `export()` is never called, silently dropping all recorded steps with zero files written and no warning to the user.
+- **Resolution for Testing**: Documented as BUG-012; tracked with strict xfail `test_b14_close_browser_without_stop_saves_or_warns`.

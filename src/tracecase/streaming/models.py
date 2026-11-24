@@ -89,9 +89,11 @@ class InputEventType(str, Enum):
     MOUSE_DOWN = "mouse_down"
     MOUSE_UP = "mouse_up"
     CLICK = "click"
+    DBLCLICK = "dblclick"
     KEY_DOWN = "key_down"
     KEY_UP = "key_up"
     TYPE = "type"
+    PASTE = "paste"
     WHEEL = "wheel"
 
 

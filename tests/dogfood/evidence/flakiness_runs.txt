@@ -1,0 +1,76 @@
+| Run | Configuration / Seed | Passed | XFailed | Failed | Status |
+|---|---|---|---|---|---|
+| **Random Run 1 (Seed 20261123)** | Seed `N/A` (random order) | 140 | 14 | 0 | ✅ PASS |
+| **Random Run 2 (Seed 7749201)** | Seed `N/A` (random order) | 140 | 14 | 0 | ✅ PASS |
+| **Random Run 3 (Seed 8839102)** | Seed `N/A` (random order) | 140 | 14 | 0 | ✅ PASS |
+| **Parallel Run 1 (-n 2)** | `-n 2` (2 parallel workers) | 140 | 14 | 0 | ✅ PASS |
+| **Parallel Run 2 (-n 2)** | `-n 2` (2 parallel workers) | 140 | 14 | 0 | ✅ PASS |
+
+=== Random Run 1 (Seed 20261123) ===
+Args: --randomly-seed=20261123
+Exit Code: 0
+Summary: 140 passed, 14 xfailed, 0 failed
+x.........x.........x.........x...............x......................... [ 46%]
+.................x...........x...x..........x........x.........x........ [ 93%]
+...x.x.x..                                                               [100%]
+140 passed, 14 xfailed in 164.76s (0:02:44)
+
+
+=== Random Run 2 (Seed 7749201) ===
+Args: --randomly-seed=7749201
+Exit Code: 0
+Summary: 140 passed, 14 xfailed, 0 failed
+.x........x......x...............xx...x........x...............x........ [ 46%]
+.......x....x.....x.....x...............................x..............x [ 93%]
+..........                                                               [100%]
+140 passed, 14 xfailed in 157.88s (0:02:37)
+
+
+=== Random Run 3 (Seed 8839102) ===
+Args: --randomly-seed=8839102
+Exit Code: 0
+Summary: 140 passed, 14 xfailed, 0 failed
+...x.............x.............xx.......x............................... [ 46%]
+..................x....x..........x........x...x.............x...x...x.. [ 93%]
+........x.                                                               [100%]
+140 passed, 14 xfailed in 160.31s (0:02:40)
+
+
+=== Parallel Run 1 (-n 2) ===
+Args: -n 2 -p no:randomly
+Exit Code: 0
+Summary: 140 passed, 14 xfailed, 0 failed
+bringing up nodes...
+bringing up nodes...
+
+..x.....x....x...........x....x......................x...........x...... [ 46%]
+x............xxx...........................x..x....................x.... [ 93%]
+..........                                                               [100%]
+140 passed, 14 xfailed in 81.60s (0:01:21)
+
+
+=== Parallel Run 2 (-n 2) ===
+Args: -n 2 -p no:randomly
+Exit Code: 0
+Summary: 140 passed, 14 xfailed, 0 failed
+bringing up nodes...
+bringing up nodes...
+
+..x.....x....x...........x....x......................x.........x........ [ 46%]
+x............xxx........................x.....x................x........ [ 93%]
+..........                                                               [100%]
+140 passed, 14 xfailed in 80.67s (0:01:20)
+
+
+================================================================================
+FLAKINESS & CONCURRENCY RESULTS
+================================================================================
+| Run | Configuration / Seed | Passed | XFailed | Failed | Status |
+|---|---|---|---|---|---|
+| **Random Run 1 (Seed 20261123)** | Seed `N/A` (random order) | 140 | 14 | 0 | ✅ PASS |
+| **Random Run 2 (Seed 7749201)** | Seed `N/A` (random order) | 140 | 14 | 0 | ✅ PASS |
+| **Random Run 3 (Seed 8839102)** | Seed `N/A` (random order) | 140 | 14 | 0 | ✅ PASS |
+| **Parallel Run 1 (-n 2)** | `-n 2` (2 parallel workers) | 140 | 14 | 0 | ✅ PASS |
+| **Parallel Run 2 (-n 2)** | `-n 2` (2 parallel workers) | 140 | 14 | 0 | ✅ PASS |
+
+Wrote flakiness report to: /Users/ganeshjayaprakash/experimental/Tracecase/tests/dogfood/FLAKINESS_REPORT.md and /Users/ganeshjayaprakash/experimental/Tracecase/tests/dogfood/evidence/flakiness_runs.txt

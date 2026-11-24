@@ -20,6 +20,7 @@ class BrowserManager:
         headless: bool = False,
         viewport: tuple[int, int] = (1280, 720),
         timeout: int = 30000,
+        launch_args: list[str] | None = None,
     ) -> None:
         """
         Initialize browser manager.
@@ -29,11 +30,13 @@ class BrowserManager:
             headless: Run browser without GUI
             viewport: Browser window size (width, height)
             timeout: Default timeout for operations in ms
+            launch_args: Additional command line flags for browser launch
         """
         self.browser_type = browser_type
         self.headless = headless
         self.viewport = {"width": viewport[0], "height": viewport[1]}
         self.timeout = timeout
+        self.launch_args = launch_args
 
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
@@ -80,22 +83,24 @@ class BrowserManager:
         self._playwright = await async_playwright().start()
 
         if self.browser_type == "msedge":
-            self._browser = await self._playwright.chromium.launch(
-                headless=self.headless,
-                channel="msedge",
-            )
+            launch_kwargs: dict[str, Any] = {"headless": self.headless, "channel": "msedge"}
+            if self.launch_args:
+                launch_kwargs["args"] = self.launch_args
+            self._browser = await self._playwright.chromium.launch(**launch_kwargs)
         elif self.browser_type == "firefox":
             # Playwright's Firefox Nightly.app hits macOS WindowServer/Seatbelt
             # sandbox crashes when launched headed on macOS 26/27; run headless on darwin.
             use_headless = True if sys.platform == "darwin" else self.headless
-            self._browser = await self._playwright.firefox.launch(
-                headless=use_headless,
-            )
+            launch_kwargs = {"headless": use_headless}
+            if self.launch_args:
+                launch_kwargs["args"] = self.launch_args
+            self._browser = await self._playwright.firefox.launch(**launch_kwargs)
         else:
             launcher = getattr(self._playwright, self.browser_type)
-            self._browser = await launcher.launch(
-                headless=self.headless,
-            )
+            launch_kwargs = {"headless": self.headless}
+            if self.launch_args:
+                launch_kwargs["args"] = self.launch_args
+            self._browser = await launcher.launch(**launch_kwargs)
 
         self._context = await self._browser.new_context(
             viewport={"width": self.viewport["width"], "height": self.viewport["height"]},

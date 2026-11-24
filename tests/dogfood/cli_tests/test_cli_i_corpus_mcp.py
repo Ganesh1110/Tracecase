@@ -482,7 +482,6 @@ def test_i22_mcp_stdout_protocol_purity(isolated_workspace: Path, isolated_env: 
 
 
 @pytest.mark.flow("I19")
-@pytest.mark.xfail(strict=True, reason="BUG-009D: MCP get_testcase returns plaintext password credentials")
 def test_i20_mcp_password_masking(isolated_workspace: Path, isolated_env: dict[str, str]):
     """I19 / BUG-009D: MCP get_testcase must NOT return unmasked plaintext passwords."""
     from tracecase.mcp.server import MCPServer
