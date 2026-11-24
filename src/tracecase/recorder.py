@@ -284,10 +284,27 @@ class Recorder:
                 # Setup dialogs, file uploads, and downloads
                 self._setup_embedded_page_handlers(page, page_id=0)
 
+                # Ensure clean browser view - remove any in-page panel if added
+                await page.add_init_script(
+                    "() => {"
+                    "  const observer = new MutationObserver(() => {"
+                    "    const p = document.getElementById('__tracecase_panel__');"
+                    "    if (p) p.remove();"
+                    "  });"
+                    "  if (document.body) {"
+                    "    observer.observe(document.body, { childList: true, subtree: true });"
+                    "  } else {"
+                    "    document.addEventListener('DOMContentLoaded', () => {"
+                    "      if (document.body) observer.observe(document.body, { childList: true, subtree: true });"
+                    "    });"
+                    "  }"
+                    "}"
+                )
+
                 # Set up event listeners without injected control panel
                 await setup_event_listeners(page, self, page_id=0)
                 self.state = StreamSessionState.ACTIVE
-                console.print("[green]✓[/green] Embedded screencast active (no in-page panel)")
+                console.print("[green]✓[/green] Embedded screencast active (clean browser view, no in-page panel)")
             else:
                 # Set up control panel and event listeners for headed mode
                 await inject_control_panel(page, self)
@@ -770,15 +787,20 @@ class Recorder:
     async def _on_page_load(self, _: Any) -> None:
         """Handle page load event."""
         if self._browser_manager and self._browser_manager._page:
-            # Re-inject control panel and event listeners
             try:
-                await self._browser_manager._page.evaluate(CONTROL_PANEL_JS)
+                if self.embedded:
+                    # Clean browser view: ensure in-page control panel is removed
+                    await self._browser_manager._page.evaluate(
+                        "() => { const p = document.getElementById('__tracecase_panel__'); if (p) p.remove(); }"
+                    )
+                else:
+                    await self._browser_manager._page.evaluate(CONTROL_PANEL_JS)
+                    await update_panel_ui(
+                        self._browser_manager._page,
+                        self.is_recording,
+                        len(self.steps),
+                    )
                 await self._browser_manager._page.evaluate(EVENT_LISTENER_JS)
-                await update_panel_ui(
-                    self._browser_manager._page,
-                    self.is_recording,
-                    len(self.steps),
-                )
             except Exception:
                 pass
 
@@ -811,8 +833,8 @@ class Recorder:
         console.print("[dim]Perform your actions in the browser...[/dim]")
         console.print("[dim]Console logs and network requests are being captured.[/dim]\n")
 
-        # Update UI
-        if self._browser_manager and self._browser_manager._page:
+        # Update UI (headed mode only)
+        if not self.embedded and self._browser_manager and self._browser_manager._page:
             await update_panel_ui(
                 self._browser_manager._page,
                 is_recording=True,
@@ -825,7 +847,7 @@ class Recorder:
             return
         self.is_paused = True
         console.print("[yellow]❚❚ Recording paused[/yellow]")
-        if self._browser_manager and self._browser_manager._page:
+        if not self.embedded and self._browser_manager and self._browser_manager._page:
             with contextlib.suppress(Exception):
                 await update_panel_ui(
                     self._browser_manager._page,
@@ -840,7 +862,7 @@ class Recorder:
             return
         self.is_paused = False
         console.print("[green]▶ Recording resumed[/green]")
-        if self._browser_manager and self._browser_manager._page:
+        if not self.embedded and self._browser_manager and self._browser_manager._page:
             with contextlib.suppress(Exception):
                 await update_panel_ui(
                     self._browser_manager._page,
@@ -1022,8 +1044,8 @@ class Recorder:
         # Log the action
         console.print(f"  [dim]{step_number}.[/dim] {description_short}")
 
-        # Update UI
-        if self._browser_manager and self._browser_manager._page:
+        # Update UI (headed mode only)
+        if not self.embedded and self._browser_manager and self._browser_manager._page:
             await update_panel_ui(
                 self._browser_manager._page,
                 is_recording=True,

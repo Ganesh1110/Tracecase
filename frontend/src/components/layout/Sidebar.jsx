@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import React, { useState } from "react";
+import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -24,53 +24,74 @@ import {
   ChevronRight,
   ShieldCheck,
   Zap,
-} from 'lucide-react';
+} from "lucide-react";
 
 const navSections = [
   {
-    title: 'Workspace',
+    title: "Workspace",
     items: [
-      { name: 'Overview', to: '/', icon: LayoutDashboard },
-      { name: 'Projects', to: '/projects', icon: FolderKanban },
+      { name: "Overview", to: "/", icon: LayoutDashboard },
+      { name: "Projects", to: "/projects", icon: FolderKanban },
     ],
   },
   {
-    title: 'Testing',
+    title: "Testing",
     items: [
-      { name: 'Test Cases', to: '/testcases', icon: FileCode2 },
-      { name: 'Test Suites', to: '/suites', icon: Layers },
-      { name: 'Local Studio', to: '/recorder', icon: Video, highlight: true, badge: 'Studio' },
-      { name: 'Test Executions', to: '/executions', icon: PlayCircle },
-      { name: 'Execution History', to: '/history', icon: History },
-      { name: 'Reports', to: '/reports', icon: FileSpreadsheet },
-      { name: 'Visual Regression', to: '/visual-diff', icon: Images },
-      { name: 'CI Quality Gate', to: '/ci', icon: ShieldCheck, badge: 'Gate' },
+      { name: "Test Cases", to: "/testcases", icon: FileCode2 },
+      { name: "Test Suites", to: "/suites", icon: Layers },
+      {
+        name: "Local Studio",
+        to: "/recorder",
+        icon: Video,
+        highlight: true,
+        badge: "Studio",
+      },
+      { name: "Test Executions", to: "/executions", icon: PlayCircle },
+      { name: "Execution History", to: "/history", icon: History },
+      { name: "Reports", to: "/reports", icon: FileSpreadsheet },
+      { name: "Visual Regression", to: "/visual-diff", icon: Images },
+      { name: "CI Quality Gate", to: "/ci", icon: ShieldCheck, badge: "Gate" },
     ],
   },
   {
-    title: 'Intelligence',
+    title: "Intelligence",
     items: [
-      { name: 'Smart Regression', to: '/regression-selection', icon: Zap, badge: 'Smart' },
-      { name: 'Autonomous Exploration', to: '/explore', icon: Compass, badge: 'New' },
-      { name: 'AI Test Assistant', to: '/ai-assistant', icon: Sparkles, badge: 'AI' },
-      { name: 'Test Analysis', to: '/test-analysis', icon: BarChart3 },
-      { name: 'Negative Test Generation', to: '/mutations', icon: Dna },
-      { name: 'Test Repository', to: '/repository', icon: Database },
+      {
+        name: "Smart Regression",
+        to: "/regression-selection",
+        icon: Zap,
+        badge: "Smart",
+      },
+      {
+        name: "Autonomous Exploration",
+        to: "/explore",
+        icon: Compass,
+        badge: "New",
+      },
+      {
+        name: "AI Test Assistant",
+        to: "/ai-assistant",
+        icon: Sparkles,
+        badge: "AI",
+      },
+      { name: "Test Analysis", to: "/test-analysis", icon: BarChart3 },
+      { name: "Negative Test Generation", to: "/mutations", icon: Dna },
+      { name: "Test Repository", to: "/repository", icon: Database },
     ],
   },
   {
-    title: 'Developer Tools',
+    title: "Developer Tools",
     items: [
-      { name: 'Code Generator', to: '/codegen', icon: Terminal },
-      { name: 'Network Inspector', to: '/network', icon: Activity },
-      { name: 'MCP Integrations', to: '/mcp', icon: Cpu },
+      { name: "Code Generator", to: "/codegen", icon: Terminal },
+      { name: "Network Inspector", to: "/network", icon: Activity },
+      { name: "MCP Integrations", to: "/mcp", icon: Cpu },
     ],
   },
   {
-    title: 'Administration',
+    title: "Administration",
     items: [
-      { name: 'Settings', to: '/settings', icon: Settings },
-      { name: 'Storage Management', to: '/storage', icon: HardDrive },
+      { name: "Settings", to: "/settings", icon: Settings },
+      { name: "Storage Management", to: "/storage", icon: HardDrive },
     ],
   },
 ];
@@ -81,7 +102,7 @@ export function Sidebar() {
   return (
     <aside
       className={`relative flex flex-col h-screen transition-all duration-300 border-r bg-white dark:bg-surface-panelDark border-slate-200 dark:border-surface-borderDark ${
-        collapsed ? 'w-18' : 'w-64'
+        collapsed ? "w-18" : "w-64"
       } shrink-0 z-30 select-none`}
     >
       {/* Brand Header */}
@@ -104,9 +125,13 @@ export function Sidebar() {
         <button
           onClick={() => setCollapsed(!collapsed)}
           className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+          {collapsed ? (
+            <ChevronRight className="w-4 h-4" />
+          ) : (
+            <ChevronLeft className="w-4 h-4" />
+          )}
         </button>
       </div>
 
@@ -128,15 +153,15 @@ export function Sidebar() {
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all group relative ${
                       isActive
-                        ? 'bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-300 font-semibold'
-                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/70 dark:hover:bg-slate-800/60'
+                        ? "bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-300 font-semibold"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/70 dark:hover:bg-slate-800/60"
                     }`
                   }
                   title={collapsed ? item.name : undefined}
                 >
                   <Icon
                     className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${
-                      item.highlight ? 'text-brand-500 animate-pulse' : ''
+                      item.highlight ? "text-brand-500 animate-pulse" : ""
                     }`}
                   />
                   {!collapsed && (

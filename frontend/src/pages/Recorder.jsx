@@ -1,52 +1,48 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Video,
-  Globe,
-  CheckCircle2,
-  AlertCircle,
-  Clock,
-  ArrowRight,
-  Loader2,
-  StopCircle,
-  Pause,
   Play,
-  FolderKanban,
-  Activity,
-  Layers,
-  Bug,
-  Radio,
-  FileUp,
-  Download,
-  RefreshCw,
-  Sliders,
-  Sparkles,
+  Pause,
+  Save,
+  Globe,
   Plus,
   Trash2,
-  Edit3,
+  Edit2,
+  Check,
+  CheckCircle2,
+  X,
+  AlertCircle,
+  FileUp,
+  RotateCcw,
+  Sparkles,
+  ShieldCheck,
+  Loader2,
+  Hand,
+  Copy,
   ChevronDown,
   ChevronRight,
-  MousePointer,
+  ChevronUp,
   MousePointerClick,
   Type,
-  Lock,
-  Shield,
-  ShieldCheck,
-  Eye,
-  GitBranch,
-  Split,
-  Save,
+  Video,
+  Activity,
   Maximize2,
-  Terminal,
-  Copy,
-  X,
+  Minimize2,
+  Search,
   ExternalLink,
-  Hand,
-  Check,
-  Variable,
-  Database,
+  Laptop,
+  Smartphone,
+  Sliders,
+  Terminal,
+  Wifi,
+  CornerDownRight,
   ArrowLeft,
-  RotateCcw,
+  ArrowRight,
+  RefreshCw,
+  Lock,
+  Eye,
+  EyeOff,
+  Code2,
 } from "lucide-react";
 import { api } from "../services/api";
 import { useWebSocket } from "../context/WebSocketContext";
@@ -54,33 +50,47 @@ import { useToast } from "../context/ToastContext";
 import { useProject } from "../context/ProjectContext";
 
 export function Recorder() {
-  const [url, setUrl] = useState("https://");
-  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [testcaseName, setTestcaseName] = useState("New Test Case");
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [browser, setBrowser] = useState("chromium");
   const [headless, setHeadless] = useState(true);
   const [status, setStatus] = useState({ status: "idle" });
+
+  // Clean empty step list by default
   const [liveSteps, setLiveSteps] = useState([]);
+
   const [loading, setLoading] = useState(false);
   const [pauseLoading, setPauseLoading] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
-  // KaneAI-style Interaction & Authoring States
+  // Authoring & Interaction States
   const [manualInteraction, setManualInteraction] = useState(true);
   const [nlPrompt, setNlPrompt] = useState("");
   const [promptLoading, setPromptLoading] = useState(false);
   const [isVariablesOpen, setIsVariablesOpen] = useState(false);
   const [activeBottomTab, setActiveBottomTab] = useState("network"); // 'network' | 'console' | 'telemetry'
+  const [isDrawerCollapsed, setIsDrawerCollapsed] = useState(false);
 
   // Edit / Stats Counters
   const [additionsCount, setAdditionsCount] = useState(0);
   const [editedCount, setEditedCount] = useState(0);
   const [deletedCount, setDeletedCount] = useState(0);
 
+  // Inline Step Editing State
+  const [editingIndex, setEditingIndex] = useState(null);
+  const [editDesc, setEditDesc] = useState("");
+  const [editSelector, setEditSelector] = useState("");
+  const [editValue, setEditValue] = useState("");
+
+  // Step expansion state (expanded details)
+  const [expandedSteps, setExpandedSteps] = useState({});
+
   // Local Variables Store
   const [localVariables, setLocalVariables] = useState([
     { key: "base_url", value: "https://example.com", isSecret: false },
     { key: "username", value: "tester@tracecase.local", isSecret: false },
-    { key: "password", value: "Test@124!Secure", isSecret: true },
+    { key: "password", value: "Test@124", isSecret: true },
     { key: "totp_seed", value: "JBSWY3DPEHPK3PXP", isSecret: true },
   ]);
   const [newVarKey, setNewVarKey] = useState("");
@@ -96,14 +106,17 @@ export function Recorder() {
 
   // Condition collapse states
   const [collapsedConditions, setCollapsedConditions] = useState({});
+  const [showElseSteps, setShowElseSteps] = useState({});
 
   // Embedded CDP Screencast & Browser Chrome States
   const [streamConnected, setStreamConnected] = useState(false);
   const [streamSessionId, setStreamSessionId] = useState(null);
   const [streamToken, setStreamToken] = useState(null);
   const [viewportDims, setViewportDims] = useState({ width: 1440, height: 900 });
-  const [chromeUrl, setChromeUrl] = useState("https://");
-  const [tabs, setTabs] = useState([{ page_id: 0, title: "New Tab", url: "https://" }]);
+  const [chromeUrl, setChromeUrl] = useState("");
+  const [tabs, setTabs] = useState([
+    { page_id: 0, title: "New Tab", url: "about:blank" },
+  ]);
   const [activeTabId, setActiveTabId] = useState(0);
   const [latencyMs, setLatencyMs] = useState(0);
 
@@ -124,7 +137,7 @@ export function Recorder() {
   const streamWsRef = useRef(null);
   const offscreenImgRef = useRef(new Image());
   const lastMouseMoveRef = useRef(0);
-  const frameCountRef = useRef(0);
+  const frameCountRef = useRef(142);
   const viewportContainerRef = useRef(null);
   const timerRef = useRef(null);
 
@@ -146,7 +159,7 @@ export function Recorder() {
     try {
       const data = await api.getRecordingStatus();
       setStatus(data);
-      if (data.steps && Array.isArray(data.steps)) {
+      if (data.steps && Array.isArray(data.steps) && data.steps.length > 0) {
         setLiveSteps(data.steps);
       }
       if (data.elapsed_seconds !== undefined) {
@@ -248,127 +261,124 @@ export function Recorder() {
   }, [streamConnected]);
 
   // Connect to dedicated screencast WebSocket
-  const connectStreamWebSocket = useCallback(
-    (sessionId, token) => {
-      if (!sessionId) return;
-      if (streamWsRef.current) {
-        streamWsRef.current.close();
-      }
+  const connectStreamWebSocket = useCallback((sessionId, token) => {
+    if (!sessionId) return;
+    if (streamWsRef.current) {
+      streamWsRef.current.close();
+    }
 
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : "";
-      const wsUrl = `${protocol}//${window.location.host}/api/ws/record/stream/${sessionId}${tokenQuery}`;
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : "";
+    const wsUrl = `${protocol}//${window.location.host}/api/ws/record/stream/${sessionId}${tokenQuery}`;
 
-      const ws = new WebSocket(wsUrl);
-      streamWsRef.current = ws;
+    const ws = new WebSocket(wsUrl);
+    streamWsRef.current = ws;
 
-      ws.onopen = () => {
-        setStreamConnected(true);
-        setStreamSessionId(sessionId);
-        setStreamToken(token);
-      };
+    ws.onopen = () => {
+      setStreamConnected(true);
+      setStreamSessionId(sessionId);
+      setStreamToken(token);
+    };
 
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          const type = msg.type;
-          const payload = msg.payload || {};
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        const type = msg.type;
+        const payload = msg.payload || {};
 
-          if (type === "frame") {
-            frameCountRef.current += 1;
-            const img = offscreenImgRef.current;
-            img.onload = () => {
-              const canvas = canvasRef.current;
-              if (!canvas) return;
-              const ctx = canvas.getContext("2d");
-              if (!ctx) return;
-              if (
-                canvas.width !== img.naturalWidth ||
-                canvas.height !== img.naturalHeight
-              ) {
-                canvas.width = img.naturalWidth;
-                canvas.height = img.naturalHeight;
-                setViewportDims({ width: img.naturalWidth, height: img.naturalHeight });
-              }
-              ctx.drawImage(img, 0, 0);
-            };
-            img.src = "data:image/jpeg;base64," + payload.data_base64;
-          } else if (type === "session_state") {
-            if (payload.url) setChromeUrl(payload.url);
-            if (payload.viewport_width && payload.viewport_height) {
-              setViewportDims({
-                width: payload.viewport_width,
-                height: payload.viewport_height,
-              });
+        if (type === "frame") {
+          frameCountRef.current += 1;
+          const img = offscreenImgRef.current;
+          img.onload = () => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return;
+            if (
+              canvas.width !== img.naturalWidth ||
+              canvas.height !== img.naturalHeight
+            ) {
+              canvas.width = img.naturalWidth;
+              canvas.height = img.naturalHeight;
+              setViewportDims({ width: img.naturalWidth, height: img.naturalHeight });
             }
-          } else if (type === "pong" || type === "input_ack") {
-            if (payload.client_ts) {
-              const rtt = Math.round(performance.now() - payload.client_ts);
-              setLatencyMs(rtt);
-            }
-          } else if (type === "tab_opened") {
-            setTabs((prev) => {
-              const exists = prev.some((t) => t.page_id === payload.page_id);
-              if (exists) return prev;
-              return [
-                ...prev,
-                {
-                  page_id: payload.page_id,
-                  title: payload.title || `Tab ${payload.page_id + 1}`,
-                  url: payload.url || "about:blank",
-                },
-              ];
+            ctx.drawImage(img, 0, 0);
+          };
+          img.src = "data:image/jpeg;base64," + payload.data_base64;
+        } else if (type === "session_state") {
+          if (payload.url) setChromeUrl(payload.url);
+          if (payload.viewport_width && payload.viewport_height) {
+            setViewportDims({
+              width: payload.viewport_width,
+              height: payload.viewport_height,
             });
-            setActiveTabId(payload.page_id);
-          } else if (type === "tab_closed") {
-            setTabs((prev) => prev.filter((t) => t.page_id !== payload.page_id));
-            setActiveTabId(0);
-          } else if (type === "dialog_opened") {
-            setActiveDialog({
-              dialog_type: payload.dialog_type,
-              message: payload.message,
-              default_prompt: payload.default_prompt || "",
-            });
-            setDialogPromptValue(payload.default_prompt || "");
-          } else if (type === "file_chooser_opened") {
-            setActiveFileChooser({
-              multiple: payload.multiple || false,
-            });
-          } else if (type === "console_log") {
-            setConsoleLogs((prev) => [...prev.slice(-99), payload]);
-          } else if (type === "page_error") {
-            setPageErrors((prev) => [...prev.slice(-49), payload]);
-          } else if (type === "network_request") {
-            setNetworkRequests((prev) => [...prev.slice(-99), payload]);
-          } else if (type === "download_started") {
-            setDownloadNotice({
-              status: "downloading",
-              filename: payload.suggested_filename || "download",
-            });
-          } else if (type === "download_finished") {
-            setDownloadNotice({
-              status: "completed",
-              filename: payload.filename,
-              path: payload.path,
-            });
-            setTimeout(() => setDownloadNotice(null), 6000);
           }
-        } catch (err) {
-          console.debug("Error parsing WebSocket message:", err);
+        } else if (type === "pong" || type === "input_ack") {
+          if (payload.client_ts) {
+            const rtt = Math.round(performance.now() - payload.client_ts);
+            setLatencyMs(rtt);
+          }
+        } else if (type === "tab_opened") {
+          setTabs((prev) => {
+            const exists = prev.some((t) => t.page_id === payload.page_id);
+            if (exists) return prev;
+            return [
+              ...prev,
+              {
+                page_id: payload.page_id,
+                title: payload.title || `Tab ${payload.page_id + 1}`,
+                url: payload.url || "about:blank",
+              },
+            ];
+          });
+          setActiveTabId(payload.page_id);
+        } else if (type === "tab_closed") {
+          setTabs((prev) => prev.filter((t) => t.page_id !== payload.page_id));
+          setActiveTabId(0);
+        } else if (type === "dialog_opened") {
+          setActiveDialog({
+            dialog_type: payload.dialog_type,
+            message: payload.message,
+            default_prompt: payload.default_prompt || "",
+          });
+          setDialogPromptValue(payload.default_prompt || "");
+        } else if (type === "file_chooser_opened") {
+          setActiveFileChooser({
+            multiple: payload.multiple || false,
+          });
+        } else if (type === "console_log") {
+          setConsoleLogs((prev) => [...prev.slice(-99), payload]);
+        } else if (type === "page_error") {
+          setPageErrors((prev) => [...prev.slice(-49), payload]);
+        } else if (type === "network_request") {
+          setNetworkRequests((prev) => [...prev.slice(-99), payload]);
+        } else if (type === "download_started") {
+          setDownloadNotice({
+            status: "downloading",
+            filename: payload.suggested_filename || "download",
+          });
+        } else if (type === "download_finished") {
+          setDownloadNotice({
+            status: "completed",
+            filename: payload.filename,
+            path: payload.path,
+          });
+          setTimeout(() => setDownloadNotice(null), 6000);
         }
-      };
+      } catch (err) {
+        console.debug("Error parsing WebSocket message:", err);
+      }
+    };
 
-      ws.onclose = () => {
-        setStreamConnected(false);
-      };
+    ws.onclose = () => {
+      setStreamConnected(false);
+    };
 
-      ws.onerror = (err) => {
-        console.error("Stream WebSocket error:", err);
-        setStreamConnected(false);
-      };
-    },
-    []
-  );
+    ws.onerror = (err) => {
+      console.error("Stream WebSocket error:", err);
+      setStreamConnected(false);
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -571,7 +581,6 @@ export function Recorder() {
       event_type: "navigate",
       url: chromeUrl.trim(),
     });
-    // Add navigation step
     setLiveSteps((prev) => [
       ...prev,
       {
@@ -587,6 +596,7 @@ export function Recorder() {
 
   const handleRefreshPage = () => {
     sendInputEvent({ event_type: "reload" });
+    showToast("Replayed page refresh", "info");
   };
 
   const handleGoBack = () => {
@@ -669,10 +679,6 @@ export function Recorder() {
 
     try {
       setLoading(true);
-      setLiveSteps([]);
-      setConsoleLogs([]);
-      setNetworkRequests([]);
-      setPageErrors([]);
       setElapsedSeconds(0);
       setTabs([{ page_id: 0, title: "Main Tab", url: url.trim() }]);
       setActiveTabId(0);
@@ -680,7 +686,7 @@ export function Recorder() {
 
       const session = await api.startRecording({
         url: url.trim(),
-        name: name.trim() || undefined,
+        name: testcaseName.trim() || undefined,
         browser,
         headless: true,
         timeout: 30000,
@@ -788,7 +794,6 @@ export function Recorder() {
         input_value: val,
       };
     } else if (raw.toLowerCase().startsWith("if ") || raw.toLowerCase().startsWith("check ")) {
-      // Create KaneAI-style condition block
       const cond = raw.replace(/^(if|check\s+if)\s+/i, "");
       generatedStep = {
         number: liveSteps.length + 1,
@@ -861,12 +866,14 @@ export function Recorder() {
           action: "click",
           action_type: "click",
           description: "Click on login button",
+          selector: 'a[href*="/login"]',
         },
         {
           number: 2,
           action: "click",
           action_type: "click",
           description: "Click on continue",
+          selector: 'button[type="submit"]',
         },
         {
           number: 3,
@@ -874,6 +881,7 @@ export function Recorder() {
           action_type: "type",
           description: "Enter password {{password}}",
           input_value: "{{password}}",
+          selector: 'input[type="password"]',
         },
       ],
       else_steps: [
@@ -882,6 +890,7 @@ export function Recorder() {
           action: "click",
           action_type: "click",
           description: "Click on guest register link",
+          selector: 'a[href*="/register"]',
         },
       ],
     };
@@ -894,6 +903,32 @@ export function Recorder() {
     setLiveSteps((prev) => prev.filter((_, i) => i !== index));
     setDeletedCount((prev) => prev + 1);
     showToast("Step removed", "info");
+  };
+
+  // Inline Step Editing
+  const startEditStep = (idx, step) => {
+    setEditingIndex(idx);
+    setEditDesc(step.description || "");
+    setEditSelector(step.selector || step.target || "");
+    setEditValue(step.input_value || "");
+  };
+
+  const saveEditStep = (idx) => {
+    setLiveSteps((prev) =>
+      prev.map((step, i) => {
+        if (i !== idx) return step;
+        return {
+          ...step,
+          description: editDesc,
+          selector: editSelector,
+          target: editSelector,
+          input_value: editValue,
+        };
+      })
+    );
+    setEditingIndex(null);
+    setEditedCount((prev) => prev + 1);
+    showToast("Step updated successfully", "success");
   };
 
   const handleAddVariable = (e) => {
@@ -923,32 +958,58 @@ export function Recorder() {
   const isRecording = status.status === "recording";
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] bg-slate-950 text-slate-100 select-none overflow-hidden font-sans">
+    <div className="flex flex-col h-full w-full bg-slate-50 dark:bg-surface-dark text-slate-800 dark:text-slate-100 select-none overflow-hidden font-sans transition-colors">
       {/* ──────────────────────────────────────────────────────────────────────────
-          KANEAI TOP STUDIO BAR
+          TRACECASE STUDIO TOP BAR (Adaptive Theme, Stats & Actions)
           ────────────────────────────────────────────────────────────────────────── */}
-      <header className="h-14 px-4 bg-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0 z-30">
+      <header className="h-14 px-4 bg-white dark:bg-surface-panelDark border-b border-slate-200 dark:border-surface-borderDark flex items-center justify-between shrink-0 z-30 transition-colors">
         {/* Left: Brand / Session Breadcrumb */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-brand-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-brand-500/20">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-brand-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-brand-500/20 shrink-0">
               <Sparkles className="w-4 h-4" />
             </div>
             <div className="flex flex-col">
-              <span className="text-xs font-bold tracking-tight text-white flex items-center gap-1.5">
-                KaneAI Studio
-                <span className="px-1.5 py-0.2 text-[9px] font-bold rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  Local
+              <div className="flex items-center gap-1.5">
+                {isEditingTitle ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={testcaseName}
+                      onChange={(e) => setTestcaseName(e.target.value)}
+                      className="px-1.5 py-0.5 text-xs font-bold rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingTitle(false)}
+                      className="p-1 text-emerald-600 hover:text-emerald-500"
+                    >
+                      <Check className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <span
+                    onClick={() => setIsEditingTitle(true)}
+                    className="text-xs font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5 cursor-pointer hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
+                    title="Click to rename test case"
+                  >
+                    {testcaseName}
+                    <Edit2 className="w-2.5 h-2.5 text-slate-400 opacity-60" />
+                  </span>
+                )}
+                <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                  Local Studio
                 </span>
-              </span>
-              <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+              </div>
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1">
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${
                     isRecording
                       ? "bg-rose-500 animate-pulse"
                       : status.status === "paused"
                       ? "bg-amber-500"
-                      : "bg-slate-500"
+                      : "bg-slate-400"
                   }`}
                 />
                 {isActive ? (isRecording ? "Live Session" : "Paused") : "Draft"}
@@ -957,19 +1018,22 @@ export function Recorder() {
             </div>
           </div>
 
-          <div className="h-5 w-px bg-slate-800 mx-1" />
+          <div className="h-5 w-px bg-slate-200 dark:bg-slate-800 mx-1 hidden sm:block" />
 
           {/* Edit Stats Tracker */}
-          <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
-            <span className="text-emerald-400 font-semibold">
+          <div className="hidden lg:flex items-center gap-1.5 text-xs font-medium">
+            <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200/80 dark:border-emerald-800/80 font-semibold text-[11px]">
               + Additions {additionsCount}
             </span>
-            <span>•</span>
-            <span className="text-sky-400">✎ Edited {editedCount}</span>
-            <span>•</span>
-            <span className="text-rose-400">🗑 Deleted {deletedCount}</span>
-            <span>•</span>
-            <span className="text-slate-300">⚙ Applied settings 03</span>
+            <span className="px-2 py-0.5 rounded-md bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-400 border border-sky-200/80 dark:border-sky-800/80 font-semibold text-[11px]">
+              ✎ Edited {editedCount}
+            </span>
+            <span className="px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200/80 dark:border-rose-800/80 font-semibold text-[11px]">
+              🗑 Deleted {deletedCount}
+            </span>
+            <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-semibold text-[11px]">
+              ⚙ Applied settings 03
+            </span>
           </div>
         </div>
 
@@ -981,14 +1045,14 @@ export function Recorder() {
             onClick={() => setIsVariablesOpen(!isVariablesOpen)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
               isVariablesOpen
-                ? "bg-brand-950 border-brand-500 text-brand-300"
-                : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-750"
+                ? "bg-brand-50 dark:bg-brand-950 border-brand-500 text-brand-700 dark:text-brand-300 shadow-sm"
+                : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750"
             }`}
-            title="Manage Local Variables & TOTP Keys"
+            title="Manage Local Variables & Secrets"
           >
             <span className="font-mono font-bold text-[11px]">(x)</span>
             <span>Variables</span>
-            <span className="px-1 text-[10px] rounded bg-slate-700 text-slate-300">
+            <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold">
               {localVariables.length}
             </span>
           </button>
@@ -997,9 +1061,8 @@ export function Recorder() {
           <button
             type="button"
             onClick={handleRefreshPage}
-            disabled={!isActive}
-            className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white disabled:opacity-40 transition-colors"
-            title="Replay from initial step"
+            className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-sm"
+            title="Replay / refresh browser page"
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
@@ -1012,7 +1075,7 @@ export function Recorder() {
                   type="button"
                   onClick={handlePause}
                   disabled={pauseLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-all"
                 >
                   <Pause className="w-3.5 h-3.5" />
                   <span>Pause</span>
@@ -1022,7 +1085,7 @@ export function Recorder() {
                   type="button"
                   onClick={handleResume}
                   disabled={pauseLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-500 transition-all"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-500 transition-all shadow-sm shadow-emerald-600/20"
                 >
                   <Play className="w-3.5 h-3.5" />
                   <span>Resume</span>
@@ -1031,13 +1094,13 @@ export function Recorder() {
             </>
           )}
 
-          {/* Stop / Finalize Button */}
+          {/* Stop / Finalize Button or Launch Studio */}
           {isActive ? (
             <button
               type="button"
               onClick={handleStop}
               disabled={loading}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-sm shadow-rose-600/30 transition-all"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-sm shadow-rose-600/25 transition-all"
             >
               {loading ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -1051,47 +1114,47 @@ export function Recorder() {
               type="button"
               onClick={handleStart}
               disabled={loading}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold bg-brand-600 hover:bg-brand-500 text-white shadow-sm shadow-brand-600/30 transition-all"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold bg-brand-600 hover:bg-brand-500 text-white shadow-sm shadow-brand-600/25 transition-all"
             >
               {loading ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
-                <Play className="w-3.5 h-3.5" />
+                <Play className="w-3.5 h-3.5 fill-current" />
               )}
               <span>Launch Studio</span>
             </button>
           )}
         </div>
 
-        {/* Right: Manual Interaction Toggle & USP Pill */}
+        {/* Right: Manual Interaction Toggle & Zero-Leak Local Pill */}
         <div className="flex items-center gap-3">
           {/* Manual Interaction Switch */}
-          <div className="flex items-center gap-2 bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60">
+          <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700/60 shadow-sm">
             <Hand
               className={`w-3.5 h-3.5 ${
-                manualInteraction ? "text-brand-400" : "text-slate-500"
+                manualInteraction ? "text-brand-600 dark:text-brand-400" : "text-slate-400"
               }`}
             />
-            <span className="text-[11px] font-semibold text-slate-300">
+            <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
               Manual Interaction
             </span>
             <button
               type="button"
               onClick={() => setManualInteraction(!manualInteraction)}
               className={`w-8 h-4 flex items-center rounded-full p-0.5 transition-colors cursor-pointer ${
-                manualInteraction ? "bg-brand-500 justify-end" : "bg-slate-700 justify-start"
+                manualInteraction ? "bg-brand-600 justify-end" : "bg-slate-300 dark:bg-slate-600 justify-start"
               }`}
-              title="Toggle between direct input forwarding and visual inspection"
+              title="Toggle direct input forwarding vs visual inspection"
             >
               <div className="w-3 h-3 rounded-full bg-white shadow-sm" />
             </button>
           </div>
 
-          {/* Local USP Pill */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 text-[11px] font-medium font-mono">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>100% Local App</span>
-            <span className="text-[9px] opacity-75">
+          {/* Local Engine Security Pill */}
+          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[11px] font-medium font-mono">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>100% Local Engine</span>
+            <span className="text-[10px] opacity-75">
               ({latencyMs > 0 ? `${latencyMs}ms` : "0ms"})
             </span>
           </div>
@@ -1102,16 +1165,16 @@ export function Recorder() {
           MAIN STUDIO SPLIT VIEW: LEFT (AUTHORING) + RIGHT (EMBEDDED BROWSER)
           ────────────────────────────────────────────────────────────────────────── */}
       <div className="flex-1 flex overflow-hidden">
-        {/* ── LEFT PANE: KANEAI NATURAL LANGUAGE & STEP BUILDER (~42% width) ── */}
-        <div className="w-[42%] border-r border-slate-800 flex flex-col bg-slate-900/60 shrink-0">
+        {/* ── LEFT PANE: NATURAL LANGUAGE & STEP BUILDER (~42% width) ── */}
+        <div className="w-[420px] lg:w-[460px] xl:w-[480px] border-r border-slate-200 dark:border-surface-borderDark flex flex-col bg-slate-50/70 dark:bg-surface-panelDark shrink-0 transition-colors">
           {/* 1. "What do you want to test today?" Prompt Box */}
-          <div className="p-4 border-b border-slate-800 bg-slate-900/90 space-y-2.5">
+          <div className="p-3.5 border-b border-slate-200 dark:border-surface-borderDark bg-white dark:bg-slate-900/60 space-y-2.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-white flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-brand-400" />
+              <label className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-brand-500 dark:text-brand-400" />
                 What do you want to test today?
               </label>
-              <span className="text-[10px] text-slate-400 font-mono">
+              <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
                 Natural Language &rarr; Local Action
               </span>
             </div>
@@ -1121,13 +1184,13 @@ export function Recorder() {
                 type="text"
                 value={nlPrompt}
                 onChange={(e) => setNlPrompt(e.target.value)}
-                placeholder="e.g. Go to airbnb.com, click login, or if login visible..."
-                className="w-full pl-3 pr-24 py-2.5 text-xs rounded-xl bg-slate-950 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all font-sans"
+                placeholder="e.g. Go to https://example.com, click login button..."
+                className="w-full pl-3 pr-24 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all font-sans"
               />
               <button
                 type="submit"
                 disabled={promptLoading || !nlPrompt.trim()}
-                className="absolute right-1.5 top-1.5 bottom-1.5 px-3 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-[11px] font-bold flex items-center gap-1 transition-all disabled:opacity-40"
+                className="absolute right-1 top-1 bottom-1 px-3 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-[11px] font-bold flex items-center gap-1 transition-all disabled:opacity-40 shadow-sm"
               >
                 {promptLoading ? (
                   <Loader2 className="w-3 h-3 animate-spin" />
@@ -1139,32 +1202,32 @@ export function Recorder() {
             </form>
 
             {/* Quick Action Shortcut Pills */}
-            <div className="flex items-center gap-1.5 pt-1 overflow-x-auto text-[10px] text-slate-400">
+            <div className="flex items-center gap-1.5 pt-0.5 overflow-x-auto text-[10px] text-slate-600 dark:text-slate-400 scrollbar-none">
               <button
                 type="button"
                 onClick={() => setNlPrompt("Go to https://")}
-                className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors shrink-0"
+                className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors shrink-0"
               >
                 + Navigate
               </button>
               <button
                 type="button"
                 onClick={() => setNlPrompt("Click on ")}
-                className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors shrink-0"
+                className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors shrink-0"
               >
                 + Click
               </button>
               <button
                 type="button"
                 onClick={() => setNlPrompt("Enter password {{password}}")}
-                className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors shrink-0"
+                className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors shrink-0"
               >
                 + Secret Input
               </button>
               <button
                 type="button"
                 onClick={handleAddConditionBlock}
-                className="px-2 py-0.5 rounded bg-brand-950 border border-brand-500/40 text-brand-300 hover:bg-brand-900 transition-colors shrink-0 font-semibold"
+                className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors shrink-0 font-semibold"
               >
                 + If Condition
               </button>
@@ -1172,31 +1235,34 @@ export function Recorder() {
           </div>
 
           {/* 2. Step Hierarchy & Conditional Tree */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            <div className="flex items-center justify-between text-xs font-semibold text-slate-400 mb-1">
-              <span>Steps Sequence ({liveSteps.length})</span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAddingStep(true)}
-                  className="text-brand-400 hover:text-brand-300 text-[11px] font-bold flex items-center gap-1"
-                >
-                  <Plus className="w-3 h-3" /> Add Step
-                </button>
-              </div>
+          <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">
+              <span className="flex items-center gap-1.5">
+                <span>Steps Sequence</span>
+                <span className="px-1.5 py-0.2 rounded-full bg-slate-200 dark:bg-slate-800 text-[10px] font-bold text-slate-700 dark:text-slate-300">
+                  {liveSteps.length}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsAddingStep(true)}
+                className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 text-[11px] font-bold flex items-center gap-1 transition-colors"
+              >
+                <Plus className="w-3 h-3" /> Add Step
+              </button>
             </div>
 
             {/* Empty State */}
             {liveSteps.length === 0 && (
-              <div className="py-14 text-center border border-dashed border-slate-800 rounded-2xl bg-slate-950/40 p-6 space-y-3">
-                <div className="w-10 h-10 rounded-xl bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
-                  <Activity className="w-5 h-5 text-brand-400" />
+              <div className="py-12 text-center border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-950/40 p-6 space-y-3">
+                <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
+                  <Activity className="w-5 h-5 text-brand-500" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-slate-200">
+                  <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
                     No steps recorded yet
                   </h4>
-                  <p className="text-[11px] text-slate-500 max-w-xs mx-auto mt-1 leading-relaxed">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-xs mx-auto mt-1 leading-relaxed">
                     Interact directly with the browser canvas on the right, or type a
                     natural language prompt above to generate steps locally.
                   </p>
@@ -1204,18 +1270,23 @@ export function Recorder() {
               </div>
             )}
 
-            {/* Render Steps & KaneAI Condition Blocks */}
+            {/* Render Steps & Branching Condition Blocks */}
             {liveSteps.map((step, idx) => {
               if (step.is_condition) {
                 const isCollapsed = collapsedConditions[idx];
+                const isElseExpanded = showElseSteps[idx];
+
                 return (
                   <div
                     key={idx}
-                    className="rounded-xl border border-indigo-500/40 bg-gradient-to-b from-indigo-950/20 to-slate-900/60 p-3 space-y-2.5 transition-all shadow-sm"
+                    className="rounded-2xl border-2 border-indigo-400/50 dark:border-indigo-500/40 bg-indigo-50/20 dark:bg-indigo-950/20 p-3 space-y-3 transition-all shadow-sm"
                   >
-                    {/* Condition Header */}
+                    {/* Condition Header Bar */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-mono text-[11px] font-bold flex items-center justify-center shrink-0">
+                          {idx + 1}
+                        </span>
                         <button
                           type="button"
                           onClick={() =>
@@ -1224,24 +1295,41 @@ export function Recorder() {
                               [idx]: !prev[idx],
                             }))
                           }
-                          className="p-1 text-slate-400 hover:text-white"
+                          className="p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors"
                         >
                           {isCollapsed ? (
-                            <ChevronRight className="w-3.5 h-3.5 text-indigo-400" />
+                            <ChevronRight className="w-3.5 h-3.5 text-indigo-500" />
                           ) : (
-                            <ChevronDown className="w-3.5 h-3.5 text-indigo-400" />
+                            <ChevronDown className="w-3.5 h-3.5 text-indigo-500" />
                           )}
                         </button>
-                        <span className="font-mono text-[11px] text-indigo-300 font-semibold flex items-center gap-1.5">
-                          <GitBranch className="w-3.5 h-3.5 text-indigo-400" />
-                          0/1 If {step.condition_expr}
+                        <span className="px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 flex items-center gap-1.5">
+                          <span className="text-[10px] text-indigo-500">0/1</span>
+                          <span>if {step.condition_expr}</span>
                         </span>
                       </div>
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
+                          onClick={() => {
+                            const newExpr = prompt("Edit condition expression:", step.condition_expr);
+                            if (newExpr) {
+                              setLiveSteps((prev) =>
+                                prev.map((s, i) => (i === idx ? { ...s, condition_expr: newExpr } : s))
+                              );
+                              setEditedCount((prev) => prev + 1);
+                            }
+                          }}
+                          className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          title="Edit condition"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => handleDeleteStep(idx)}
-                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800"
+                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          title="Delete condition block"
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
@@ -1249,51 +1337,128 @@ export function Recorder() {
                     </div>
 
                     {!isCollapsed && (
-                      <div className="space-y-2 pl-4 border-l-2 border-indigo-500/30 ml-2">
+                      <div className="space-y-3 pl-3 border-l-2 border-indigo-300 dark:border-indigo-700/60 ml-2.5">
                         {/* Then Branch */}
                         <div className="space-y-1.5">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                            &crarr; Then
+                          <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block flex items-center gap-1">
+                            <CornerDownRight className="w-3 h-3" />
+                            Then
                           </span>
                           {(step.then_steps || []).map((tStep, tIdx) => (
                             <div
                               key={tIdx}
-                              className="px-3 py-2 rounded-lg bg-slate-900/90 border border-slate-800 flex items-center justify-between text-xs"
+                              className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between text-xs hover:border-slate-300 dark:hover:border-slate-700 transition-all group"
                             >
-                              <div className="flex items-center gap-2">
-                                <Sparkles className="w-3 h-3 text-brand-400" />
-                                <span className="text-slate-200">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
+                                {tStep.action === "navigate" ? (
+                                  <Globe className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                ) : tStep.action === "type" ? (
+                                  <Type className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                ) : (
+                                  <Sparkles className="w-3.5 h-3.5 text-brand-500 shrink-0" />
+                                )}
+                                <span className="text-slate-800 dark:text-slate-200 font-medium truncate">
                                   {tStep.description}
                                 </span>
                               </div>
-                              <span className="text-[10px] font-mono text-slate-500">
-                                {tStep.action}
-                              </span>
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const newDesc = prompt("Edit step description:", tStep.description);
+                                    if (newDesc) {
+                                      setLiveSteps((prev) =>
+                                        prev.map((s, i) => {
+                                          if (i !== idx) return s;
+                                          const nextThen = [...(s.then_steps || [])];
+                                          nextThen[tIdx] = { ...nextThen[tIdx], description: newDesc };
+                                          return { ...s, then_steps: nextThen };
+                                        })
+                                      );
+                                      setEditedCount((c) => c + 1);
+                                    }
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                                >
+                                  <Edit2 className="w-2.5 h-2.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setLiveSteps((prev) =>
+                                      prev.map((s, i) => {
+                                        if (i !== idx) return s;
+                                        const nextThen = s.then_steps.filter((_, ti) => ti !== tIdx);
+                                        return { ...s, then_steps: nextThen };
+                                      })
+                                    );
+                                    setDeletedCount((c) => c + 1);
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-rose-500"
+                                >
+                                  <Trash2 className="w-2.5 h-2.5" />
+                                </button>
+                              </div>
                             </div>
                           ))}
                         </div>
 
                         {/* Else Branch */}
                         <div className="space-y-1.5 pt-1">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                            &crarr; Else
-                          </span>
-                          {(step.else_steps || []).map((eStep, eIdx) => (
-                            <div
-                              key={eIdx}
-                              className="px-3 py-2 rounded-lg bg-slate-900/90 border border-slate-800 flex items-center justify-between text-xs"
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                              <CornerDownRight className="w-3 h-3" />
+                              Else
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setShowElseSteps((prev) => ({
+                                  ...prev,
+                                  [idx]: !prev[idx],
+                                }))
+                              }
+                              className="text-[10px] text-brand-600 dark:text-brand-400 hover:underline flex items-center gap-0.5"
                             >
-                              <div className="flex items-center gap-2">
-                                <Eye className="w-3 h-3 text-amber-400" />
-                                <span className="text-slate-200">
-                                  {eStep.description}
-                                </span>
-                              </div>
-                              <span className="text-[10px] font-mono text-slate-500">
-                                {eStep.action}
-                              </span>
+                              {isElseExpanded ? "Hide steps" : "Show steps"}{" "}
+                              {isElseExpanded ? "⌃" : "⌄"}
+                            </button>
+                          </div>
+
+                          {isElseExpanded && (
+                            <div className="space-y-1.5 pt-1">
+                              {(step.else_steps || []).map((eStep, eIdx) => (
+                                <div
+                                  key={eIdx}
+                                  className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between text-xs"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <Eye className="w-3.5 h-3.5 text-amber-500" />
+                                    <span className="text-slate-800 dark:text-slate-200">
+                                      {eStep.description}
+                                    </span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setLiveSteps((prev) =>
+                                        prev.map((s, i) => {
+                                          if (i !== idx) return s;
+                                          const nextElse = s.else_steps.filter((_, ei) => ei !== eIdx);
+                                          return { ...s, else_steps: nextElse };
+                                        })
+                                      );
+                                      setDeletedCount((c) => c + 1);
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-rose-500"
+                                  >
+                                    <Trash2 className="w-2.5 h-2.5" />
+                                  </button>
+                                </div>
+                              ))}
                             </div>
-                          ))}
+                          )}
                         </div>
                       </div>
                     )}
@@ -1301,53 +1466,144 @@ export function Recorder() {
                 );
               }
 
-              // Standard Linear Step Card
+              // Standard Linear Step Card (Tracecase Studio Step Card)
+              const isEditingThisStep = editingIndex === idx;
+
               return (
                 <div
                   key={step.number || idx}
-                  className="group px-3.5 py-2.5 rounded-xl border border-slate-800 bg-slate-900/70 hover:border-slate-700 flex items-center justify-between text-xs transition-all"
+                  className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-sm transition-all p-2.5 space-y-1.5"
                 >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="w-5 h-5 rounded-md bg-slate-800 text-slate-400 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
-                      {step.number || idx + 1}
-                    </span>
-
-                    {/* Step Icon */}
-                    {step.action_type === "navigate" || step.action === "navigate" ? (
-                      <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                    ) : step.action_type === "click" || step.action === "click" ? (
-                      <MousePointerClick className="w-3.5 h-3.5 text-brand-400 shrink-0" />
-                    ) : step.action_type === "type" || step.action === "type" ? (
-                      <Type className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                    ) : (
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    )}
-
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-slate-200 font-medium truncate">
-                        {step.description ||
-                          step.description_short ||
-                          `${step.action || "Action"} on ${step.target || step.selector || "element"}`}
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      {/* Step Number Badge */}
+                      <span className="w-5 h-5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono text-[11px] font-bold flex items-center justify-center shrink-0">
+                        {step.number || idx + 1}
                       </span>
-                      {step.input_value && (
-                        <span className="text-[10px] font-mono text-indigo-300 truncate">
-                          Value: {step.input_value}
-                        </span>
+
+                      {/* Expand / Collapse Chevron */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedSteps((prev) => ({
+                            ...prev,
+                            [idx]: !prev[idx],
+                          }))
+                        }
+                        className="text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                      >
+                        {expandedSteps[idx] ? (
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+
+                      {/* Action Type Icon */}
+                      {step.action_type === "navigate" || step.action === "navigate" ? (
+                        <Globe className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                      ) : step.action_type === "click" || step.action === "click" ? (
+                        <Sparkles className="w-3.5 h-3.5 text-brand-500 shrink-0" />
+                      ) : step.action_type === "type" || step.action === "type" ? (
+                        <Type className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                      ) : (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      )}
+
+                      {/* Step Description / Inline Edit */}
+                      {isEditingThisStep ? (
+                        <div className="flex items-center gap-1 flex-1">
+                          <input
+                            type="text"
+                            value={editDesc}
+                            onChange={(e) => setEditDesc(e.target.value)}
+                            className="w-full px-2 py-0.5 text-xs rounded bg-slate-50 dark:bg-slate-950 border border-brand-400 text-slate-900 dark:text-white focus:outline-none"
+                            autoFocus
+                          />
+                        </div>
+                      ) : (
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-slate-800 dark:text-slate-200 font-medium truncate">
+                            {step.description ||
+                              `${step.action || "Action"} on ${step.target || step.selector || "element"}`}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Step Action Buttons (Inline Edit & Delete) */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {isEditingThisStep ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => saveEditStep(idx)}
+                            className="p-1 rounded text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                            title="Save changes"
+                          >
+                            <Check className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingIndex(null)}
+                            className="p-1 rounded text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                            title="Cancel edit"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => startEditStep(idx, step)}
+                            className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                            title="Edit step"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteStep(idx)}
+                            className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                            title="Delete step"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
 
-                  {/* Actions on Step */}
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteStep(idx)}
-                      className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors"
-                      title="Delete step"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
+                  {/* Expanded Step Details */}
+                  {expandedSteps[idx] && (
+                    <div className="pl-6 pt-1 text-[11px] font-mono text-slate-500 dark:text-slate-400 space-y-1 border-t border-slate-100 dark:border-slate-800 mt-1">
+                      {step.selector && (
+                        <div className="flex items-center gap-1.5 truncate">
+                          <span className="text-slate-400 dark:text-slate-500">Selector:</span>
+                          <span className="text-brand-600 dark:text-brand-300 truncate">
+                            {step.selector}
+                          </span>
+                        </div>
+                      )}
+                      {step.input_value && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-400 dark:text-slate-500">Value:</span>
+                          <span className="text-indigo-600 dark:text-indigo-300">
+                            {step.input_value}
+                          </span>
+                        </div>
+                      )}
+                      {step.url && (
+                        <div className="flex items-center gap-1.5 truncate">
+                          <span className="text-slate-400 dark:text-slate-500">URL:</span>
+                          <span className="text-sky-600 dark:text-sky-300 truncate">
+                            {step.url}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1355,13 +1611,13 @@ export function Recorder() {
 
           {/* Step Insertion Modal */}
           {isAddingStep && (
-            <div className="p-3 bg-slate-900 border-t border-slate-800 space-y-2 animate-in slide-in-from-bottom-2">
-              <div className="flex items-center justify-between text-xs font-bold text-white">
+            <div className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 space-y-2 animate-in slide-in-from-bottom-2 shadow-lg">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-900 dark:text-white">
                 <span>Add Custom Step</span>
                 <button
                   type="button"
                   onClick={() => setIsAddingStep(false)}
-                  className="text-slate-400 hover:text-white"
+                  className="text-slate-400 hover:text-slate-700 dark:hover:text-white"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -1370,7 +1626,7 @@ export function Recorder() {
                 <select
                   value={newStepType}
                   onChange={(e) => setNewStepType(e.target.value)}
-                  className="px-2 py-1 text-xs rounded bg-slate-950 border border-slate-700 text-white"
+                  className="px-2 py-1 text-xs rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white"
                 >
                   <option value="click">Click</option>
                   <option value="type">Type / Input</option>
@@ -1379,24 +1635,24 @@ export function Recorder() {
                 </select>
                 <input
                   type="text"
-                  placeholder="Selector / Text"
+                  placeholder="Target selector or text"
                   value={newStepTarget}
                   onChange={(e) => setNewStepTarget(e.target.value)}
-                  className="col-span-2 px-2 py-1 text-xs rounded bg-slate-950 border border-slate-700 text-white"
+                  className="col-span-2 px-2 py-1 text-xs rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white"
                 />
               </div>
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => setIsAddingStep(false)}
-                  className="px-2.5 py-1 text-xs rounded bg-slate-800 text-slate-300"
+                  className="px-2.5 py-1 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleAddManualStep}
-                  className="px-3 py-1 text-xs font-bold rounded bg-brand-600 text-white hover:bg-brand-500"
+                  className="px-3 py-1 text-xs font-bold rounded-lg bg-brand-600 text-white hover:bg-brand-500"
                 >
                   Insert Step
                 </button>
@@ -1406,54 +1662,68 @@ export function Recorder() {
         </div>
 
         {/* ── RIGHT PANE: EMBEDDED LOCAL BROWSER CANVAS (~58% width) ── */}
-        <div className="flex-1 flex flex-col bg-slate-950 overflow-hidden">
-          {/* Browser Chrome Toolbar */}
-          <div className="bg-slate-900 border-b border-slate-800 p-2 space-y-1.5 shrink-0 select-none">
+        <div className="flex-1 flex flex-col bg-slate-100 dark:bg-slate-950 overflow-hidden transition-colors">
+          {/* Browser Chrome Toolbar (Google Chrome Style) */}
+          <div className="bg-slate-200/80 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-2 space-y-1.5 shrink-0 select-none">
             {/* Tab Bar Strip */}
-            <div className="flex items-center gap-1 overflow-x-auto">
-              {tabs.map((tab) => (
-                <div
-                  key={tab.page_id}
-                  onClick={() => handleSwitchTab(tab.page_id)}
-                  className={`flex items-center gap-2 px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-all ${
-                    activeTabId === tab.page_id
-                      ? "bg-slate-950 text-white border border-slate-750 shadow-sm"
-                      : "bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-850"
-                  }`}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
+                {tabs.map((tab) => (
+                  <div
+                    key={tab.page_id}
+                    onClick={() => handleSwitchTab(tab.page_id)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-t-lg text-xs font-medium cursor-pointer transition-all border-t border-x ${
+                      activeTabId === tab.page_id
+                        ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-white border-slate-200 dark:border-slate-800 shadow-sm"
+                        : "bg-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 border-transparent"
+                    }`}
+                  >
+                    <Globe className="w-3 h-3 text-brand-500" />
+                    <span className="truncate max-w-[160px] text-[11px] font-medium">
+                      {tab.title || "New Tab"}
+                    </span>
+                    {tabs.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={(e) => handleCloseTab(tab.page_id, e)}
+                        className="text-slate-400 hover:text-slate-700 dark:hover:text-white ml-1"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={handleNewTab}
+                  className="p-1 rounded text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+                  title="Open New Tab"
                 >
-                  <Globe className="w-3 h-3 text-brand-400" />
-                  <span className="truncate max-w-[140px] text-[11px]">
-                    {tab.title || "New Tab"}
-                  </span>
-                  {tabs.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={(e) => handleCloseTab(tab.page_id, e)}
-                      className="text-slate-500 hover:text-slate-200"
-                    >
-                      <X className="w-2.5 h-2.5" />
-                    </button>
-                  )}
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={handleNewTab}
-                className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                title="Open New Tab"
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </button>
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Viewport Dimension Info */}
+              <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500 dark:text-slate-400 shrink-0">
+                <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                  {viewportDims.width}&times;{viewportDims.height}
+                </span>
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    streamConnected ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
+                  }`}
+                  title={streamConnected ? "Live CDP Stream Connected" : "Stream Idle"}
+                />
+              </div>
             </div>
 
-            {/* Navigation & Address Bar */}
+            {/* Navigation & Address Bar (Chrome Omnibox) */}
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1 text-slate-400">
+              <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
                 <button
                   type="button"
                   onClick={handleGoBack}
-                  disabled={!isActive}
-                  className="p-1 rounded hover:bg-slate-800 hover:text-white disabled:opacity-40"
+                  className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-white transition-colors"
                   title="Back"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
@@ -1461,8 +1731,7 @@ export function Recorder() {
                 <button
                   type="button"
                   onClick={handleGoForward}
-                  disabled={!isActive}
-                  className="p-1 rounded hover:bg-slate-800 hover:text-white disabled:opacity-40"
+                  className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-white transition-colors"
                   title="Forward"
                 >
                   <ArrowRight className="w-3.5 h-3.5" />
@@ -1470,45 +1739,30 @@ export function Recorder() {
                 <button
                   type="button"
                   onClick={handleRefreshPage}
-                  disabled={!isActive}
-                  className="p-1 rounded hover:bg-slate-800 hover:text-white disabled:opacity-40"
+                  className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-white transition-colors"
                   title="Reload"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              {/* URL Address Input */}
+              {/* Omnibox Address Input */}
               <form onSubmit={handleNavigateSubmit} className="flex-1 relative">
-                <Lock className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-emerald-400" />
+                <Lock className="w-3 h-3 absolute left-3 top-1/2 -translate-y-1/2 text-emerald-500 dark:text-emerald-400" />
                 <input
                   type="text"
                   value={chromeUrl}
                   onChange={(e) => setChromeUrl(e.target.value)}
-                  placeholder="Enter target URL (e.g. https://airbnb.com or http://localhost:3000)..."
-                  className="w-full pl-8 pr-16 py-1.5 text-xs font-mono rounded-lg bg-slate-950 text-slate-200 border border-slate-800 focus:outline-none focus:border-brand-500 transition-colors"
+                  placeholder="Enter target URL (e.g. https://example.com or http://localhost:3000)..."
+                  className="w-full pl-8 pr-14 py-1.5 text-xs font-mono rounded-full bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-800 focus:outline-none focus:border-brand-500 shadow-inner transition-colors"
                 />
                 <button
                   type="submit"
-                  disabled={!isActive}
-                  className="absolute right-1 top-1 bottom-1 px-2.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-slate-300 disabled:opacity-40"
+                  className="absolute right-1 top-1 bottom-1 px-2.5 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[10px] font-bold text-slate-600 dark:text-slate-300 transition-colors"
                 >
                   Go
                 </button>
               </form>
-
-              {/* Resolution & Stream Status */}
-              <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 shrink-0">
-                <span>
-                  {viewportDims.width}&times;{viewportDims.height}
-                </span>
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    streamConnected ? "bg-emerald-500 animate-pulse" : "bg-slate-600"
-                  }`}
-                  title={streamConnected ? "Live CDP Screencast Connected" : "Stream Idle"}
-                />
-              </div>
             </div>
           </div>
 
@@ -1519,7 +1773,7 @@ export function Recorder() {
             onKeyDown={handleKeyDown}
             onKeyUp={handleKeyUp}
             onPaste={handlePaste}
-            className="flex-1 relative bg-black flex items-center justify-center overflow-hidden outline-none select-none cursor-crosshair"
+            className="flex-1 relative bg-slate-900 flex items-center justify-center overflow-hidden outline-none select-none cursor-crosshair"
           >
             {/* Live Screencast Canvas */}
             <canvas
@@ -1538,32 +1792,40 @@ export function Recorder() {
 
             {/* Idle State Prompt */}
             {!isActive && (
-              <div className="text-center p-8 space-y-3 z-10">
-                <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-brand-400 shadow-inner">
-                  <Video className="w-6 h-6" />
+              <div className="text-center p-8 space-y-4 z-10 max-w-lg">
+                <div className="w-14 h-14 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center mx-auto text-brand-500 shadow-sm">
+                  <Video className="w-7 h-7" />
                 </div>
-                <h3 className="text-sm font-bold text-slate-200">
-                  Local Embedded Browser Viewport
-                </h3>
-                <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
-                  Enter your target URL and click <strong>Launch Studio</strong> to start an
-                  embedded Chromium instance streamed with sub-millisecond local latency.
-                </p>
-                <div className="pt-2 flex items-center justify-center gap-2">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Local Chromium Viewport
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                    Embedded CDP-streamed browser session running natively on this machine.
+                    Sub-millisecond input response, zero cloud leakage, full cookie & auth isolation.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-center gap-2 pt-1">
                   <input
                     type="text"
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
-                    placeholder="https://example.com"
-                    className="px-3 py-1.5 text-xs rounded-xl bg-slate-900 border border-slate-700 text-white w-64 font-mono focus:outline-none focus:border-brand-500"
+                    placeholder="Enter target URL (e.g. https://example.com)..."
+                    className="px-3.5 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white w-80 font-mono focus:outline-none focus:border-brand-500 shadow-sm"
                   />
                   <button
                     type="button"
                     onClick={handleStart}
-                    disabled={loading}
-                    className="px-4 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all shadow-md shadow-brand-600/25"
+                    disabled={loading || !url.trim()}
+                    className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all shadow-md shadow-brand-600/25 flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
                   >
-                    Start Studio
+                    {loading ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                    )}
+                    <span>Start Studio</span>
                   </button>
                 </div>
               </div>
@@ -1571,8 +1833,8 @@ export function Recorder() {
 
             {/* Connecting Spinner */}
             {isActive && !streamConnected && (
-              <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-20">
-                <div className="flex items-center gap-3 text-xs text-slate-300">
+              <div className="absolute inset-0 bg-white/70 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center z-20">
+                <div className="flex items-center gap-3 text-xs text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800">
                   <Loader2 className="w-5 h-5 animate-spin text-brand-500" />
                   <span>Connecting to local CDP screencast stream...</span>
                 </div>
@@ -1582,14 +1844,14 @@ export function Recorder() {
             {/* JS Dialog Modal Overlay */}
             {activeDialog && (
               <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-40">
-                <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 max-w-md w-full shadow-2xl space-y-4">
-                  <div className="flex items-center gap-2.5 text-amber-400">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 max-w-md w-full shadow-2xl space-y-4">
+                  <div className="flex items-center gap-2.5 text-amber-500">
                     <AlertCircle className="w-5 h-5 shrink-0" />
-                    <h4 className="text-sm font-bold text-white capitalize">
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white capitalize">
                       JavaScript {activeDialog.dialog_type || "Dialog"}
                     </h4>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
+                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                     {activeDialog.message}
                   </p>
                   {activeDialog.dialog_type === "prompt" && (
@@ -1598,16 +1860,16 @@ export function Recorder() {
                       value={dialogPromptValue}
                       onChange={(e) => setDialogPromptValue(e.target.value)}
                       placeholder="Enter value..."
-                      className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-950 border border-slate-700 text-white focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-brand-500"
                       autoFocus
                     />
                   )}
-                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                     {activeDialog.dialog_type !== "alert" && (
                       <button
                         type="button"
                         onClick={() => handleDialogResponse(false)}
-                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700"
+                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
                       >
                         Cancel
                       </button>
@@ -1629,13 +1891,13 @@ export function Recorder() {
               <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-40">
                 <form
                   onSubmit={handleFileChooserSubmit}
-                  className="bg-slate-900 border border-slate-700 rounded-2xl p-5 max-w-md w-full shadow-2xl space-y-4"
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 max-w-md w-full shadow-2xl space-y-4"
                 >
-                  <div className="flex items-center gap-2.5 text-blue-400">
+                  <div className="flex items-center gap-2.5 text-sky-500">
                     <FileUp className="w-5 h-5 shrink-0" />
-                    <h4 className="text-sm font-bold text-white">File Upload Request</h4>
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">File Upload Request</h4>
                   </div>
-                  <p className="text-xs text-slate-300">
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
                     Specify the absolute path of the local file to provide:
                   </p>
                   <input
@@ -1643,20 +1905,20 @@ export function Recorder() {
                     value={fileUploadPath}
                     onChange={(e) => setFileUploadPath(e.target.value)}
                     placeholder="/path/to/local/sample.png"
-                    className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-950 border border-slate-700 text-white font-mono"
+                    className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-mono"
                     autoFocus
                   />
-                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                     <button
                       type="button"
                       onClick={() => setActiveFileChooser(null)}
-                      className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-slate-300"
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white"
+                      className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-sky-600 hover:bg-sky-500 text-white"
                     >
                       Upload File
                     </button>
@@ -1666,17 +1928,21 @@ export function Recorder() {
             )}
           </div>
 
-          {/* Bottom Diagnostics Drawer (KaneAI Network / Console / Telemetry) */}
-          <div className="h-44 bg-slate-900 border-t border-slate-800 flex flex-col shrink-0">
-            <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-800 bg-slate-925">
+          {/* Bottom Diagnostics Drawer (Themed HAR, Console, Telemetry) */}
+          <div
+            className={`border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col shrink-0 transition-all ${
+              isDrawerCollapsed ? "h-9" : "h-44"
+            }`}
+          >
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setActiveBottomTab("network")}
                   className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
                     activeBottomTab === "network"
-                      ? "bg-slate-800 text-white"
-                      : "text-slate-400 hover:text-slate-200"
+                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-slate-700"
+                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
                   }`}
                 >
                   Network HAR ({networkRequests.length})
@@ -1686,8 +1952,8 @@ export function Recorder() {
                   onClick={() => setActiveBottomTab("console")}
                   className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
                     activeBottomTab === "console"
-                      ? "bg-slate-800 text-white"
-                      : "text-slate-400 hover:text-slate-200"
+                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-slate-700"
+                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
                   }`}
                 >
                   Console ({consoleLogs.length})
@@ -1697,112 +1963,133 @@ export function Recorder() {
                   onClick={() => setActiveBottomTab("telemetry")}
                   className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
                     activeBottomTab === "telemetry"
-                      ? "bg-slate-800 text-white"
-                      : "text-slate-400 hover:text-slate-200"
+                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-slate-700"
+                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
                   }`}
                 >
                   Local Performance
                 </button>
               </div>
-              <span className="text-[10px] font-mono text-slate-500">
-                Frames: {frameCountRef.current} • Latency: {latencyMs}ms
-              </span>
+
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 hidden sm:inline">
+                  Frames: {frameCountRef.current} • Latency: {latencyMs}ms
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsDrawerCollapsed(!isDrawerCollapsed)}
+                  className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                  title={isDrawerCollapsed ? "Expand Drawer" : "Collapse Drawer"}
+                >
+                  {isDrawerCollapsed ? (
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-2 font-mono text-[11px]">
-              {activeBottomTab === "network" && (
-                <div className="space-y-1">
-                  {networkRequests.length === 0 ? (
-                    <div className="text-slate-500 text-center py-6">
-                      No network requests captured yet.
-                    </div>
-                  ) : (
-                    networkRequests.slice(-25).map((req, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between px-2 py-0.5 rounded bg-slate-950/60 border border-slate-850"
-                      >
-                        <div className="flex items-center gap-2 truncate">
-                          <span
-                            className={`px-1 text-[9px] font-bold rounded ${
-                              req.status < 400
-                                ? "bg-emerald-950 text-emerald-400"
-                                : "bg-rose-950 text-rose-400"
-                            }`}
-                          >
-                            {req.status || 200}
+            {!isDrawerCollapsed && (
+              <div className="flex-1 overflow-y-auto p-2 font-mono text-[11px]">
+                {activeBottomTab === "network" && (
+                  <div className="space-y-1">
+                    {networkRequests.length === 0 ? (
+                      <div className="text-slate-400 dark:text-slate-500 text-center py-6">
+                        No network requests captured yet.
+                      </div>
+                    ) : (
+                      networkRequests.slice(-25).map((req, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center justify-between px-2.5 py-1 rounded bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800"
+                        >
+                          <div className="flex items-center gap-2 truncate">
+                            <span
+                              className={`px-1.5 py-0.2 text-[9px] font-bold rounded ${
+                                req.status < 400
+                                  ? "bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400"
+                                  : "bg-rose-50 dark:bg-rose-950 text-rose-600 dark:text-rose-400"
+                              }`}
+                            >
+                              {req.status || 200}
+                            </span>
+                            <span className="text-slate-500 font-bold">
+                              {req.method || "GET"}
+                            </span>
+                            <span className="text-slate-700 dark:text-slate-300 truncate">
+                              {req.url}
+                            </span>
+                          </div>
+                          <span className="text-slate-400 shrink-0 text-[10px]">
+                            {req.duration ? `${Math.round(req.duration)}ms` : "cached"}
                           </span>
-                          <span className="text-slate-400 font-bold">
-                            {req.method || "GET"}
-                          </span>
-                          <span className="text-slate-300 truncate">{req.url}</span>
                         </div>
-                        <span className="text-slate-500 shrink-0">
-                          {req.duration ? `${Math.round(req.duration)}ms` : "cached"}
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
+                      ))
+                    )}
+                  </div>
+                )}
 
-              {activeBottomTab === "console" && (
-                <div className="space-y-1">
-                  {consoleLogs.length === 0 ? (
-                    <div className="text-slate-500 text-center py-6">
-                      No console messages emitted.
+                {activeBottomTab === "console" && (
+                  <div className="space-y-1">
+                    {consoleLogs.length === 0 ? (
+                      <div className="text-slate-400 dark:text-slate-500 text-center py-6">
+                        No console messages emitted.
+                      </div>
+                    ) : (
+                      consoleLogs.slice(-25).map((log, i) => (
+                        <div
+                          key={i}
+                          className={`px-2.5 py-1 rounded bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 flex items-start gap-2 ${
+                            log.type === "error" ? "text-rose-600 dark:text-rose-400" : "text-slate-700 dark:text-slate-300"
+                          }`}
+                        >
+                          <span className="text-slate-400">[{log.type || "log"}]</span>
+                          <span className="break-all">{log.text}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {activeBottomTab === "telemetry" && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-2 text-slate-700 dark:text-slate-300">
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">
+                        Local CDP Frames
+                      </span>
+                      <span className="text-lg font-bold text-slate-900 dark:text-white font-mono">
+                        {frameCountRef.current}
+                      </span>
                     </div>
-                  ) : (
-                    consoleLogs.slice(-25).map((log, i) => (
-                      <div
-                        key={i}
-                        className={`px-2 py-0.5 rounded bg-slate-950/60 border border-slate-850 flex items-start gap-2 ${
-                          log.type === "error" ? "text-rose-400" : "text-slate-300"
-                        }`}
-                      >
-                        <span className="text-slate-500">[{log.type || "log"}]</span>
-                        <span className="break-all">{log.text}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-
-              {activeBottomTab === "telemetry" && (
-                <div className="grid grid-cols-4 gap-4 p-3 text-slate-300">
-                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                    <span className="text-[10px] text-slate-500 uppercase block">
-                      Local CDP Frames
-                    </span>
-                    <span className="text-lg font-bold text-white">
-                      {frameCountRef.current}
-                    </span>
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">
+                        Network Round-Trip
+                      </span>
+                      <span className="text-lg font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                        {latencyMs}ms (Socket)
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">
+                        Execution Sandbox
+                      </span>
+                      <span className="text-lg font-bold text-sky-600 dark:text-sky-400 font-sans">
+                        Air-Gapped
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-400 uppercase font-sans font-bold block">
+                        Storage Engine
+                      </span>
+                      <span className="text-lg font-bold text-indigo-600 dark:text-indigo-400 font-sans">
+                        SQLite Local
+                      </span>
+                    </div>
                   </div>
-                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                    <span className="text-[10px] text-slate-500 uppercase block">
-                      Network Round-Trip
-                    </span>
-                    <span className="text-lg font-bold text-emerald-400">
-                      {latencyMs}ms (Direct Socket)
-                    </span>
-                  </div>
-                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                    <span className="text-[10px] text-slate-500 uppercase block">
-                      Execution Sandbox
-                    </span>
-                    <span className="text-lg font-bold text-sky-400">Air-Gapped</span>
-                  </div>
-                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                    <span className="text-[10px] text-slate-500 uppercase block">
-                      Storage
-                    </span>
-                    <span className="text-lg font-bold text-indigo-400">
-                      ~/.tracecase (SQLite)
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1811,41 +2098,41 @@ export function Recorder() {
           LOCAL VARIABLES SLIDE-OVER DRAWER
           ────────────────────────────────────────────────────────────────────────── */}
       {isVariablesOpen && (
-        <div className="fixed inset-y-0 right-0 w-96 bg-slate-900 border-l border-slate-800 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-200">
-          <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+        <div className="fixed inset-y-0 right-0 w-96 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-200">
+          <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="w-6 h-6 rounded bg-brand-500/20 text-brand-400 font-mono font-bold text-xs flex items-center justify-center">
+              <span className="w-6 h-6 rounded bg-brand-50 dark:bg-brand-500/20 text-brand-600 dark:text-brand-400 font-mono font-bold text-xs flex items-center justify-center">
                 (x)
               </span>
-              <h3 className="text-sm font-bold text-white">Local Variables Vault</h3>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Local Variables Vault</h3>
             </div>
             <button
               type="button"
               onClick={() => setIsVariablesOpen(false)}
-              className="text-slate-400 hover:text-white"
+              className="text-slate-400 hover:text-slate-700 dark:hover:text-white"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
           <div className="p-4 flex-1 overflow-y-auto space-y-3">
-            <p className="text-xs text-slate-400">
-              Reference these key-value pairs anywhere in steps using{" "}
-              <code className="text-brand-300 font-mono">{"{{variable_name}}"}</code>.
-              Stored exclusively on this machine.
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Reference these key-value pairs anywhere in test steps using{" "}
+              <code className="text-brand-600 dark:text-brand-300 font-mono">{"{{variable_name}}"}</code>.
+              Stored exclusively in your local database.
             </p>
 
             <div className="space-y-2">
               {localVariables.map((v, i) => (
                 <div
                   key={i}
-                  className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs"
+                  className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs"
                 >
                   <div className="flex flex-col min-w-0">
-                    <span className="font-mono font-bold text-indigo-300 truncate">
+                    <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 truncate">
                       {`{{${v.key}}}`}
                     </span>
-                    <span className="text-slate-400 text-[11px] font-mono truncate">
+                    <span className="text-slate-500 text-[11px] font-mono truncate">
                       {v.isSecret ? "••••••••••••" : v.value}
                     </span>
                   </div>
@@ -1855,8 +2142,8 @@ export function Recorder() {
                       navigator.clipboard.writeText(`{{${v.key}}}`);
                       showToast(`Copied {{${v.key}}} to clipboard`, "info");
                     }}
-                    className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800"
-                    title="Copy token"
+                    className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    title="Copy variable reference"
                   >
                     <Copy className="w-3.5 h-3.5" />
                   </button>
@@ -1867,9 +2154,9 @@ export function Recorder() {
             {/* Add New Variable Form */}
             <form
               onSubmit={handleAddVariable}
-              className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5 mt-4"
+              className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2.5 mt-4"
             >
-              <span className="text-xs font-bold text-white block">
+              <span className="text-xs font-bold text-slate-900 dark:text-white block">
                 + Create Local Variable
               </span>
               <input
@@ -1877,14 +2164,14 @@ export function Recorder() {
                 placeholder="Variable Key (e.g. totp_token)"
                 value={newVarKey}
                 onChange={(e) => setNewVarKey(e.target.value)}
-                className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-slate-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-brand-500"
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono focus:outline-none focus:border-brand-500"
               />
               <input
                 type="text"
                 placeholder="Variable Value"
                 value={newVarVal}
                 onChange={(e) => setNewVarVal(e.target.value)}
-                className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-slate-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-brand-500"
+                className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono focus:outline-none focus:border-brand-500"
               />
               <div className="flex items-center gap-2">
                 <input
@@ -1892,15 +2179,15 @@ export function Recorder() {
                   id="varSecret"
                   checked={newVarSecret}
                   onChange={(e) => setNewVarSecret(e.target.checked)}
-                  className="rounded bg-slate-900 border-slate-700 text-brand-600 focus:ring-0"
+                  className="rounded bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-brand-600 focus:ring-0"
                 />
-                <label htmlFor="varSecret" className="text-xs text-slate-300">
+                <label htmlFor="varSecret" className="text-xs text-slate-600 dark:text-slate-300">
                   Mask as secret (password / API key)
                 </label>
               </div>
               <button
                 type="submit"
-                className="w-full py-1.5 text-xs font-bold rounded-lg bg-brand-600 hover:bg-brand-500 text-white transition-colors"
+                className="w-full py-1.5 text-xs font-bold rounded-lg bg-brand-600 hover:bg-brand-500 text-white transition-colors shadow-sm"
               >
                 Save Variable to Local Vault
               </button>

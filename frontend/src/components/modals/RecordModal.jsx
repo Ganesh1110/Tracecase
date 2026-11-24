@@ -37,6 +37,7 @@ export function RecordModal({ isOpen, onClose }) {
         headless,
         timeout: 30000,
         project_id: currentProject?.id || "default_project",
+        embedded: true,
       });
       showToast(
         `Recording session started (${session.session_id})!`,

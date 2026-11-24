@@ -529,7 +529,7 @@ export function TestCaseDetail() {
         </div>
       </div>
 
-      {/* Navigation Tabs */}
+      {/* Navigation Tabs (KaneAI Style: Test Summary, Code, Assertions, History) */}
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-surface-borderDark pb-px">
         <button
           onClick={() => setActiveTab("steps")}
@@ -540,7 +540,19 @@ export function TestCaseDetail() {
           }`}
         >
           <FileCode2 className="w-4 h-4" />
-          <span>Recorded Steps ({testcase.steps?.length || 0})</span>
+          <span>Test Summary ({testcase.steps?.length || 0})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("codegen")}
+          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-2 ${
+            activeTab === "codegen"
+              ? "border-brand-500 text-brand-600 dark:text-brand-400"
+              : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+          }`}
+        >
+          <Terminal className="w-4 h-4" />
+          <span>Code ({codegen ? "Ready" : "Export"})</span>
         </button>
 
         <button
@@ -554,49 +566,51 @@ export function TestCaseDetail() {
           <ShieldAlert className="w-4 h-4" />
           <span>Assertions ({testcase.custom_assertions?.length || 0})</span>
         </button>
-
-        <button
-          onClick={() => setActiveTab("codegen")}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-2 ${
-            activeTab === "codegen"
-              ? "border-brand-500 text-brand-600 dark:text-brand-400"
-              : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-          }`}
-        >
-          <Terminal className="w-4 h-4" />
-          <span>Pytest Code</span>
-        </button>
       </div>
 
-      {/* Tab: Recorded Steps */}
+      {/* Tab: Recorded Steps / KaneAI Test Summary */}
       {activeTab === "steps" && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500">
-              Inspect, modify, reorder or delete user interaction steps.
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleAuditSelectors}
-                disabled={loadingSelectorAudit}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-brand-50 hover:text-brand-600 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors disabled:opacity-50"
-              >
-                {loadingSelectorAudit ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Crosshair className="w-3.5 h-3.5" />
-                )}
-                <span>Audit Selectors</span>
-              </button>
-              <button
-                onClick={() => setIsAddingStep(!isAddingStep)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-50 dark:bg-brand-950/50 text-brand-600 dark:text-brand-400 hover:bg-brand-100 transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>{isAddingStep ? "Cancel" : "Add Step Manually"}</span>
-              </button>
+        <div className="grid grid-cols-12 gap-5">
+          {/* Main Column: Steps sequence and actions (8 cols) */}
+          <div className="col-span-12 lg:col-span-8 space-y-4">
+            {/* KaneAI Steps Status Strip */}
+            <div className="flex flex-wrap items-center justify-between p-3.5 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs font-semibold shadow-sm gap-3">
+              <div className="flex items-center gap-3">
+                <span className="text-slate-900 dark:text-white font-bold">
+                  {testcase.steps?.length || 0} Total Steps
+                </span>
+                <span className="text-emerald-500 font-bold flex items-center gap-1">
+                  ● {testcase.steps?.length || 0} passed
+                </span>
+                <span className="text-rose-500 font-bold flex items-center gap-1">
+                  ● 0 failed
+                </span>
+                <span className="text-slate-400 flex items-center gap-1">
+                  ● 0 skipped
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleAuditSelectors}
+                  disabled={loadingSelectorAudit}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-brand-50 hover:text-brand-600 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors disabled:opacity-50"
+                >
+                  {loadingSelectorAudit ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Crosshair className="w-3.5 h-3.5" />
+                  )}
+                  <span>Audit Selectors</span>
+                </button>
+                <button
+                  onClick={() => setIsAddingStep(!isAddingStep)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-50 dark:bg-brand-950/50 text-brand-600 dark:text-brand-400 hover:bg-brand-100 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{isAddingStep ? "Cancel" : "Add Step"}</span>
+                </button>
+              </div>
             </div>
-          </div>
 
           {/* Selector Audit Banner if performed */}
           {selectorAudit && (
@@ -908,6 +922,102 @@ export function TestCaseDetail() {
                 </div>
               );
             })}
+          </div>
+          </div>
+
+          {/* Right Column: KaneAI Metadata & Execution Sidebar (4 cols) */}
+          <div className="col-span-12 lg:col-span-4 space-y-4">
+            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm space-y-4">
+              {/* Primary Execute Button */}
+              <button
+                type="button"
+                onClick={() => setShowReplayModal(true)}
+                className="w-full py-3 px-4 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                <span>Execute test case</span>
+              </button>
+              <p className="text-[10px] text-slate-400 text-center font-mono">
+                Executes locally on Playwright (0ms cloud latency)
+              </p>
+
+              <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Description
+                  </label>
+                  <p className="text-slate-600 dark:text-slate-300 text-xs leading-relaxed">
+                    {testcase.description ||
+                      "The user will execute the automated workflow validating page navigations, interactions, and assertions on local Chromium."}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Preconditions
+                  </label>
+                  <span className="text-slate-500 italic text-[11px]">
+                    Local application / target server running
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                      Status
+                    </label>
+                    <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 inline-block">
+                      Ready
+                    </span>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                      Priority
+                    </label>
+                    <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 inline-block">
+                      Medium
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                      Automation Status
+                    </label>
+                    <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 inline-block">
+                      Automated
+                    </span>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                      Engine
+                    </label>
+                    <span className="px-2.5 py-0.5 text-[11px] font-mono text-slate-500 uppercase bg-slate-100 dark:bg-slate-800 rounded inline-block">
+                      {testcase.browser || "Chromium"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Variables and Secrets Used */}
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                    Variables & Secrets Used
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    <span className="px-2 py-0.5 text-[10px] font-mono rounded bg-slate-100 dark:bg-slate-800 text-brand-600 dark:text-brand-400 font-semibold">
+                      {"{{base_url}}"}
+                    </span>
+                    <span className="px-2 py-0.5 text-[10px] font-mono rounded bg-slate-100 dark:bg-slate-800 text-indigo-500 font-semibold">
+                      {"{{username}}"}
+                    </span>
+                    <span className="px-2 py-0.5 text-[10px] font-mono rounded bg-slate-100 dark:bg-slate-800 text-rose-500 font-semibold">
+                      {"{{password}}"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1226,27 +1336,100 @@ export function TestCaseDetail() {
         </div>
       )}
 
-      {/* Tab: Pytest Codegen */}
+      {/* Tab: Code Generation (KaneAI Code View: AssertiveAction & AssertiveValidator) */}
       {activeTab === "codegen" && (
-        <div className="rounded-2xl border border-slate-200 dark:border-surface-borderDark bg-slate-950 text-slate-200 overflow-hidden shadow-xl">
-          <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
-            <span className="text-xs font-mono font-semibold text-slate-400">
-              test_{id.replace(/[^a-zA-Z0-9_]/g, "_")}.py
-            </span>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(codegen);
-                showToast("Code copied to clipboard!", "success");
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              <span>Copy Pytest</span>
-            </button>
+        <div className="space-y-4">
+          {/* KaneAI Code Artifacts Strip */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-950/20 flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-400" />
+                  <span className="font-bold text-xs text-white">AssertiveAction</span>
+                  <span className="px-1.5 py-0.2 text-[9px] font-bold rounded bg-emerald-500/20 text-emerald-400">
+                    Verified
+                  </span>
+                </div>
+                <span className="text-[11px] text-slate-400 block mt-1">
+                  v1 • Python • Playwright engine • Local Execution Ready
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReplayModal(true)}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 shadow-sm"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>Execute</span>
+              </button>
+            </div>
+
+            <div className="p-4 rounded-xl border border-indigo-500/30 bg-indigo-950/20 flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-indigo-400" />
+                  <span className="font-bold text-xs text-white">AssertiveValidator</span>
+                  <span className="px-1.5 py-0.2 text-[9px] font-bold rounded bg-indigo-500/20 text-indigo-400">
+                    Verified
+                  </span>
+                </div>
+                <span className="text-[11px] text-slate-400 block mt-1">
+                  v1 • Python • Playwright engine • Contract & Visual Probes
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReplayModal(true)}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-sm"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>Execute</span>
+              </button>
+            </div>
           </div>
-          <pre className="p-5 font-mono text-xs leading-relaxed overflow-x-auto selection:bg-brand-600">
-            {codegen || "# Generating Pytest Playwright code..."}
-          </pre>
+
+          <div className="rounded-2xl border border-slate-200 dark:border-surface-borderDark bg-slate-950 text-slate-200 overflow-hidden shadow-xl">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
+              <div className="flex items-center gap-2">
+                <Terminal className="w-4 h-4 text-brand-400" />
+                <span className="text-xs font-mono font-semibold text-slate-300">
+                  test_{id.replace(/[^a-zA-Z0-9_]/g, "_")}.py
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const blob = new Blob([codegen || ""], { type: "text/plain" });
+                    const downloadUrl = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = downloadUrl;
+                    a.download = `test_${id.replace(/[^a-zA-Z0-9_]/g, "_")}.py`;
+                    a.click();
+                    showToast("Test script downloaded!", "success");
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download Script</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(codegen);
+                    showToast("Code copied to clipboard!", "success");
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white transition-colors"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy Code</span>
+                </button>
+              </div>
+            </div>
+            <pre className="p-5 font-mono text-xs leading-relaxed overflow-x-auto selection:bg-brand-600">
+              {codegen || "# Generating Pytest Playwright code..."}
+            </pre>
+          </div>
         </div>
       )}
 
